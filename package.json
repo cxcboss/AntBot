@@ -13,7 +13,7 @@
     "prepare:voicebox": "node ./scripts/prepare-voicebox.js",
     "prepare:icon:mac": "bash ./scripts/generate-mac-icon.sh",
     "build:mac": "npm run prepare:icon:mac && npm run prepare:voicebox && electron-builder --mac dmg && node ./scripts/fix-mac-update-metadata.js",
-    "build:win": "npm run prepare:playwright:win && npm run prepare:voicebox && electron-builder --win nsis --x64",
+    "build:win": "npm run prepare:playwright:win && npm run prepare:voicebox && electron-builder --win nsis --x64 --publish never",
     "build:win:portable": "npm run prepare:playwright:win && npm run prepare:voicebox && electron-builder --win portable --x64 --config.win.artifactName='搬运蚁-${version}-win-${arch}-portable.${ext}'",
     "build:win:arm64": "npm run prepare:voicebox && electron-builder --win nsis --arm64",
     "build:linux": "npm run prepare:voicebox && electron-builder --linux AppImage",
