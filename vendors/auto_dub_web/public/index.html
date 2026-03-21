@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>自动配音字幕视频生成器</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main class="container">
+      <section class="hero">
+        <h1>自动配音字幕视频生成器</h1>
+        <p>上传视频后自动转成抖音 9:16（居中+背景模糊），并按字幕时间线合成配音与字幕。</p>
+      </section>
+
+      <section class="panel">
+        <h2>语音克隆档案（Voice Clone）</h2>
+        <form id="clone-form">
+          <label>
+            克隆声音名称
+            <input type="text" name="profile_name" placeholder="例如：我的旁白音色" />
+          </label>
+
+          <label>
+            样本语言
+            <select name="language">
+              <option value="zh" selected>中文</option>
+              <option value="en">English</option>
+            </select>
+          </label>
+
+          <label>
+            克隆样本音频
+            <input type="file" name="sample_audio" accept=".wav,.mp3,.m4a,.aac,.flac,.ogg,audio/*" />
+          </label>
+
+          <label>
+            样本参考文本（必须与样本音频内容一致）
+            <textarea name="reference_text" rows="3" placeholder="请填写样本音频里真实说的话"></textarea>
+          </label>
+
+          <button type="submit" id="clone-submit-btn">创建克隆声音</button>
+        </form>
+        <p class="voice-hint" id="clone-status-text"></p>
+      </section>
+
+      <section class="panel">
+        <form id="process-form">
+          <label>
+            视频文件
+            <input type="file" name="video_file" accept="video/*" required />
+          </label>
+
+          <label>
+            字幕文件（.srt）
+            <input type="file" name="srt_file" accept=".srt" required />
+          </label>
+
+          <label>
+            外部配音文件（可选，剪映导出）
+            <input type="file" name="dub_audio_file" id="dub-audio-file" accept=".mp3,.wav,.m4a,.aac,.flac,.ogg,audio/*" />
+          </label>
+
+          <p class="voice-hint">如果上传外部配音，将优先使用该音频并跳过系统 TTS。</p>
+
+          <label>
+            配音来源
+            <select name="tts_mode" id="tts-mode">
+              <option value="system" selected>系统 TTS</option>
+              <option value="voice_clone">语音克隆档案（Voice Clone）</option>
+            </select>
+          </label>
+
+          <label>
+            克隆档案
+            <select name="clone_profile_id" id="clone-profile-select">
+              <option value="">请先创建或加载克隆档案</option>
+            </select>
+          </label>
+
+          <label>
+            克隆配音语言
+            <select name="clone_language" id="clone-language">
+              <option value="zh" selected>中文</option>
+              <option value="en">English</option>
+            </select>
+          </label>
+
+          <label>
+            配音速度（0.5 - 3.0）
+            <input type="number" name="dub_speed" min="0.5" max="3.0" step="0.05" value="1.0" />
+          </label>
+
+          <label>
+            配音音色
+            <select name="voice" id="voice-select"></select>
+          </label>
+
+          <p class="voice-hint" id="voice-hint"></p>
+
+          <label>
+            语速（80-600）
+            <input type="number" name="rate" min="80" max="600" value="220" required />
+          </label>
+
+          <label>
+            字幕位置
+            <select name="subtitle_position">
+              <option value="bottom" selected>底部</option>
+              <option value="middle">中间</option>
+              <option value="top">顶部</option>
+            </select>
+          </label>
+
+          <label>
+            字幕边距（像素）
+            <input type="number" name="subtitle_margin" min="0" max="600" value="120" />
+          </label>
+
+          <label class="checkbox-line">
+            <input type="checkbox" name="keep_original_audio" checked />
+            保留原视频原声（和配音混合）
+          </label>
+
+          <label>
+            原声音量（0-200%）
+            <div class="range-row">
+              <input type="range" name="original_audio_level" id="original-audio-level" min="0" max="200" value="45" />
+              <span id="original-audio-value">45%</span>
+            </div>
+          </label>
+
+          <label>
+            配音音量（50-350%）
+            <div class="range-row">
+              <input type="range" name="dub_audio_level" id="dub-audio-level" min="50" max="350" value="180" />
+              <span id="dub-audio-value">180%</span>
+            </div>
+          </label>
+
+          <button type="submit" id="submit-btn">开始生成</button>
+        </form>
+      </section>
+
+      <section class="panel hidden" id="status-panel">
+        <h2>处理状态</h2>
+        <p id="status-text"></p>
+      </section>
+
+      <section class="panel hidden" id="result-panel">
+        <h2>处理完成</h2>
+        <video id="result-video" controls>
+          <track id="result-track" kind="subtitles" srclang="zh" label="中文字幕" default />
+        </video>
+        <a id="download-link" download>下载结果视频</a>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

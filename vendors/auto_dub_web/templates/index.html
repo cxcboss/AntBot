@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>自动配音字幕视频生成器</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>自动配音字幕视频生成器</h1>
+      <p class="hint">上传视频 + SRT 字幕，自动生成大音量配音并输出带字幕视频。</p>
+
+      {% if error %}
+      <div class="alert error">{{ error }}</div>
+      {% endif %}
+
+      <form method="post" enctype="multipart/form-data" class="panel">
+        <label>
+          视频文件
+          <input type="file" name="video_file" accept="video/*" required />
+        </label>
+
+        <label>
+          字幕文件（.srt）
+          <input type="file" name="srt_file" accept=".srt" required />
+        </label>
+
+        <label>
+          配音音色
+          <select name="voice">
+            {% for voice_id, voice_name in voice_options.items() %}
+            <option value="{{ voice_id }}">{{ voice_name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+
+        <button type="submit">开始处理</button>
+      </form>
+
+      {% if output_url %}
+      <section class="panel result">
+        <h2>生成完成</h2>
+        <video controls src="{{ output_url }}"></video>
+        <a class="download" href="{{ output_url }}" download>下载结果视频</a>
+      </section>
+      {% endif %}
+    </main>
+  </body>
+</html>

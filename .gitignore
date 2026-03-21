@@ -1,0 +1,9 @@
+node_modules
+release
+release_flutter_windows
+dist
+.DS_Store
+*.log
+src/main/**/tmp
+vendors/ms-playwright/*
+!vendors/ms-playwright/.gitkeep

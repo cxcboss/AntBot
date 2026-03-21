@@ -1,0 +1,155 @@
+:root {
+  --bg: #f2f5f8;
+  --fg: #111827;
+  --panel: #ffffff;
+  --line: #d8dee6;
+  --accent: #0f62fe;
+  --muted: #516072;
+  --error: #a61b1b;
+  --error-bg: #fff0f0;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: linear-gradient(160deg, #d8ecff 0%, var(--bg) 45%);
+  color: var(--fg);
+  font-family: "PingFang SC", "Noto Sans SC", sans-serif;
+}
+
+.container {
+  width: min(920px, calc(100% - 2rem));
+  margin: 2.6rem auto;
+  display: grid;
+  gap: 1rem;
+}
+
+.hero h1 {
+  margin: 0;
+  font-size: clamp(1.8rem, 2.6vw, 2.5rem);
+}
+
+.hero p {
+  margin-top: 0.65rem;
+  color: var(--muted);
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 1.1rem;
+}
+
+form {
+  display: grid;
+  gap: 0.8rem;
+}
+
+label {
+  display: grid;
+  gap: 0.4rem;
+  font-weight: 600;
+}
+
+input,
+select,
+textarea,
+button,
+a {
+  font: inherit;
+}
+
+input,
+select,
+textarea {
+  border: 1px solid #c4ced8;
+  border-radius: 8px;
+  padding: 0.6rem 0.7rem;
+  background: #fff;
+}
+
+textarea {
+  resize: vertical;
+}
+
+button {
+  border: none;
+  border-radius: 8px;
+  padding: 0.72rem 1rem;
+  font-weight: 700;
+  background: var(--accent);
+  color: white;
+  cursor: pointer;
+}
+
+button[disabled] {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.voice-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.checkbox-line {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-weight: 600;
+}
+
+.checkbox-line input[type='checkbox'] {
+  width: 1rem;
+  height: 1rem;
+}
+
+.range-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.range-row input[type='range'] {
+  flex: 1;
+  padding: 0;
+}
+
+#status-text.error {
+  color: var(--error);
+  background: var(--error-bg);
+  border: 1px solid #ffd0d0;
+  border-radius: 8px;
+  padding: 0.8rem;
+}
+
+.voice-hint.error {
+  color: var(--error);
+}
+
+video {
+  width: 100%;
+  border-radius: 10px;
+  background: black;
+}
+
+a {
+  color: var(--accent);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.hidden {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .container {
+    margin: 1.2rem auto;
+  }
+}

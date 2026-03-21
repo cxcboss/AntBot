@@ -1,0 +1,94 @@
+{
+  "name": "antbot",
+  "version": "0.3.4",
+  "description": "搬运蚁 - 内置浏览器的视频下载、字幕生成、剪辑与发布工作台",
+  "main": "src/main/index.js",
+  "author": "",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron .",
+    "postinstall": "playwright install chromium",
+    "prepare:playwright:win": "node ./scripts/prepare-playwright-win.js",
+    "prepare:voicebox": "node ./scripts/prepare-voicebox.js",
+    "prepare:icon:mac": "bash ./scripts/generate-mac-icon.sh",
+    "build:mac": "npm run prepare:icon:mac && npm run prepare:voicebox && electron-builder --mac dmg && node ./scripts/fix-mac-update-metadata.js",
+    "build:win": "npm run prepare:playwright:win && npm run prepare:voicebox && electron-builder --win nsis --x64",
+    "build:win:portable": "npm run prepare:playwright:win && npm run prepare:voicebox && electron-builder --win portable --x64 --config.win.artifactName='搬运蚁-${version}-win-${arch}-portable.${ext}'",
+    "build:win:arm64": "npm run prepare:voicebox && electron-builder --win nsis --arm64",
+    "build:linux": "npm run prepare:voicebox && electron-builder --linux AppImage",
+    "build:fnos:image": "bash ./scripts/package-fnos-image.sh",
+    "build:fnos:image:cn": "bash ./scripts/package-fnos-image-cn.sh",
+    "build:fnos:context": "bash ./scripts/package-fnos-build-context.sh"
+  },
+  "dependencies": {
+    "dayjs": "^1.11.13",
+    "playwright": "^1.52.0",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "electron": "^35.0.3",
+    "electron-builder": "^26.0.12",
+    "resedit": "^1.7.1"
+  },
+  "build": {
+    "appId": "com.antbot.desktop",
+    "productName": "搬运蚁",
+    "directories": {
+      "output": "release",
+      "buildResources": "assets"
+    },
+    "files": [
+      "src/**/*",
+      "package.json",
+      "README.md"
+    ],
+    "extraResources": [
+      {
+        "from": "vendors/ms-playwright",
+        "to": "ms-playwright",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "assets/models",
+        "to": "models"
+      },
+      {
+        "from": "vendors/auto_dub_web",
+        "to": "vendors/auto_dub_web",
+        "filter": [
+          "**/*",
+          "!.git{,/**}",
+          "!data/**",
+          "!workspace/**",
+          "!outputs/**",
+          "!**/__pycache__/**"
+        ]
+      }
+    ],
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "artifactName": "搬运蚁-${version}-mac-${arch}.${ext}",
+      "icon": "assets/icon.icns",
+      "category": "public.app-category.productivity",
+      "identity": null,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
+    },
+    "win": {
+      "artifactName": "搬运蚁-${version}-win-${arch}.${ext}",
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ]
+    }
+  }
+}

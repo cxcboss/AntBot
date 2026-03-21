@@ -1,0 +1,35 @@
+services:
+  antbot:
+    image: antbot:fnos-latest
+    pull_policy: never
+    build:
+      context: ./antbot-src
+      dockerfile: deploy/fnos/Dockerfile
+      args:
+        BASE_IMAGE: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/node:22-bookworm-slim
+        APT_DEBIAN_MIRROR: http://mirrors.aliyun.com/debian
+        APT_SECURITY_MIRROR: http://mirrors.aliyun.com/debian-security
+        PLAYWRIGHT_DOWNLOAD_HOST: https://npmmirror.com/mirrors/playwright
+        ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
+        PIP_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
+        PIP_TRUSTED_HOST: pypi.tuna.tsinghua.edu.cn
+        NPM_REGISTRY: https://registry.npmmirror.com
+    container_name: antbot
+    restart: unless-stopped
+    ports:
+      - "17888:17888"
+    environment:
+      TZ: Asia/Shanghai
+      ANTBOT_REMOTE_ENABLED: "1"
+      ANTBOT_REMOTE_PORT: "17888"
+      ANTBOT_REMOTE_PASSWORD: "请替换成强密码"
+      ANTBOT_HEADLESS: "1"
+      ANTBOT_DISABLE_CHROMIUM_SANDBOX: "1"
+      ANTBOT_DATA_ROOT: /data
+      ANTBOT_VIDEOS_ROOT: /videos
+      ANTBOT_PREPARE_VOICEBOX: "0"
+      XVFB_DISPLAY: ":99"
+      XVFB_RESOLUTION: "1920x1080x24"
+    volumes:
+      - ./data:/data
+      - ./videos:/videos

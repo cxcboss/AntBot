@@ -1,0 +1,120 @@
+:root {
+  --bg: #f4f6f8;
+  --panel: #ffffff;
+  --text: #111111;
+  --accent: #0055cc;
+  --border: #dde3ea;
+  --error-bg: #ffecec;
+  --error-text: #9a1a1a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "PingFang SC", "Noto Sans SC", sans-serif;
+  background: radial-gradient(circle at top, #dfe9f5 0%, var(--bg) 45%);
+  color: var(--text);
+}
+
+.container {
+  width: min(880px, calc(100% - 2rem));
+  margin: 3rem auto;
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(1.6rem, 2.4vw, 2.2rem);
+}
+
+.hint {
+  margin-top: 0.6rem;
+  color: #3c4a5d;
+}
+
+.panel {
+  margin-top: 1rem;
+  padding: 1.2rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  display: grid;
+  gap: 0.9rem;
+}
+
+label {
+  display: grid;
+  gap: 0.45rem;
+  font-weight: 600;
+}
+
+input,
+select,
+button,
+a.download {
+  font: inherit;
+}
+
+input,
+select {
+  width: 100%;
+  border: 1px solid #c4d0dd;
+  border-radius: 8px;
+  padding: 0.62rem 0.7rem;
+  background: #fff;
+}
+
+button {
+  border: none;
+  border-radius: 8px;
+  padding: 0.7rem 1rem;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+button:hover {
+  filter: brightness(0.95);
+}
+
+.alert {
+  margin-top: 1rem;
+  border-radius: 8px;
+  padding: 0.8rem;
+  border: 1px solid;
+}
+
+.error {
+  background: var(--error-bg);
+  color: var(--error-text);
+  border-color: #ffc6c6;
+}
+
+.result h2 {
+  margin: 0;
+}
+
+video {
+  width: 100%;
+  border-radius: 10px;
+  background: #000;
+}
+
+a.download {
+  text-decoration: none;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+@media (max-width: 640px) {
+  .container {
+    margin: 1.4rem auto;
+  }
+
+  .panel {
+    padding: 0.9rem;
+  }
+}

@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>__APP_DISPLAY__ 远程控制</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <main class="shell">
+    <section class="card auth-card" id="auth-card">
+      <div class="hero-row">
+        <div>
+          <div class="hero-kicker">手机远程控制台</div>
+          <h1 id="auth-app-title">__APP_DISPLAY__</h1>
+          <p class="hero-copy">先选择用户，再输入对应远程密码登录。任务主页保持简洁，其他设置放到单独界面。</p>
+        </div>
+        <div class="status-pill" id="connect-state-pill">未连接</div>
+      </div>
+
+      <label class="field">
+        <span>选择用户</span>
+        <select id="auth-user-select"></select>
+      </label>
+
+      <label class="field">
+        <span>远程密码</span>
+        <input id="password-input" type="password" placeholder="输入所选用户的远程密码" autocomplete="current-password" />
+      </label>
+
+      <div class="actions dual-actions">
+        <button id="connect-btn" class="btn btn-primary" type="button">进入控制台</button>
+        <button id="forget-btn" class="btn btn-ghost" type="button">清空密码</button>
+      </div>
+
+      <div class="status-line" id="auth-status">请选择用户并输入密码。</div>
+    </section>
+
+    <section class="card global-progress hidden" id="action-progress-card">
+      <div class="progress-head">
+        <span id="action-progress-label">处理中</span>
+        <strong id="action-progress-percent">0%</strong>
+      </div>
+      <div class="progress-track">
+        <div class="progress-bar" id="action-progress-bar" style="width:0%"></div>
+      </div>
+      <div class="helper-text" id="action-progress-detail">请稍候...</div>
+    </section>
+
+    <section class="workspace hidden" id="workspace">
+      <header class="card workspace-card">
+        <div class="hero-row">
+          <div>
+            <div class="hero-kicker">已连接</div>
+            <h2 id="workspace-app-title">__APP_DISPLAY__</h2>
+            <p class="hero-copy" id="workspace-subtitle">等待同步桌面状态</p>
+          </div>
+          <div class="status-pill" id="active-user-pill">蚂蚁1</div>
+        </div>
+
+        <div class="nav-row">
+          <button id="show-home-btn" class="nav-btn active" type="button">主页</button>
+          <button id="show-tasks-btn" class="nav-btn" type="button">任务</button>
+          <button id="show-settings-btn" class="nav-btn" type="button">设置</button>
+          <button id="switch-user-btn" class="btn btn-ghost btn-small" type="button">切换用户</button>
+        </div>
+      </header>
+
+      <section class="view-stack" id="home-view">
+        <section class="card">
+          <div class="section-head">
+            <div>
+              <div class="section-kicker">实时进度</div>
+              <h3>任务状态</h3>
+            </div>
+          </div>
+          <div class="task-list" id="task-list"></div>
+        </section>
+
+        <section class="card">
+          <div class="section-head">
+            <div>
+              <div class="section-kicker">实时日志</div>
+              <h3>执行记录</h3>
+            </div>
+          </div>
+          <pre class="log-box" id="log-list">暂无日志</pre>
+        </section>
+
+        <section class="card">
+          <div class="section-head">
+            <div>
+              <div class="section-kicker">主页状态</div>
+              <h3>连接与运行概览</h3>
+            </div>
+            <button id="refresh-btn" class="btn btn-ghost btn-small" type="button">刷新</button>
+          </div>
+
+          <div class="summary-grid">
+            <article class="mini-card">
+              <span class="mini-label">运行状态</span>
+              <strong id="run-state">空闲</strong>
+            </article>
+            <article class="mini-card">
+              <span class="mini-label">执行用户</span>
+              <strong id="run-owner">无</strong>
+            </article>
+            <article class="mini-card">
+              <span class="mini-label">当前任务</span>
+              <strong id="task-count">0</strong>
+            </article>
+            <article class="mini-card">
+              <span class="mini-label">排队批次</span>
+              <strong id="queue-count">0</strong>
+            </article>
+            <article class="mini-card">
+              <span class="mini-label">平台登录</span>
+              <strong id="platform-ready">未检测</strong>
+            </article>
+          </div>
+
+          <div class="status-list">
+            <div class="status-row">
+              <span>局域网地址</span>
+              <div class="status-value">
+                <div id="local-url-list" class="link-list">连接后显示</div>
+                <button id="copy-local-btn" class="btn btn-ghost btn-small" type="button">复制</button>
+              </div>
+            </div>
+            <div class="status-row">
+              <span>公网地址</span>
+              <div class="status-value">
+                <div id="public-url-text" class="link-list">未开启</div>
+                <button id="copy-public-btn" class="btn btn-ghost btn-small" type="button">复制</button>
+              </div>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <section class="view-stack hidden" id="tasks-view">
+        <section class="card">
+          <div class="section-head">
+            <div>
+              <div class="section-kicker">任务输入</div>
+              <h3>启动与排队</h3>
+            </div>
+          </div>
+
+          <div class="helper-block" id="queue-hint">
+            每行一条任务。平台关键词：微信=视频号；抖音=抖音；都写=双平台；都不写=默认视频号。运行中再次提交会自动排队。
+          </div>
+
+          <label class="field">
+            <span>任务内容</span>
+            <textarea id="task-input" rows="7" placeholder="视频文案，话题，发布时间，任务名/原创/不原创，视频链接，时间段。"></textarea>
+          </label>
+
+          <div class="actions">
+            <button id="start-btn" class="btn btn-primary" type="button">发送并启动</button>
+            <button id="stop-btn" class="btn btn-danger" type="button">停止并清空队列</button>
+          </div>
+
+          <div class="user-list" id="queue-preview"></div>
+        </section>
+      </section>
+
+      <section class="view-stack hidden" id="settings-view">
+        <section class="card">
+          <div class="section-head">
+            <div>
+              <div class="section-kicker">用户管理</div>
+              <h3>当前账号</h3>
+            </div>
+          </div>
+
+          <div class="helper-block">
+            新用户会复制当前用户的大部分设置，但视频号、抖音和登录态互相独立。语音克隆会全局复用。切换其他用户请返回登录页重新选择。
+          </div>
+
+          <label class="field">
+            <span>当前用户名</span>
+            <input id="current-user-name" type="text" placeholder="输入当前用户名称" />
+          </label>
+
+          <div class="actions dual-actions">
+            <button id="rename-user-btn" class="btn btn-primary" type="button">保存当前用户名</button>
+            <button id="back-to-login-btn" class="btn btn-ghost" type="button">返回登录页切换</button>
+          </div>
+
+          <label class="field">
+            <span>新增用户</span>
+            <input id="new-user-name" type="text" placeholder="留空则自动生成蚂蚁2、蚂蚁3..." />
+          </label>
+
+          <button id="create-user-btn" class="btn btn-ghost" type="button">新增用户</button>
+
+          <div class="user-list" id="user-list"></div>
+        </section>
+
+        <section class="card">
+          <div class="section-head">
+            <div>
+              <div class="section-kicker">浏览器登录</div>
+              <h3>视频号 / 抖音 / Gemini</h3>
+            </div>
+          </div>
+
+          <div class="summary-grid">
+            <article class="mini-card">
+              <span class="mini-label">视频号</span>
+              <strong id="login-video-status">未检测</strong>
+            </article>
+            <article class="mini-card">
+              <span class="mini-label">抖音</span>
+              <strong id="login-douyin-status">未检测</strong>
+            </article>
+            <article class="mini-card">
+              <span class="mini-label">Gemini</span>
+              <strong id="login-gemini-status">未检测</strong>
+            </article>
+          </div>
+
+          <div class="actions dual-actions">
+            <button id="login-video-btn" class="btn btn-primary" type="button">登录视频号</button>
+            <button id="login-douyin-btn" class="btn btn-primary" type="button">登录抖音</button>
+            <button id="login-gemini-btn" class="btn btn-primary" type="button">登录 Gemini</button>
+          </div>
+
+          <div class="login-progress hidden" id="login-progress-box">
+            <div class="progress-head">
+              <span id="login-progress-label">等待网页加载</span>
+              <strong id="login-progress-percent">0%</strong>
+            </div>
+            <div class="progress-track">
+              <div id="login-progress-bar" class="progress-bar" style="width:0%"></div>
+            </div>
+            <div class="helper-text" id="login-progress-detail">正在打开登录页...</div>
+          </div>
+
+          <div class="preview-box">
+            <img id="login-preview-image" class="preview-image hidden" alt="登录截图预览" />
+            <div id="login-preview-empty" class="preview-empty">点击上方按钮后，这里会显示桌面浏览器截图。扫码完成后点击确认。</div>
+          </div>
+
+          <div class="actions dual-actions">
+            <button id="login-confirm-btn" class="btn btn-ghost" type="button" disabled>已扫码，确认登录</button>
+            <button id="login-cancel-btn" class="btn btn-ghost" type="button" disabled>取消登录</button>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="section-head">
+            <div>
+              <div class="section-kicker">语音克隆</div>
+              <h3>共享语音资产</h3>
+            </div>
+          </div>
+
+          <div class="summary-grid">
+            <article class="mini-card">
+              <span class="mini-label">音色 ID</span>
+              <strong id="voice-current-id">未配置</strong>
+            </article>
+            <article class="mini-card">
+              <span class="mini-label">档案名称</span>
+              <strong id="voice-current-profile">未配置</strong>
+            </article>
+          </div>
+
+          <label class="field">
+            <span>样本音频</span>
+            <input id="voice-clone-file" type="file" accept="audio/*" />
+          </label>
+          <div class="helper-text" id="voice-clone-file-name">尚未选择文件</div>
+
+          <label class="field">
+            <span>样本文案</span>
+            <textarea id="voice-clone-text" rows="4" placeholder="必须与音频内容一致"></textarea>
+          </label>
+
+          <label class="field">
+            <span>档案名称</span>
+            <input id="voice-clone-name" type="text" placeholder="例如：蚂蚁旁白" />
+          </label>
+
+          <label class="field">
+            <span>语言</span>
+            <select id="voice-clone-lang">
+              <option value="zh">中文（zh）</option>
+              <option value="en">英文（en）</option>
+            </select>
+          </label>
+
+          <button id="voice-clone-run-btn" class="btn btn-primary" type="button">开始语音克隆</button>
+
+          <div class="voice-progress hidden" id="voice-clone-progress-box">
+            <div class="progress-head">
+              <span id="voice-clone-progress-label">等待开始</span>
+              <strong id="voice-clone-progress-percent">0%</strong>
+            </div>
+            <div class="progress-track">
+              <div id="voice-clone-progress-bar" class="progress-bar" style="width:0%"></div>
+            </div>
+            <div class="helper-text" id="voice-clone-progress-detail">准备中...</div>
+            <pre class="log-box compact" id="voice-clone-log">暂无日志</pre>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="section-head">
+            <div>
+              <div class="section-kicker">完整设置</div>
+              <h3>与桌面端字段对齐</h3>
+            </div>
+            <button id="reload-settings-btn" class="btn btn-ghost btn-small" type="button">同步设置</button>
+          </div>
+
+          <form id="settings-form" class="settings-form">
+            <details class="settings-group" open>
+              <summary>路径</summary>
+              <div class="field-grid">
+                <label class="field"><span>临时目录</span><input name="tempDir" type="text" /></label>
+                <label class="field"><span>输出根目录</span><input name="outputBaseDir" type="text" /></label>
+                <label class="field"><span>YouTube 项目目录</span><input name="youtubeProjectPath" type="text" /></label>
+                <label class="field"><span>剪辑项目目录</span><input name="editProjectPath" type="text" /></label>
+                <label class="field"><span>发布项目目录</span><input name="publishProjectPath" type="text" /></label>
+              </div>
+            </details>
+
+            <details class="settings-group">
+              <summary>命令</summary>
+              <div class="field-grid">
+                <label class="field field-wide"><span>下载命令</span><input name="downloadCmd" type="text" /></label>
+                <label class="field field-wide"><span>Gemini 命令</span><input name="geminiCmd" type="text" /></label>
+                <label class="field field-wide"><span>剪辑命令</span><input name="editCmd" type="text" /></label>
+                <label class="field field-wide"><span>发布命令</span><input name="publishCmd" type="text" /></label>
+                <label class="field field-wide"><span>语音克隆命令</span><input name="voiceCloneCmd" type="text" /></label>
+              </div>
+            </details>
+
+            <details class="settings-group">
+              <summary>流程</summary>
+              <div class="field-grid">
+                <label class="field"><span>自动发布</span>
+                  <select name="publishEnabled"><option value="true">开启</option><option value="false">关闭</option></select>
+                </label>
+                <label class="field"><span>失败重试次数</span><input name="failedRetryCount" type="number" min="0" step="1" /></label>
+                <label class="field"><span>任务间隔毫秒</span><input name="pauseBetweenTasksMs" type="number" min="0" step="500" /></label>
+                <label class="field"><span>动作等待毫秒</span><input name="actionDelayMs" type="number" min="500" step="100" /></label>
+                <label class="field"><span>显示自动化窗口</span>
+                  <select name="showAutomationWindow"><option value="false">否</option><option value="true">是</option></select>
+                </label>
+                <label class="field field-wide"><span>Gemini 字幕网址</span><input name="geminiSubtitleUrl" type="text" /></label>
+              </div>
+            </details>
+
+            <details class="settings-group">
+              <summary>样式</summary>
+              <div class="field-grid">
+                <label class="field"><span>语速</span><input name="voiceSpeed" type="number" min="0.5" max="2" step="0.1" /></label>
+                <label class="field"><span>旁白语音</span>
+                  <select name="voiceoverEnabled"><option value="true">开启</option><option value="false">关闭</option></select>
+                </label>
+                <label class="field"><span>字幕</span>
+                  <select name="subtitleEnabled"><option value="true">开启</option><option value="false">关闭</option></select>
+                </label>
+                <label class="field"><span>字幕颜色</span><input name="subtitleTextColor" type="text" /></label>
+                <label class="field"><span>描边颜色</span><input name="subtitleStrokeColor" type="text" /></label>
+                <label class="field"><span>字幕位置（0-100）</span><input name="subtitlePositionPercent" type="number" min="0" max="100" step="1" /></label>
+                <label class="field"><span>克隆音色 ID</span><input name="voiceId" type="text" /></label>
+                <label class="field"><span>克隆模型路径</span><input name="modelPath" type="text" /></label>
+              </div>
+            </details>
+
+            <details class="settings-group">
+              <summary>远程登录</summary>
+              <div class="field-grid">
+                <label class="field"><span>启用远程控制</span>
+                  <select name="remoteEnabled"><option value="false">否</option><option value="true">是</option></select>
+                </label>
+                <label class="field"><span>端口</span><input name="remotePort" type="number" min="1024" max="65535" step="1" /></label>
+                <label class="field field-wide"><span>当前用户远程密码</span><input name="remotePassword" type="password" /></label>
+                <label class="field"><span>公网模式</span>
+                  <select name="remotePublicMode"><option value="off">关闭</option><option value="cloudflare-quick">Cloudflare Quick Tunnel</option></select>
+                </label>
+              </div>
+            </details>
+          </form>
+
+          <div class="actions dual-actions">
+            <button id="save-settings-btn" class="btn btn-primary" type="button">保存设置</button>
+          </div>
+        </section>
+      </section>
+    </section>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>

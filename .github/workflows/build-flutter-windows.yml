@@ -1,0 +1,70 @@
+name: Build Flutter Windows
+
+on:
+  push:
+    branches:
+      - main
+      - "codex/**"
+  workflow_dispatch:
+    inputs:
+      use_cn_mirror:
+        description: Use Flutter China mirror
+        required: false
+        default: false
+        type: boolean
+      skip_backend_build:
+        description: Skip rebuilding Electron backend
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Use Flutter China mirror
+        if: ${{ inputs.use_cn_mirror }}
+        run: |
+          "PUB_HOSTED_URL=https://pub.flutter-io.cn" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "FLUTTER_STORAGE_BASE_URL=https://storage.flutter-io.cn" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Enable Windows desktop
+        working-directory: clients/antbot_flutter
+        run: flutter config --enable-windows-desktop
+
+      - name: Build Flutter Windows package
+        run: ./scripts/build-flutter-windows.ps1 -SkipBackendBuild:${{ inputs.skip_backend_build }}
+
+      - name: Upload Flutter Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: antbot-flutter-windows
+          path: release_flutter_windows/**
+          if-no-files-found: error
