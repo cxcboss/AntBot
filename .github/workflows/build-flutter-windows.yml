@@ -47,7 +47,7 @@ jobs:
           cache: true
 
       - name: Use Flutter China mirror
-        if: ${{ inputs.use_cn_mirror }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.use_cn_mirror == true }}
         run: |
           "PUB_HOSTED_URL=https://pub.flutter-io.cn" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "FLUTTER_STORAGE_BASE_URL=https://storage.flutter-io.cn" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
@@ -60,7 +60,9 @@ jobs:
         run: flutter config --enable-windows-desktop
 
       - name: Build Flutter Windows package
-        run: ./scripts/build-flutter-windows.ps1 -SkipBackendBuild:${{ inputs.skip_backend_build }}
+        env:
+          SKIP_BACKEND_BUILD: ${{ github.event_name == 'workflow_dispatch' && inputs.skip_backend_build == true }}
+        run: ./scripts/build-flutter-windows.ps1 -SkipBackendBuild:($env:SKIP_BACKEND_BUILD -eq 'true')
 
       - name: Upload Flutter Windows artifacts
         uses: actions/upload-artifact@v4
