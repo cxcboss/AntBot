@@ -1,9 +1,9 @@
-$ErrorActionPreference = 'Stop'
-
 param(
   [string]$OutputDir = "",
   [switch]$SkipBackendBuild
 )
+
+$ErrorActionPreference = 'Stop'
 
 $RootDir = Split-Path -Parent $PSScriptRoot
 $FlutterDir = Join-Path $RootDir 'clients\antbot_flutter'
