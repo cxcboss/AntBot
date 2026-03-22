@@ -13,7 +13,7 @@ function normalizeProfileSegment(value, fallback) {
 }
 
 function isSharedProfileService(serviceKey) {
-  return normalizeProfileSegment(serviceKey, 'service') === 'gemini';
+  return false;
 }
 
 function getProfileScopeKey(serviceKey, userId = 'user-1') {

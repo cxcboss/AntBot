@@ -47,8 +47,13 @@ yarn-error.log
 # Data
 data/cache/*
 data/generations/*
+data/profiles/
+data/*.db
 !data/cache/.gitkeep
 !data/generations/.gitkeep
+
+# Workspace
+workspace/
 
 # Outputs
 outputs/*

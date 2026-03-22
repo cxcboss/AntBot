@@ -87,11 +87,15 @@ const BASE_DEFAULT_SETTINGS = {
     failedTaskRetries: 0
   },
   remote: {
-    enabled: false,
+    enabled: true,
     port: 17888,
     password: '',
-    publicMode: 'off',
+    publicMode: 'cloudflare-quick',
     cloudflaredPath: ''
+  },
+  system: {
+    preventSleepOnTasks: true,
+    launchAtLogin: true
   },
   style: {
     subtitleTextColor: '#FFA100',

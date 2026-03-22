@@ -1,7 +1,17 @@
 node_modules
 release
+release_flutter
+release_fnos_app
+release_flutter_figma
 release_flutter_windows
 dist
+.build
+.tools/fnpack
+.codex-tmp
+.antbot-runtime
+assets/icon.iconset.gen
+assets/icon-build.iconset
+assets/icon-build\ 2.iconset
 .DS_Store
 *.log
 src/main/**/tmp

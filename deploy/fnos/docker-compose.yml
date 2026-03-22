@@ -9,7 +9,6 @@ services:
       TZ: Asia/Shanghai
       ANTBOT_REMOTE_ENABLED: "1"
       ANTBOT_REMOTE_PORT: "17888"
-      ANTBOT_REMOTE_PASSWORD: "请替换成强密码"
       ANTBOT_HEADLESS: "1"
       ANTBOT_DISABLE_CHROMIUM_SANDBOX: "1"
       ANTBOT_DATA_ROOT: /data

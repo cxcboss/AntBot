@@ -2,7 +2,6 @@ const fs = require('node:fs/promises');
 const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
-const crypto = require('node:crypto');
 const { URL } = require('node:url');
 const { spawn } = require('node:child_process');
 const { parseTaskInput } = require('./parser');
@@ -41,23 +40,10 @@ function normalizeRemoteSettings(remote = {}) {
   return {
     enabled: Boolean(remote.enabled),
     port: Number.isFinite(port) && port > 0 ? Math.min(65535, Math.max(1024, Math.round(port))) : 17888,
-    password: String(remote.password || '').trim(),
+    password: '',
     publicMode: publicMode === 'cloudflare-quick' ? publicMode : 'off',
     cloudflaredPath: String(remote.cloudflaredPath || '').trim()
   };
-}
-
-function timingSafeEqualText(a, b) {
-  const left = Buffer.from(String(a || ''), 'utf-8');
-  const right = Buffer.from(String(b || ''), 'utf-8');
-  if (left.length !== right.length) {
-    return false;
-  }
-  try {
-    return crypto.timingSafeEqual(left, right);
-  } catch {
-    return false;
-  }
 }
 
 function getElectronApp() {
@@ -298,8 +284,11 @@ function pickRemoteSettings(settings = {}) {
     remote: {
       enabled: Boolean(settings.remote?.enabled),
       port: settings.remote?.port ?? 17888,
-      password: settings.remote?.password || '',
       publicMode: settings.remote?.publicMode === 'cloudflare-quick' ? 'cloudflare-quick' : 'off'
+    },
+    system: {
+      preventSleepOnTasks: settings.system?.preventSleepOnTasks !== false,
+      launchAtLogin: settings.system?.launchAtLogin !== false
     }
   };
 }
@@ -418,10 +407,19 @@ function buildRemoteSettingsPatch(source = {}, current = {}) {
     remote: {
       enabled: parseBooleanInput(source.remote?.enabled, currentPicked.remote.enabled),
       port: parseIntegerInput(source.remote?.port, currentPicked.remote.port, 1024, 65535),
-      password: trimInput(source.remote?.password, currentPicked.remote.password),
       publicMode: trimInput(source.remote?.publicMode, currentPicked.remote.publicMode) === 'cloudflare-quick'
         ? 'cloudflare-quick'
         : 'off'
+    },
+    system: {
+      preventSleepOnTasks: parseBooleanInput(
+        source.system?.preventSleepOnTasks,
+        currentPicked.system.preventSleepOnTasks
+      ),
+      launchAtLogin: parseBooleanInput(
+        source.system?.launchAtLogin,
+        currentPicked.system.launchAtLogin
+      )
     }
   };
 }
@@ -485,13 +483,15 @@ async function ensureWindowsFirewallRule(port, logger = () => {}) {
 }
 
 class RemoteControlServer {
-  constructor({ store, taskRunner, onStatusChange = () => {}, onRemoteLog = () => {} }) {
+  constructor({ store, taskRunner, onStatusChange = () => {}, onRemoteLog = () => {}, systemControl = null }) {
     this.store = store;
     this.taskRunner = taskRunner;
     this.onStatusChange = onStatusChange;
     this.onRemoteLog = onRemoteLog;
+    this.systemControl = systemControl;
 
     this.server = null;
+    this.remoteAccessServer = null;
     this.remoteSettings = normalizeRemoteSettings();
     this.status = {
       enabled: false,
@@ -539,6 +539,10 @@ class RemoteControlServer {
   async init() {
     await this.refreshStoreState();
     const settings = await this.store.getSettings();
+    if (this.localUiMode) {
+      await this.startLocalUiServer();
+    }
+    this.systemControl?.applySettings(settings);
     await this.reconfigure(settings.remote || {});
   }
 
@@ -552,8 +556,60 @@ class RemoteControlServer {
 
     this.history = history.slice(0, 20);
     this.loginState = loginState;
-    this.users = users;
-    this.activeUser = activeUser;
+    this.users = this.decorateUsersWithProgress(users);
+    this.activeUser = this.decorateUserSummary(activeUser);
+  }
+
+  buildTaskCountMap(progress = this.taskRunner.getSnapshot()) {
+    const counts = new Map();
+    const items = [
+      ...(Array.isArray(progress?.tasks) ? progress.tasks : []),
+      ...(Array.isArray(progress?.queueTasks) ? progress.queueTasks : [])
+    ];
+
+    for (const item of items) {
+      const userId = String(item?.userId || '').trim();
+      if (!userId) {
+        continue;
+      }
+      const status = String(item?.status || '').trim();
+      if (!counts.has(userId)) {
+        counts.set(userId, {
+          liveTaskCount: 0,
+          waitingTaskCount: 0,
+          runningTaskCount: 0
+        });
+      }
+      const bucket = counts.get(userId);
+      if (!['completed', 'failed', 'partial_failed', 'stopped'].includes(status)) {
+        bucket.liveTaskCount += 1;
+      }
+      if (['queued', 'pending'].includes(status)) {
+        bucket.waitingTaskCount += 1;
+      }
+      if (status === 'running') {
+        bucket.runningTaskCount += 1;
+      }
+    }
+
+    return counts;
+  }
+
+  decorateUserSummary(user) {
+    if (!user || typeof user !== 'object') {
+      return user;
+    }
+    const counts = this.buildTaskCountMap(this.progress).get(String(user.id || '').trim()) || {};
+    return {
+      ...user,
+      liveTaskCount: Number(counts.liveTaskCount || 0),
+      waitingTaskCount: Number(counts.waitingTaskCount || 0),
+      runningTaskCount: Number(counts.runningTaskCount || 0)
+    };
+  }
+
+  decorateUsersWithProgress(users = []) {
+    return (Array.isArray(users) ? users : []).map((user) => this.decorateUserSummary(user));
   }
 
   async activateUser(userId, options = {}) {
@@ -564,9 +620,10 @@ class RemoteControlServer {
 
     await this.store.switchUser(targetUserId);
     await this.refreshStoreState();
+    const settings = await this.store.getSettings();
+    this.systemControl?.applySettings(settings);
 
     if (options.reconfigure) {
-      const settings = await this.store.getSettings();
       await this.reconfigure(settings.remote || {});
     } else if (options.emit !== false) {
       this.emitStatus();
@@ -579,7 +636,7 @@ class RemoteControlServer {
     };
   }
 
-  async resolveUserAuth(userId, password) {
+  async resolveUserAuth(userId) {
     const targetUserId = String(userId || '').trim();
     const fallbackUserId = targetUserId || this.activeUser?.id || '';
     if (!fallbackUserId) {
@@ -595,20 +652,6 @@ class RemoteControlServer {
       return { ok: false, message: '用户不存在。' };
     }
 
-    if (this.localUiMode) {
-      return { ok: true, user };
-    }
-
-    const expectedPassword = String(user.settings?.remote?.password || '').trim();
-    if (!expectedPassword) {
-      return { ok: true, user };
-    }
-
-    const candidate = String(password || '').trim();
-    if (!candidate || !timingSafeEqualText(candidate, expectedPassword)) {
-      return { ok: false, message: '密码错误。' };
-    }
-
     return { ok: true, user };
   }
 
@@ -620,14 +663,7 @@ class RemoteControlServer {
       || this.activeUser?.id
       || ''
     ).trim();
-    const password = String(
-      req.headers['x-antbot-password']
-      || body.password
-      || requestUrl.searchParams.get('password')
-      || ''
-    ).trim();
-
-    const auth = await this.resolveUserAuth(userId, password);
+    const auth = await this.resolveUserAuth(userId);
     if (!auth.ok) {
       return auth;
     }
@@ -644,10 +680,7 @@ class RemoteControlServer {
       app: getAppInfo(),
       activeUser: this.activeUser,
       users: this.users,
-      server: {
-        ...this.status,
-        passwordConfigured: Boolean(this.remoteSettings.password)
-      },
+      server: this.status,
       progress: this.progress,
       history: this.history.slice(0, 10),
       logs: this.logs.slice(-20),
@@ -669,10 +702,7 @@ class RemoteControlServer {
       app: getAppInfo(),
       activeUser,
       users,
-      server: {
-        ...this.status,
-        passwordConfigured: Boolean(activeUser?.remotePasswordConfigured)
-      },
+      server: this.status,
       progress: this.taskRunner.getSnapshotForUser(userId),
       history: history.slice(0, 10),
       logs: this.logs.slice(-20),
@@ -684,6 +714,9 @@ class RemoteControlServer {
 
   handleProgress(payload) {
     this.progress = payload;
+    this.users = this.decorateUsersWithProgress(this.users);
+    this.activeUser = this.decorateUserSummary(this.activeUser);
+    this.systemControl?.handleProgress(payload);
     this.broadcast('progress', payload);
     this.broadcast('state', this.getPublicState());
   }
@@ -742,19 +775,49 @@ class RemoteControlServer {
   }
 
   async handleRemoteSettingsGet(userId) {
-    const settings = await this.store.getSettingsForUser(userId);
-    return pickRemoteSettings(settings);
+    const [settings, globalSettings] = await Promise.all([
+      this.store.getSettingsForUser(userId),
+      this.store.getGlobalSettingsForUser(userId)
+    ]);
+    return {
+      ...pickRemoteSettings(settings),
+      __userId: settings.__userId || '',
+      __geminiProfileId: settings.__geminiProfileId || '',
+      __geminiProfileName: settings.__geminiProfileName || '',
+      __globalSettings: pickRemoteSettings(globalSettings),
+      __profileSettingsEnabled: Boolean(settings.__profileSettingsEnabled),
+      __profileSettingsOverrides: settings.__profileSettingsOverrides || {}
+    };
   }
 
   async handleRemoteSettingsUpdate(body, userId) {
     const current = await this.store.getSettingsForUser(userId);
     const source = body?.settings && typeof body.settings === 'object' ? body.settings : body;
-    const partial = buildRemoteSettingsPatch(source, current);
-    const settings = await this.store.updateSettingsForUser(userId, partial);
+    const hasExplicitScope = typeof body?.scope === 'string';
+    const scope = body?.scope === 'user-profile' ? 'user-profile' : 'global';
+    const partial = hasExplicitScope
+      ? source
+      : buildRemoteSettingsPatch(source, current);
+    const settings = await this.store.updateSettingsForUser(userId, partial, {
+      scope,
+      profileSettingsEnabled: typeof body?.profileSettingsEnabled === 'boolean'
+        ? body.profileSettingsEnabled
+        : null
+    });
+    this.systemControl?.applySettings(settings);
     await this.refreshStoreState();
+    const globalSettings = await this.store.getGlobalSettingsForUser(userId);
     return {
       fullSettings: settings,
-      settings: pickRemoteSettings(settings),
+      settings: {
+        ...pickRemoteSettings(settings),
+        __userId: settings.__userId || '',
+        __geminiProfileId: settings.__geminiProfileId || '',
+        __geminiProfileName: settings.__geminiProfileName || '',
+        __globalSettings: pickRemoteSettings(globalSettings),
+        __profileSettingsEnabled: Boolean(settings.__profileSettingsEnabled),
+        __profileSettingsOverrides: settings.__profileSettingsOverrides || {}
+      },
       remoteChanged: Boolean(source?.remote)
     };
   }
@@ -766,9 +829,7 @@ class RemoteControlServer {
     }
 
     const settings = await this.store.getSettingsForUser(userId);
-    const resolvedUserId = serviceKey === 'gemini'
-      ? (settings.__geminiProfileId || settings.__userId || userId || 'user-1')
-      : (settings.__userId || userId || 'user-1');
+    const resolvedUserId = settings.__userId || userId || 'user-1';
     const serviceConfig = settings.loginHints?.[serviceKey];
     if (!serviceConfig) {
       throw new Error(`未知登录平台：${serviceKey}`);
@@ -812,9 +873,7 @@ class RemoteControlServer {
       throw new Error('缺少登录平台。');
     }
     const settings = await this.store.getSettingsForUser(userId);
-    const scopeId = serviceKey === 'gemini'
-      ? (settings.__geminiProfileId || settings.__userId || userId)
-      : userId;
+    const scopeId = settings.__userId || userId;
     const contextKey = getProfileScopeKey(serviceKey, scopeId);
     const entry = this.loginContexts.get(contextKey);
     if (entry?.context) {
@@ -836,9 +895,7 @@ class RemoteControlServer {
       throw new Error('缺少登录平台。');
     }
     const settings = await this.store.getSettingsForUser(userId);
-    const scopeId = serviceKey === 'gemini'
-      ? (settings.__geminiProfileId || settings.__userId || userId)
-      : userId;
+    const scopeId = settings.__userId || userId;
     const contextKey = getProfileScopeKey(serviceKey, scopeId);
     const entry = this.loginContexts.get(contextKey);
     if (entry?.context) {
@@ -941,41 +998,59 @@ class RemoteControlServer {
     return this.reconfigureQueue;
   }
 
+  async startLocalUiServer() {
+    if (!this.localUiMode || this.server) {
+      return;
+    }
+
+    this.server = http.createServer((req, res) => {
+      this.handleRequest(req, res).catch((error) => {
+        sendJson(res, 500, {
+          ok: false,
+          message: String(error?.message || error || '服务器内部错误')
+        });
+      });
+    });
+
+    await new Promise((resolve, reject) => {
+      this.server.once('error', reject);
+      this.server.listen(this.localUiPort, LOCAL_UI_HOST, () => {
+        this.server.off('error', reject);
+        resolve();
+      });
+    }).catch((error) => {
+      this.server = null;
+      throw error;
+    });
+  }
+
   async applyConfiguration(remoteSettings) {
     const configuredSettings = normalizeRemoteSettings(remoteSettings);
-    const nextSettings = this.localUiMode
-      ? {
-          ...configuredSettings,
-          enabled: true,
-          port: this.localUiPort,
-          password: '',
-          publicMode: 'off'
-        }
-      : configuredSettings;
+    const nextSettings = configuredSettings;
     const previousSettings = this.remoteSettings;
     const previousPublic = this.status.public;
-    const unchanged = this.server
+    const accessServer = this.localUiMode ? this.remoteAccessServer : this.server;
+    const unchanged = accessServer
       && this.status.online
       && previousSettings.enabled
       && previousSettings.port === nextSettings.port
-      && previousSettings.password === nextSettings.password
       && previousSettings.publicMode === nextSettings.publicMode
       && previousSettings.cloudflaredPath === nextSettings.cloudflaredPath;
 
     this.remoteSettings = nextSettings;
     this.status = {
-      enabled: this.localUiMode ? true : this.remoteSettings.enabled,
+      enabled: this.remoteSettings.enabled,
       online: false,
       port: this.remoteSettings.port,
-      passwordConfigured: Boolean(this.remoteSettings.password),
+      passwordConfigured: false,
       urls: this.remoteSettings.enabled
-        ? (this.localUiMode ? listLocalUiUrls(this.remoteSettings.port) : listRemoteUrls(this.remoteSettings.port))
+        ? listRemoteUrls(this.remoteSettings.port)
         : [],
       lastError: '',
       updatedAt: new Date().toISOString(),
       internalMode: this.localUiMode,
       public: {
-        mode: this.localUiMode ? 'off' : this.remoteSettings.publicMode,
+        mode: this.remoteSettings.publicMode,
         online: false,
         url: '',
         lastError: '',
@@ -986,10 +1061,8 @@ class RemoteControlServer {
 
     if (unchanged) {
       this.status.online = true;
-      this.status.urls = this.localUiMode
-        ? listLocalUiUrls(this.remoteSettings.port)
-        : listRemoteUrls(this.remoteSettings.port);
-      this.status.passwordConfigured = Boolean(this.remoteSettings.password);
+      this.status.urls = listRemoteUrls(this.remoteSettings.port);
+      this.status.passwordConfigured = false;
       if (previousPublic) {
         this.status.public = {
           ...this.status.public,
@@ -997,7 +1070,7 @@ class RemoteControlServer {
           mode: this.remoteSettings.publicMode
         };
       }
-      if (!this.localUiMode && this.remoteSettings.publicMode === 'cloudflare-quick' && !this.status.public.online) {
+      if (this.remoteSettings.publicMode === 'cloudflare-quick' && !this.status.public.online) {
         await this.startPublicTunnelIfNeeded();
       }
       this.status.updatedAt = new Date().toISOString();
@@ -1013,7 +1086,7 @@ class RemoteControlServer {
 
     await this.stop(false);
     try {
-      await this.startLocalServer();
+      await this.startConfiguredServer();
     } catch (error) {
       const message = String(error?.message || error || '远程服务启动失败');
       this.status.online = false;
@@ -1023,15 +1096,13 @@ class RemoteControlServer {
       return this.getPublicState();
     }
 
-    if (!this.localUiMode) {
-      await this.startPublicTunnelIfNeeded();
-    }
+    await this.startPublicTunnelIfNeeded();
     this.emitStatus();
     return this.getPublicState();
   }
 
-  async startLocalServer() {
-    this.server = http.createServer((req, res) => {
+  async startConfiguredServer() {
+    const serverRef = http.createServer((req, res) => {
       this.handleRequest(req, res).catch((error) => {
         sendJson(res, 500, {
           ok: false,
@@ -1039,11 +1110,13 @@ class RemoteControlServer {
         });
       });
     });
+    const serverKey = this.localUiMode ? 'remoteAccessServer' : 'server';
+    this[serverKey] = serverRef;
 
     await new Promise((resolve, reject) => {
-      this.server.once('error', reject);
-      this.server.listen(this.remoteSettings.port, this.localUiMode ? LOCAL_UI_HOST : '0.0.0.0', () => {
-        this.server.off('error', reject);
+      serverRef.once('error', reject);
+      serverRef.listen(this.remoteSettings.port, '0.0.0.0', () => {
+        serverRef.off('error', reject);
         resolve();
       });
     }).catch((error) => {
@@ -1052,20 +1125,14 @@ class RemoteControlServer {
       } else {
         this.status.lastError = `远程服务启动失败：${String(error?.message || error)}`;
       }
-      this.server = null;
+      this[serverKey] = null;
       throw error;
     });
 
     this.status.online = true;
-    this.status.urls = this.localUiMode
-      ? listLocalUiUrls(this.remoteSettings.port)
-      : listRemoteUrls(this.remoteSettings.port);
+    this.status.urls = listRemoteUrls(this.remoteSettings.port);
     this.status.lastError = '';
     this.status.updatedAt = new Date().toISOString();
-
-    if (this.localUiMode) {
-      return;
-    }
 
     await ensureWindowsFirewallRule(this.remoteSettings.port, (message) => {
       this.onRemoteLog({
@@ -1101,11 +1168,12 @@ class RemoteControlServer {
 
     await this.stopTunnel();
 
-    if (this.server) {
+    const serverKey = this.localUiMode ? 'remoteAccessServer' : 'server';
+    if (this[serverKey]) {
       await new Promise((resolve) => {
-        this.server.close(() => resolve());
+        this[serverKey].close(() => resolve());
       }).catch(() => {});
-      this.server = null;
+      this[serverKey] = null;
     }
 
     this.status.online = false;
@@ -1400,11 +1468,6 @@ class RemoteControlServer {
       return;
     }
 
-    if ((!this.remoteSettings.enabled && !this.localUiMode) || !this.server) {
-      sendJson(res, 503, { ok: false, message: '远程控制未启用。' });
-      return;
-    }
-
     if (requestUrl.pathname === '/api/users' && req.method === 'GET') {
       await this.refreshStoreState();
       sendJson(res, 200, {
@@ -1417,9 +1480,9 @@ class RemoteControlServer {
 
     if (requestUrl.pathname === '/api/login' && req.method === 'POST') {
       const body = await parseBody(req);
-      const auth = await this.resolveUserAuth(body?.userId, body?.password);
+      const auth = await this.resolveUserAuth(body?.userId);
       if (!auth.ok) {
-        sendJson(res, 401, { ok: false, message: auth.message || '密码错误。' });
+        sendJson(res, 401, { ok: false, message: auth.message || '无法确认用户。' });
         return;
       }
       const state = await this.buildUserScopedState(auth.user.id);
@@ -1435,7 +1498,7 @@ class RemoteControlServer {
     if (requestUrl.pathname === '/api/events' && req.method === 'GET') {
       const auth = await this.authorizeRequest(req, requestUrl);
       if (!auth.ok) {
-        sendJson(res, 401, { ok: false, message: auth.message || '密码错误。' });
+        sendJson(res, 401, { ok: false, message: auth.message || '无法确认用户。' });
         return;
       }
       this.attachSseClient(req, res);
@@ -1445,7 +1508,7 @@ class RemoteControlServer {
     if (requestUrl.pathname === '/api/state' && req.method === 'GET') {
       const auth = await this.authorizeRequest(req, requestUrl);
       if (!auth.ok) {
-        sendJson(res, 401, { ok: false, message: auth.message || '密码错误。' });
+        sendJson(res, 401, { ok: false, message: auth.message || '无法确认用户。' });
         return;
       }
       sendJson(res, 200, { ok: true, state: await this.buildUserScopedState(auth.user.id) });
@@ -1455,7 +1518,7 @@ class RemoteControlServer {
     if (requestUrl.pathname === '/api/settings' && req.method === 'GET') {
       const auth = await this.authorizeRequest(req, requestUrl);
       if (!auth.ok) {
-        sendJson(res, 401, { ok: false, message: auth.message || '密码错误。' });
+        sendJson(res, 401, { ok: false, message: auth.message || '无法确认用户。' });
         return;
       }
       const settings = await this.handleRemoteSettingsGet(auth.user.id);
@@ -1467,7 +1530,7 @@ class RemoteControlServer {
       const body = await parseBody(req);
       const auth = await this.authorizeRequest(req, requestUrl, body);
       if (!auth.ok) {
-        sendJson(res, 401, { ok: false, message: auth.message || '密码错误。' });
+        sendJson(res, 401, { ok: false, message: auth.message || '无法确认用户。' });
         return;
       }
       try {
@@ -1490,7 +1553,7 @@ class RemoteControlServer {
       const body = await parseBody(req);
       const auth = await this.authorizeRequest(req, requestUrl, body);
       if (!auth.ok) {
-        sendJson(res, 401, { ok: false, message: auth.message || '密码错误。' });
+        sendJson(res, 401, { ok: false, message: auth.message || '无法确认用户。' });
         return;
       }
       try {
@@ -1506,7 +1569,7 @@ class RemoteControlServer {
       const body = await parseBody(req);
       const auth = await this.authorizeRequest(req, requestUrl, body);
       if (!auth.ok) {
-        sendJson(res, 401, { ok: false, message: auth.message || '密码错误。' });
+        sendJson(res, 401, { ok: false, message: auth.message || '无法确认用户。' });
         return;
       }
       try {
@@ -1522,7 +1585,7 @@ class RemoteControlServer {
       const body = await parseBody(req);
       const auth = await this.authorizeRequest(req, requestUrl, body);
       if (!auth.ok) {
-        sendJson(res, 401, { ok: false, message: auth.message || '密码错误。' });
+        sendJson(res, 401, { ok: false, message: auth.message || '无法确认用户。' });
         return;
       }
       try {
@@ -1538,7 +1601,7 @@ class RemoteControlServer {
       const body = await parseBody(req);
       const auth = await this.authorizeRequest(req, requestUrl, body);
       if (!auth.ok) {
-        sendJson(res, 401, { ok: false, message: auth.message || '密码错误。' });
+        sendJson(res, 401, { ok: false, message: auth.message || '无法确认用户。' });
         return;
       }
       try {
@@ -1554,7 +1617,7 @@ class RemoteControlServer {
       const body = await parseBody(req);
       const auth = await this.authorizeRequest(req, requestUrl, body);
       if (!auth.ok) {
-        sendJson(res, 401, { ok: false, message: auth.message || '密码错误。' });
+        sendJson(res, 401, { ok: false, message: auth.message || '无法确认用户。' });
         return;
       }
       try {
@@ -1576,7 +1639,7 @@ class RemoteControlServer {
       const body = await parseBody(req);
       const auth = await this.authorizeRequest(req, requestUrl, body);
       if (!auth.ok) {
-        sendJson(res, 401, { ok: false, message: auth.message || '密码错误。' });
+        sendJson(res, 401, { ok: false, message: auth.message || '无法确认用户。' });
         return;
       }
       try {
@@ -1588,11 +1651,27 @@ class RemoteControlServer {
       return;
     }
 
+    if (requestUrl.pathname === '/api/task/stop-one' && req.method === 'POST') {
+      const body = await parseBody(req);
+      const auth = await this.authorizeRequest(req, requestUrl, body);
+      if (!auth.ok) {
+        sendJson(res, 401, { ok: false, message: auth.message || '无法确认用户。' });
+        return;
+      }
+      try {
+        const result = await this.taskRunner.stopTask(body?.taskId, auth.user || { id: auth.userId });
+        sendJson(res, 200, { ok: true, ...result });
+      } catch (error) {
+        sendJson(res, 409, { ok: false, message: String(error?.message || error) });
+      }
+      return;
+    }
+
     if (requestUrl.pathname === '/api/users/create' && req.method === 'POST') {
       const body = await parseBody(req);
       const auth = await this.authorizeRequest(req, requestUrl, body);
       if (!auth.ok) {
-        sendJson(res, 401, { ok: false, message: auth.message || '密码错误。' });
+        sendJson(res, 401, { ok: false, message: auth.message || '无法确认用户。' });
         return;
       }
       try {
@@ -1615,7 +1694,7 @@ class RemoteControlServer {
       const body = await parseBody(req);
       const auth = await this.authorizeRequest(req, requestUrl, body);
       if (!auth.ok) {
-        sendJson(res, 401, { ok: false, message: auth.message || '密码错误。' });
+        sendJson(res, 401, { ok: false, message: auth.message || '无法确认用户。' });
         return;
       }
       try {
@@ -1637,7 +1716,7 @@ class RemoteControlServer {
       const body = await parseBody(req);
       const auth = await this.authorizeRequest(req, requestUrl, body);
       if (!auth.ok) {
-        sendJson(res, 401, { ok: false, message: auth.message || '密码错误。' });
+        sendJson(res, 401, { ok: false, message: auth.message || '无法确认用户。' });
         return;
       }
       try {
@@ -1660,7 +1739,7 @@ class RemoteControlServer {
       const body = await parseBody(req);
       const auth = await this.authorizeRequest(req, requestUrl, body);
       if (!auth.ok) {
-        sendJson(res, 401, { ok: false, message: auth.message || '密码错误。' });
+        sendJson(res, 401, { ok: false, message: auth.message || '无法确认用户。' });
         return;
       }
       if (this.taskRunner.running) {
@@ -1759,7 +1838,8 @@ class RemoteControlServer {
       queued: scheduled.queued,
       queuePosition: scheduled.queuePosition,
       taskCount: tasks.length,
-      runId: scheduled.runId
+      runId: scheduled.runId,
+      taskIds: scheduled.taskIds
     };
   }
 

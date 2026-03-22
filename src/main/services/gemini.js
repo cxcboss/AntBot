@@ -794,7 +794,7 @@ async function generateSubtitle(taskContext) {
     };
   }
 
-  const profileDir = getProfileDir('gemini', settings?.__geminiProfileId || settings?.__userId);
+  const profileDir = getProfileDir('gemini', settings?.__userId || settings?.__geminiProfileId);
   const geminiUrl = resolveGeminiUrl(settings);
   const context = await launchPersistentChromiumContext(profileDir, {
     headless: !settings.browser.showAutomationWindow,

@@ -92,6 +92,7 @@ class TaskRunner {
       attempt: 0,
       retryCount: 0,
       retryLimit: 0,
+      submittedAt: job.enqueuedAt,
       enqueuedAt: job.enqueuedAt,
       queueIndex: index + 1
     };
@@ -608,6 +609,7 @@ class TaskRunner {
       retryLimit: 0,
       outputPath: '',
       batchRunId: job.runId,
+      submittedAt: job.enqueuedAt,
       updatedAt: nowIso()
     }));
 
@@ -999,6 +1001,7 @@ class TaskRunner {
       retryCount: 0,
       retryLimit: 0,
       outputPath: videoPath,
+      submittedAt: job.enqueuedAt,
       updatedAt: nowIso()
     }];
 

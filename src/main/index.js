@@ -93,6 +93,7 @@ const { registerIpcHandlers } = require('./ipc');
 const { RemoteControlServer } = require('./services/remoteControl');
 const { ensureManagedBinDir, injectManagedBinIntoProcessEnv } = require('./services/dependencyManager');
 const { getAppInfo } = require('./services/appInfo');
+const { SystemControlService } = require('./services/systemControl');
 
 function parseBooleanEnv(rawValue, fallback = false) {
   const normalized = String(rawValue || '').trim().toLowerCase();
@@ -138,6 +139,7 @@ const isHeadlessMode = parseBooleanEnv(process.env.ANTBOT_HEADLESS, false)
   || parseBooleanEnv(process.env.ANTBOT_NO_WINDOW, false);
 
 let mainWindow;
+let systemControl = null;
 
 function createWindow() {
   const appInfo = getAppInfo();
@@ -177,11 +179,14 @@ async function bootstrap() {
 
   const store = new StoreService();
   await store.load();
+  systemControl = new SystemControlService();
+  systemControl.applySettings(await store.getSettings());
   let remoteServer;
 
   const taskRunner = new TaskRunner({
     store,
     onProgress: (payload) => {
+      systemControl?.handleProgress(payload);
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('task:progress', payload);
       }
@@ -205,6 +210,7 @@ async function bootstrap() {
   remoteServer = new RemoteControlServer({
     store,
     taskRunner,
+    systemControl,
     onStatusChange: (payload) => {
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('remote:status', payload);
@@ -219,6 +225,7 @@ async function bootstrap() {
   });
 
   remoteServer.progress = taskRunner.getSnapshot();
+  systemControl.handleProgress(remoteServer.progress);
   try {
     await remoteServer.init();
   } catch (error) {
@@ -229,7 +236,8 @@ async function bootstrap() {
     mainWindowRef: () => mainWindow,
     store,
     taskRunner,
-    remoteServer
+    remoteServer,
+    systemControl
   });
 }
 
@@ -259,4 +267,8 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
   }
+});
+
+app.on('before-quit', () => {
+  systemControl?.dispose();
 });

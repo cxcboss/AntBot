@@ -24,7 +24,7 @@ async function openPlaywrightLoginContext(serviceKey, serviceConfig, userId) {
   return context;
 }
 
-function registerIpcHandlers({ mainWindowRef, store, taskRunner, remoteServer }) {
+function registerIpcHandlers({ mainWindowRef, store, taskRunner, remoteServer, systemControl = null }) {
   const authContexts = new Map();
 
   const sendWindowState = async (options = {}) => {
@@ -78,6 +78,7 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, remoteServer })
 
   ipcMain.handle('settings:update', async (_event, partialSettings) => {
     const settings = await store.updateSettings(partialSettings);
+    systemControl?.applySettings(settings);
     await remoteServer.refreshStoreState();
     if (partialSettings?.remote) {
       await remoteServer.reconfigure(settings.remote || {});
@@ -204,9 +205,7 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, remoteServer })
 
   ipcMain.handle('startup:open-login-window', async (_event, serviceKey) => {
     const settings = await store.getSettings();
-    const scopeId = serviceKey === 'gemini'
-      ? (settings.__geminiProfileId || settings.__userId || 'user-1')
-      : (settings.__userId || 'user-1');
+    const scopeId = settings.__userId || 'user-1';
     const serviceConfig = settings.loginHints?.[serviceKey];
 
     if (!serviceConfig) {
@@ -239,9 +238,7 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, remoteServer })
 
   ipcMain.handle('startup:mark-login-done', async (_event, serviceKey) => {
     const settings = await store.getSettings();
-    const scopeId = serviceKey === 'gemini'
-      ? (settings.__geminiProfileId || settings.__userId || 'user-1')
-      : (settings.__userId || 'user-1');
+    const scopeId = settings.__userId || 'user-1';
     const contextKey = getProfileScopeKey(serviceKey, scopeId);
     const context = authContexts.get(contextKey);
     if (context) {

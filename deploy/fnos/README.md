@@ -6,9 +6,8 @@
 
 1. 先在飞牛 Docker 中导入镜像 `antbot:fnos-latest`（见下方第 2 节）。
 2. 把 `deploy/fnos/docker-compose.yml` 放到飞牛的某个项目目录。
-3. 修改环境变量 `ANTBOT_REMOTE_PASSWORD` 为强密码。
-4. 在飞牛 Docker 应用的 `Compose` 中创建项目并启动。
-5. 浏览器访问：`http://NAS_IP:17888/remote/`
+3. 在飞牛 Docker 应用的 `Compose` 中创建项目并启动。
+4. 浏览器访问：`http://NAS_IP:17888/remote/`
 
 ## 2. 构建镜像并导入飞牛
 
@@ -47,7 +46,6 @@ docker build \
 
 ## 4. 关键环境变量
 
-- `ANTBOT_REMOTE_PASSWORD`：远程控制密码（必须设置）
 - `ANTBOT_REMOTE_PORT`：远程服务端口（默认 `17888`）
 - `ANTBOT_PREPARE_VOICEBOX`：`1` 时容器首次启动会自动安装 voicebox 依赖（较慢）
 - `ANTBOT_DATA_ROOT`：应用数据根目录（默认 `/data`）

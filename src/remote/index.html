@@ -13,7 +13,7 @@
         <div>
           <div class="hero-kicker">手机远程控制台</div>
           <h1 id="auth-app-title">__APP_DISPLAY__</h1>
-          <p class="hero-copy">先选择用户，再输入对应远程密码登录。任务主页保持简洁，其他设置放到单独界面。</p>
+          <p class="hero-copy">直接选择用户进入控制台。网页端会自动沿用桌面端的远程设置，不再要求额外密码。</p>
         </div>
         <div class="status-pill" id="connect-state-pill">未连接</div>
       </div>
@@ -23,17 +23,12 @@
         <select id="auth-user-select"></select>
       </label>
 
-      <label class="field">
-        <span>远程密码</span>
-        <input id="password-input" type="password" placeholder="输入所选用户的远程密码" autocomplete="current-password" />
-      </label>
-
       <div class="actions dual-actions">
         <button id="connect-btn" class="btn btn-primary" type="button">进入控制台</button>
-        <button id="forget-btn" class="btn btn-ghost" type="button">清空密码</button>
+        <button id="forget-btn" class="btn btn-ghost" type="button">清除记住的用户</button>
       </div>
 
-      <div class="status-line" id="auth-status">请选择用户并输入密码。</div>
+      <div class="status-line" id="auth-status">请选择用户。</div>
     </section>
 
     <section class="card global-progress hidden" id="action-progress-card">
@@ -59,41 +54,20 @@
         </div>
 
         <div class="nav-row">
-          <button id="show-home-btn" class="nav-btn active" type="button">主页</button>
-          <button id="show-tasks-btn" class="nav-btn" type="button">任务</button>
+          <button id="show-home-btn" class="nav-btn" type="button">概览</button>
+          <button id="show-tasks-btn" class="nav-btn active" type="button">聊天</button>
           <button id="show-settings-btn" class="nav-btn" type="button">设置</button>
           <button id="switch-user-btn" class="btn btn-ghost btn-small" type="button">切换用户</button>
         </div>
       </header>
 
-      <section class="view-stack" id="home-view">
+      <section class="view-stack hidden" id="home-view">
         <section class="card">
           <div class="section-head">
             <div>
-              <div class="section-kicker">实时进度</div>
-              <h3>任务状态</h3>
+              <div class="section-kicker">控制概览</div>
+              <h3>运行状态</h3>
             </div>
-          </div>
-          <div class="task-list" id="task-list"></div>
-        </section>
-
-        <section class="card">
-          <div class="section-head">
-            <div>
-              <div class="section-kicker">实时日志</div>
-              <h3>执行记录</h3>
-            </div>
-          </div>
-          <pre class="log-box" id="log-list">暂无日志</pre>
-        </section>
-
-        <section class="card">
-          <div class="section-head">
-            <div>
-              <div class="section-kicker">主页状态</div>
-              <h3>连接与运行概览</h3>
-            </div>
-            <button id="refresh-btn" class="btn btn-ghost btn-small" type="button">刷新</button>
           </div>
 
           <div class="summary-grid">
@@ -136,31 +110,54 @@
             </div>
           </div>
         </section>
-      </section>
 
-      <section class="view-stack hidden" id="tasks-view">
         <section class="card">
           <div class="section-head">
             <div>
-              <div class="section-kicker">任务输入</div>
-              <h3>启动与排队</h3>
+              <div class="section-kicker">实时日志</div>
+              <h3>执行记录</h3>
             </div>
           </div>
+          <pre class="log-box" id="log-list">暂无日志</pre>
+        </section>
+      </section>
 
-          <div class="helper-block" id="queue-hint">
+      <section class="view-stack hidden" id="tasks-view">
+        <section class="card chat-shell">
+          <div class="section-head">
+            <div>
+              <div class="section-kicker">聊天任务</div>
+              <h3>远程会话</h3>
+            </div>
+            <button id="refresh-btn" class="btn btn-ghost btn-small" type="button">刷新</button>
+          </div>
+
+          <div class="helper-block compact" id="queue-hint">
             每行一条任务。平台关键词：微信=视频号；抖音=抖音；都写=双平台；都不写=默认视频号。运行中再次提交会自动排队。
           </div>
 
-          <label class="field">
-            <span>任务内容</span>
-            <textarea id="task-input" rows="7" placeholder="视频文案，话题，发布时间，任务名/原创/不原创，视频链接，时间段。"></textarea>
-          </label>
+          <div class="task-list chat-list" id="task-list"></div>
 
-          <div class="actions">
-            <button id="start-btn" class="btn btn-primary" type="button">发送并启动</button>
-            <button id="stop-btn" class="btn btn-danger" type="button">停止并清空队列</button>
+          <div class="composer-panel">
+            <label class="field field-compact">
+              <span>任务内容</span>
+              <textarea id="task-input" rows="5" placeholder="每行一条任务：发布时间，原创/不原创，视频链接，时间段，文案或话题。"></textarea>
+            </label>
+
+            <div class="actions composer-actions">
+              <button id="start-btn" class="btn btn-primary" type="button">发送</button>
+              <button id="stop-btn" class="btn btn-danger" type="button">停止全部</button>
+            </div>
           </div>
+        </section>
 
+        <section class="card">
+          <div class="section-head">
+            <div>
+              <div class="section-kicker">排队批次</div>
+              <h3>队列概览</h3>
+            </div>
+          </div>
           <div class="user-list" id="queue-preview"></div>
         </section>
       </section>
@@ -175,7 +172,7 @@
           </div>
 
           <div class="helper-block">
-            新用户会复制当前用户的大部分设置，但视频号、抖音和登录态互相独立。语音克隆会全局复用。切换其他用户请返回登录页重新选择。
+            新用户会复制当前用户的大部分设置，但视频号、抖音和登录态互相独立。语音克隆会全局复用。切换其他用户时不会混入别人的任务记录。
           </div>
 
           <label class="field">
@@ -185,7 +182,7 @@
 
           <div class="actions dual-actions">
             <button id="rename-user-btn" class="btn btn-primary" type="button">保存当前用户名</button>
-            <button id="back-to-login-btn" class="btn btn-ghost" type="button">返回登录页切换</button>
+            <button id="back-to-login-btn" class="btn btn-ghost" type="button">返回选择用户</button>
           </div>
 
           <label class="field">
@@ -380,7 +377,6 @@
                   <select name="remoteEnabled"><option value="false">否</option><option value="true">是</option></select>
                 </label>
                 <label class="field"><span>端口</span><input name="remotePort" type="number" min="1024" max="65535" step="1" /></label>
-                <label class="field field-wide"><span>当前用户远程密码</span><input name="remotePassword" type="password" /></label>
                 <label class="field"><span>公网模式</span>
                   <select name="remotePublicMode"><option value="off">关闭</option><option value="cloudflare-quick">Cloudflare Quick Tunnel</option></select>
                 </label>

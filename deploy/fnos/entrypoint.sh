@@ -43,10 +43,6 @@ if [ "${ANTBOT_PREPARE_VOICEBOX:-0}" = "1" ]; then
   fi
 fi
 
-if [ -z "${ANTBOT_REMOTE_PASSWORD:-}" ]; then
-  echo "[entrypoint] warning: ANTBOT_REMOTE_PASSWORD is empty, remote API login will fail until password is configured."
-fi
-
 DISPLAY_ID="${XVFB_DISPLAY:-:99}"
 XVFB_RESOLUTION="${XVFB_RESOLUTION:-1920x1080x24}"
 rm -f /tmp/.X99-lock

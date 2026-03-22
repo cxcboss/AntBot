@@ -4,7 +4,7 @@ const { app } = require('electron');
 const { buildDefaultSettings, getSettingsOverridesFromEnv } = require('./config');
 
 const STORE_FILE = 'antbot-store.json';
-const STORE_SCHEMA_VERSION = 4;
+const STORE_SCHEMA_VERSION = 6;
 const DEFAULT_USER_ID = 'user-1';
 const DEFAULT_USER_NAME = '蚂蚁1';
 const DEFAULT_GEMINI_PROFILE_ID = 'default';
@@ -126,6 +126,32 @@ function buildSharedRemote(seed = {}) {
   }, seed || {});
 }
 
+function buildSharedSystem(seed = {}) {
+  return deepMerge(clone(buildDefaultSettings().system || {}), seed || {});
+}
+
+function buildUserProfileSettingsOverrides(seed = {}, geminiProfiles = buildGeminiProfiles()) {
+  const result = {};
+
+  if (seed.retry && typeof seed.retry === 'object') {
+    result.retry = clone(seed.retry);
+  }
+  if (seed.publish && typeof seed.publish === 'object') {
+    result.publish = clone(seed.publish);
+  }
+  if (seed.style && typeof seed.style === 'object') {
+    result.style = clone(seed.style);
+  }
+  if (seed.voiceClone && typeof seed.voiceClone === 'object') {
+    result.voiceClone = clone(seed.voiceClone);
+  }
+  if (typeof seed.geminiProfileId === 'string') {
+    result.geminiProfileId = resolveGeminiProfileId(seed.geminiProfileId, geminiProfiles);
+  }
+
+  return result;
+}
+
 function buildGeminiProfile(seed = {}, fallbackId = DEFAULT_GEMINI_PROFILE_ID) {
   return {
     id: normalizeGeminiProfileId(seed.id, fallbackId),
@@ -183,11 +209,13 @@ function buildUserSettings(
   seed = {},
   sharedVoiceClone = buildSharedVoiceClone(),
   sharedRemote = buildSharedRemote(),
+  sharedSystem = buildSharedSystem(),
   geminiProfiles = buildGeminiProfiles()
 ) {
   const settings = deepMerge(buildDefaultSettings(), seed || {});
   settings.voiceClone = deepMerge(clone(sharedVoiceClone), settings.voiceClone || {});
   settings.remote = deepMerge(clone(sharedRemote), settings.remote || {});
+  settings.system = deepMerge(clone(sharedSystem), settings.system || {});
   settings.remote.password = '';
   settings.geminiProfileId = resolveGeminiProfileId(settings.geminiProfileId, geminiProfiles);
   return settings;
@@ -196,12 +224,24 @@ function buildUserSettings(
 function buildUserRecord(seed = {}, options = {}) {
   const sharedVoiceClone = options.sharedVoiceClone || buildSharedVoiceClone();
   const sharedRemote = options.sharedRemote || buildSharedRemote();
+  const sharedSystem = options.sharedSystem || buildSharedSystem();
   const geminiProfiles = options.geminiProfiles || buildGeminiProfiles();
   return {
     id: normalizeUserId(seed.id, options.index || 1),
     name: sanitizeUserName(seed.name, options.defaultName || DEFAULT_USER_NAME),
     avatarId: normalizeAvatarId(seed.avatarId) || options.avatarId || AVAILABLE_AVATAR_IDS[0],
-    settings: buildUserSettings(seed.settings || {}, sharedVoiceClone, sharedRemote, geminiProfiles),
+    settings: buildUserSettings(
+      seed.settings || {},
+      sharedVoiceClone,
+      sharedRemote,
+      sharedSystem,
+      geminiProfiles
+    ),
+    profileSettingsEnabled: Boolean(seed.profileSettingsEnabled),
+    profileSettingsOverrides: buildUserProfileSettingsOverrides(
+      seed.profileSettingsOverrides || {},
+      geminiProfiles
+    ),
     history: Array.isArray(seed.history) ? seed.history.slice(0, 200) : [],
     publishedRecords: Array.isArray(seed.publishedRecords) ? seed.publishedRecords.slice(0, 500) : [],
     loginState: deepMerge(buildDefaultLoginState(), seed.loginState || {}),
@@ -214,12 +254,14 @@ function buildDefaultState() {
   const sharedVoiceClone = buildSharedVoiceClone();
   const sharedLoginState = buildSharedLoginState();
   const sharedRemote = buildSharedRemote();
+  const sharedSystem = buildSharedSystem();
   const geminiProfiles = buildGeminiProfiles([], sharedLoginState.gemini);
   return {
     schemaVersion: STORE_SCHEMA_VERSION,
     activeUserId: DEFAULT_USER_ID,
     sharedVoiceClone,
     sharedRemote,
+    sharedSystem,
     sharedLoginState,
     geminiProfiles,
     users: [
@@ -231,6 +273,7 @@ function buildDefaultState() {
         index: 1,
         sharedVoiceClone,
         sharedRemote,
+        sharedSystem,
         geminiProfiles,
         avatarId: AVAILABLE_AVATAR_IDS[0]
       })
@@ -260,6 +303,12 @@ function normalizeState(seed = {}) {
       || seed.users.find((user) => user?.settings?.remote)?.settings?.remote
       || {}
     );
+    const sharedSystem = buildSharedSystem(
+      seed.sharedSystem
+      || seed.settings?.system
+      || seed.users.find((user) => user?.settings?.system)?.settings?.system
+      || {}
+    );
     const geminiProfiles = buildGeminiProfiles(seed.geminiProfiles, sharedLoginState.gemini);
 
     const seenIds = new Set();
@@ -269,6 +318,7 @@ function normalizeState(seed = {}) {
         index: index + 1,
         sharedVoiceClone,
         sharedRemote,
+        sharedSystem,
         geminiProfiles,
         defaultName: `蚂蚁${index + 1}`,
         avatarId: pickAvailableAvatarId(avatarSeed, user?.avatarId)
@@ -291,6 +341,7 @@ function normalizeState(seed = {}) {
       activeUserId,
       sharedVoiceClone,
       sharedRemote,
+      sharedSystem,
       sharedLoginState,
       geminiProfiles,
       users
@@ -301,6 +352,7 @@ function normalizeState(seed = {}) {
   const sharedVoiceClone = buildSharedVoiceClone(legacySettings.voiceClone || {});
   const sharedLoginState = buildSharedLoginState(seed.loginState?.gemini ? { gemini: seed.loginState.gemini } : {});
   const sharedRemote = buildSharedRemote(legacySettings.remote || {});
+  const sharedSystem = buildSharedSystem(legacySettings.system || {});
   const geminiProfiles = buildGeminiProfiles(seed.geminiProfiles, sharedLoginState.gemini);
   const migratedUser = buildUserRecord({
     id: DEFAULT_USER_ID,
@@ -313,6 +365,7 @@ function normalizeState(seed = {}) {
     index: 1,
     sharedVoiceClone,
     sharedRemote,
+    sharedSystem,
     geminiProfiles,
     avatarId: AVAILABLE_AVATAR_IDS[0]
   });
@@ -322,6 +375,7 @@ function normalizeState(seed = {}) {
     activeUserId: migratedUser.id,
     sharedVoiceClone,
     sharedRemote,
+    sharedSystem,
     sharedLoginState,
     geminiProfiles,
     users: [migratedUser]
@@ -342,11 +396,13 @@ class StoreService {
     }
 
     let changed = false;
+    let loadedSchemaVersion = STORE_SCHEMA_VERSION;
 
     try {
       const raw = await fs.readFile(this.filePath, 'utf-8');
       try {
         const parsed = JSON.parse(raw);
+        loadedSchemaVersion = Number(parsed?.schemaVersion || 0) || 0;
         this.state = normalizeState(parsed);
         changed = JSON.stringify(parsed?.schemaVersion || null) !== JSON.stringify(STORE_SCHEMA_VERSION);
       } catch (parseError) {
@@ -364,11 +420,13 @@ class StoreService {
 
     this.syncSharedVoiceCloneToUsers();
     this.syncSharedRemoteToUsers();
+    this.syncSharedSystemToUsers();
     this.syncSharedLoginStateToUsers();
     changed = this.ensureStateIntegrity() || changed;
     changed = this.applyEnvOverrides() || changed;
     changed = this.migrateLegacySettings() || changed;
     changed = this.migrateSharedRemoteSettings() || changed;
+    changed = this.migrateSchemaDefaults(loadedSchemaVersion) || changed;
 
     if (changed) {
       await this.persist();
@@ -388,6 +446,7 @@ class StoreService {
 
     this.state.sharedLoginState = buildSharedLoginState(this.state.sharedLoginState || {});
     this.state.sharedRemote = buildSharedRemote(this.state.sharedRemote || {});
+    this.state.sharedSystem = buildSharedSystem(this.state.sharedSystem || {});
     this.state.geminiProfiles = buildGeminiProfiles(this.state.geminiProfiles, this.state.sharedLoginState.gemini);
 
     const seenIds = new Set();
@@ -397,6 +456,7 @@ class StoreService {
         index: index + 1,
         sharedVoiceClone: this.state.sharedVoiceClone,
         sharedRemote: this.state.sharedRemote,
+        sharedSystem: this.state.sharedSystem,
         geminiProfiles: this.state.geminiProfiles,
         defaultName: `蚂蚁${index + 1}`,
         avatarId: pickAvailableAvatarId(avatarSeed, user?.avatarId)
@@ -425,6 +485,7 @@ class StoreService {
         user.settings || {},
         this.state.sharedVoiceClone,
         this.state.sharedRemote,
+        this.state.sharedSystem,
         this.state.geminiProfiles
       );
     }
@@ -437,6 +498,20 @@ class StoreService {
         user.settings || {},
         this.state.sharedVoiceClone,
         this.state.sharedRemote,
+        this.state.sharedSystem,
+        this.state.geminiProfiles
+      );
+    }
+  }
+
+  syncSharedSystemToUsers() {
+    this.state.sharedSystem = buildSharedSystem(this.state.sharedSystem || {});
+    for (const user of this.state.users) {
+      user.settings = buildUserSettings(
+        user.settings || {},
+        this.state.sharedVoiceClone,
+        this.state.sharedRemote,
+        this.state.sharedSystem,
         this.state.geminiProfiles
       );
     }
@@ -446,7 +521,6 @@ class StoreService {
     this.state.sharedLoginState = buildSharedLoginState(this.state.sharedLoginState || {});
     for (const user of this.state.users) {
       user.loginState = deepMerge(buildDefaultLoginState(), user.loginState || {});
-      user.loginState.gemini = clone(this.state.sharedLoginState.gemini);
     }
   }
 
@@ -533,6 +607,65 @@ class StoreService {
     return changed;
   }
 
+  migrateSchemaDefaults(previousSchemaVersion) {
+    let changed = false;
+    const version = Number(previousSchemaVersion || 0);
+
+    if (version >= STORE_SCHEMA_VERSION) {
+      return false;
+    }
+
+    if (version < 5) {
+      if (this.state.sharedRemote?.enabled !== true) {
+        this.state.sharedRemote = buildSharedRemote({
+          ...this.state.sharedRemote,
+          enabled: true
+        });
+        changed = true;
+      }
+      if (this.state.sharedRemote?.publicMode !== 'cloudflare-quick') {
+        this.state.sharedRemote = buildSharedRemote({
+          ...this.state.sharedRemote,
+          publicMode: 'cloudflare-quick'
+        });
+        changed = true;
+      }
+      if (this.state.sharedSystem?.preventSleepOnTasks !== true) {
+        this.state.sharedSystem = buildSharedSystem({
+          ...this.state.sharedSystem,
+          preventSleepOnTasks: true
+        });
+        changed = true;
+      }
+      if (this.state.sharedSystem?.launchAtLogin !== true) {
+        this.state.sharedSystem = buildSharedSystem({
+          ...this.state.sharedSystem,
+          launchAtLogin: true
+        });
+        changed = true;
+      }
+      if (changed) {
+        this.syncSharedRemoteToUsers();
+        this.syncSharedSystemToUsers();
+      }
+    }
+
+    if (version < 6) {
+      for (const user of this.state.users) {
+        if (user.profileSettingsEnabled !== false) {
+          user.profileSettingsEnabled = false;
+          changed = true;
+        }
+        if (user.profileSettingsOverrides && Object.keys(user.profileSettingsOverrides).length > 0) {
+          user.profileSettingsOverrides = {};
+          changed = true;
+        }
+      }
+    }
+
+    return changed;
+  }
+
   async backupCorruptedStore(raw, parseError) {
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const backupPath = path.join(path.dirname(this.filePath), `antbot-store.corrupted-${stamp}.txt`);
@@ -564,7 +697,8 @@ class StoreService {
 
   buildUserSummary(user) {
     const loginState = user.loginState || {};
-    const geminiProfileId = resolveGeminiProfileId(user.settings?.geminiProfileId, this.state.geminiProfiles);
+    const effectiveSettings = this.cloneSettingsForUser(user);
+    const geminiProfileId = resolveGeminiProfileId(effectiveSettings.geminiProfileId, this.state.geminiProfiles);
     const geminiProfile = this.state.geminiProfiles.find((item) => item.id === geminiProfileId)
       || this.state.geminiProfiles[0]
       || buildGeminiProfile();
@@ -577,6 +711,7 @@ class StoreService {
       geminiReady: Boolean(loginState.gemini?.loggedIn),
       geminiProfileId,
       geminiProfileName: geminiProfile.name,
+      profileSettingsEnabled: Boolean(user.profileSettingsEnabled),
       remoteEnabled: Boolean(this.state.sharedRemote?.enabled),
       remotePasswordConfigured: false,
       historyCount: Array.isArray(user.history) ? user.history.length : 0,
@@ -586,10 +721,30 @@ class StoreService {
   }
 
   cloneSettingsForUser(user) {
+    const globalSettings = this.cloneGlobalSettingsForUser(user);
+    const settings = clone(globalSettings);
+    if (user.profileSettingsEnabled) {
+      deepMerge(settings, clone(user.profileSettingsOverrides || {}));
+    }
+    settings.__userId = user.id;
+    settings.__userName = user.name;
+    settings.__avatarId = normalizeAvatarId(user.avatarId) || AVAILABLE_AVATAR_IDS[0];
+    settings.__geminiProfileId = settings.geminiProfileId;
+    settings.__geminiProfileName = this.state.geminiProfiles.find((item) => item.id === settings.geminiProfileId)?.name
+      || DEFAULT_GEMINI_PROFILE_NAME;
+    settings.__profileSettingsEnabled = Boolean(user.profileSettingsEnabled);
+    settings.__profileSettingsOverrides = clone(user.profileSettingsOverrides || {});
+    settings.__globalSettings = globalSettings;
+    return settings;
+  }
+
+  cloneGlobalSettingsForUser(user) {
     const settings = clone(user.settings || buildDefaultSettings());
     settings.voiceClone = clone(this.state.sharedVoiceClone || buildSharedVoiceClone());
     settings.remote = clone(this.state.sharedRemote || buildSharedRemote());
+    settings.system = clone(this.state.sharedSystem || buildSharedSystem());
     settings.geminiProfileId = resolveGeminiProfileId(settings.geminiProfileId, this.state.geminiProfiles);
+    settings.remote.password = '';
     settings.__userId = user.id;
     settings.__userName = user.name;
     settings.__avatarId = normalizeAvatarId(user.avatarId) || AVAILABLE_AVATAR_IDS[0];
@@ -654,12 +809,21 @@ class StoreService {
     return this.cloneSettingsForUser(user);
   }
 
+  async getGlobalSettingsForUser(userId) {
+    await this.load();
+    const user = this.getUserRecordById(userId);
+    if (!user) {
+      throw new Error('用户不存在。');
+    }
+    return this.cloneGlobalSettingsForUser(user);
+  }
+
   async updateSettings(partialSettings) {
     await this.load();
     return this.updateSettingsForUser(this.getActiveUserRecord().id, partialSettings);
   }
 
-  async updateSettingsForUser(userId, partialSettings) {
+  async updateSettingsForUser(userId, partialSettings, options = {}) {
     await this.load();
 
     const user = this.getUserRecordById(userId);
@@ -667,15 +831,42 @@ class StoreService {
       throw new Error('用户不存在。');
     }
     const nextPartial = clone(partialSettings || {});
+    const scope = options.scope === 'user-profile' ? 'user-profile' : 'global';
+    const profileSettingsEnabled = typeof options.profileSettingsEnabled === 'boolean'
+      ? options.profileSettingsEnabled
+      : null;
     const voiceClonePatch = nextPartial.voiceClone && typeof nextPartial.voiceClone === 'object'
       ? nextPartial.voiceClone
       : null;
     const remotePatch = nextPartial.remote && typeof nextPartial.remote === 'object'
       ? nextPartial.remote
       : null;
+    const systemPatch = nextPartial.system && typeof nextPartial.system === 'object'
+      ? nextPartial.system
+      : null;
     const geminiProfileId = typeof nextPartial.geminiProfileId === 'string'
       ? resolveGeminiProfileId(nextPartial.geminiProfileId, this.state.geminiProfiles)
       : '';
+
+    if (scope === 'user-profile') {
+      const profilePatch = buildUserProfileSettingsOverrides(nextPartial, this.state.geminiProfiles);
+      if (profileSettingsEnabled !== null) {
+        user.profileSettingsEnabled = profileSettingsEnabled;
+        if (!profileSettingsEnabled) {
+          user.profileSettingsOverrides = {};
+        }
+      }
+      if (Object.keys(profilePatch).length > 0) {
+        user.profileSettingsOverrides = deepMerge(
+          clone(user.profileSettingsOverrides || {}),
+          profilePatch
+        );
+        user.profileSettingsEnabled = profileSettingsEnabled ?? true;
+      }
+      this.touchUser(user);
+      await this.persist();
+      return this.cloneSettingsForUser(user);
+    }
 
     if (voiceClonePatch) {
       delete nextPartial.voiceClone;
@@ -694,14 +885,22 @@ class StoreService {
       this.state.sharedRemote.password = '';
     }
 
+    if (systemPatch) {
+      delete nextPartial.system;
+      this.state.sharedSystem = deepMerge(this.state.sharedSystem, systemPatch);
+    }
+
     if (geminiProfileId) {
       nextPartial.geminiProfileId = geminiProfileId;
     }
 
-    user.settings = deepMerge(user.settings, nextPartial);
-    this.touchUser(user);
+    for (const item of this.state.users) {
+      item.settings = deepMerge(item.settings, clone(nextPartial));
+      this.touchUser(item);
+    }
     this.syncSharedVoiceCloneToUsers();
     this.syncSharedRemoteToUsers();
+    this.syncSharedSystemToUsers();
     await this.persist();
     return this.cloneSettingsForUser(user);
   }
@@ -788,18 +987,19 @@ class StoreService {
     };
 
     if (service === 'gemini') {
-      this.state.sharedLoginState.gemini = nextState;
-      const geminiProfileId = resolveGeminiProfileId(user.settings?.geminiProfileId, this.state.geminiProfiles);
+      if (!user.loginState[service]) {
+        user.loginState[service] = { loggedIn: false, checkedAt: '' };
+      }
+      user.loginState[service] = nextState;
+      const effectiveSettings = this.cloneSettingsForUser(user);
+      const geminiProfileId = resolveGeminiProfileId(effectiveSettings.geminiProfileId, this.state.geminiProfiles);
       const geminiProfile = this.state.geminiProfiles.find((item) => item.id === geminiProfileId);
       if (geminiProfile) {
         geminiProfile.loggedIn = nextState.loggedIn;
         geminiProfile.checkedAt = nextState.checkedAt;
         geminiProfile.updatedAt = nowIso();
       }
-      this.syncSharedLoginStateToUsers();
-      for (const item of this.state.users) {
-        this.touchUser(item);
-      }
+      this.touchUser(user);
       await this.persist();
       return clone(user.loginState);
     }
@@ -891,14 +1091,16 @@ class StoreService {
         ...clone(source.settings),
         geminiProfileId: DEFAULT_GEMINI_PROFILE_ID
       },
+      profileSettingsEnabled: false,
+      profileSettingsOverrides: {},
       loginState: {
-        ...buildDefaultLoginState(),
-        gemini: clone(this.state.sharedLoginState.gemini)
+        ...buildDefaultLoginState()
       }
     }, {
       index: this.state.users.length + 1,
       sharedVoiceClone: this.state.sharedVoiceClone,
       sharedRemote: this.state.sharedRemote,
+      sharedSystem: this.state.sharedSystem,
       geminiProfiles: this.state.geminiProfiles
     });
 

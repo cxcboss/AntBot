@@ -17,6 +17,11 @@ ThemeData buildAppTheme(Brightness brightness) {
     brightness: brightness,
     surface: isDark ? const Color(0xFF171C22) : Colors.white,
   );
+  final inputFill = isDark ? const Color(0xFF191F27) : Colors.white;
+  final borderColor = isDark ? const Color(0xFF313844) : const Color(0xFFD6DCE5);
+  final hintColor = isDark ? const Color(0xFFB9C3D0) : const Color(0xFF6B7688);
+  final titleColor = isDark ? const Color(0xFFF5F7FA) : const Color(0xFF171C27);
+  final dialogColor = isDark ? const Color(0xFF1A2129) : Colors.white;
 
   return ThemeData(
     colorScheme: scheme,
@@ -31,6 +36,67 @@ ThemeData buildAppTheme(Brightness brightness) {
               ? const Color(0xFFF5F7FA)
               : const Color(0xFF171C27),
         ),
+    cardColor: dialogColor,
+    dividerColor: borderColor,
+    dialogTheme: DialogThemeData(
+      backgroundColor: dialogColor,
+      surfaceTintColor: Colors.transparent,
+      titleTextStyle: TextStyle(
+        fontSize: 18,
+        fontWeight: FontWeight.w700,
+        color: titleColor,
+      ),
+      contentTextStyle: TextStyle(
+        fontSize: 13,
+        height: 1.55,
+        color: hintColor,
+      ),
+    ),
+    popupMenuTheme: PopupMenuThemeData(
+      color: dialogColor,
+      surfaceTintColor: Colors.transparent,
+      textStyle: TextStyle(
+        fontSize: 13,
+        color: titleColor,
+      ),
+    ),
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      fillColor: inputFill,
+      labelStyle: TextStyle(color: hintColor),
+      hintStyle: TextStyle(color: hintColor),
+      floatingLabelStyle: TextStyle(color: scheme.primary),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: borderColor),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: borderColor),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: scheme.primary),
+      ),
+    ),
+    dropdownMenuTheme: DropdownMenuThemeData(
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: inputFill,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: borderColor),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: borderColor),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: scheme.primary),
+        ),
+      ),
+    ),
     useMaterial3: true,
   );
 }
@@ -155,6 +221,17 @@ class AntbotController extends ChangeNotifier {
     }
     return settingsCache[selectedUserId] ?? <String, dynamic>{};
   }
+
+  JsonMap get globalSettings {
+    final embedded = mapOf(visibleSettings['__globalSettings']);
+    return embedded.isNotEmpty ? embedded : visibleSettings;
+  }
+
+  bool get userProfileSettingsEnabled => readBool(
+    visibleSettings,
+    const <String>['__profileSettingsEnabled'],
+    false,
+  );
 
   JsonMap get activeUser {
     final scoped = mapOf(visibleState['activeUser']);
@@ -360,19 +437,22 @@ class AntbotController extends ChangeNotifier {
         listOfMaps(progress['queue']).isNotEmpty;
   }
 
-  String _pushOptimisticMessage(
+  String _pushOptimisticMessages(
     String userId,
     String inputText, {
     required bool waiting,
   }) {
+    final createdAt = DateTime.now().toIso8601String();
+    final list = optimisticMessages.putIfAbsent(userId, () => <JsonMap>[]);
     final localId =
         'local-${DateTime.now().microsecondsSinceEpoch}-${optimisticSequence += 1}';
-    final list = optimisticMessages.putIfAbsent(userId, () => <JsonMap>[]);
     list.add(<String, dynamic>{
       'localId': localId,
       'runId': '',
-      'inputText': inputText,
-      'createdAt': DateTime.now().toIso8601String(),
+      'taskIds': <String>[],
+      'taskCount': splitTaskLinesForUi(inputText).length,
+      'inputText': inputText.trim(),
+      'createdAt': createdAt,
       'status': waiting ? 'queued' : 'sending',
       'message': waiting ? '等待当前任务完成后执行' : '正在提交任务',
     });
@@ -487,6 +567,45 @@ class AntbotController extends ChangeNotifier {
     });
   }
 
+  Future<void> deleteCurrentUser() async {
+    final userId = selectedUserId;
+    if (userId.isEmpty) {
+      return;
+    }
+
+    await _guardAction(() async {
+      final payload = await _request(
+        '/api/users/delete',
+        method: 'POST',
+        userId: userId,
+        body: <String, dynamic>{'userId': userId},
+      );
+      optimisticMessages.remove(userId);
+      stateCache.remove(userId);
+      settingsCache.remove(userId);
+      taskDrafts.remove(userId);
+
+      final nextUsers = listOfMaps(payload['users']);
+      if (nextUsers.isNotEmpty) {
+        users = nextUsers;
+      }
+
+      final nextUserId = stringOf(mapOf(payload['activeUser'])['id']);
+      if (nextUserId.isNotEmpty) {
+        selectedUserId = nextUserId;
+        await _refreshWorkspace(
+          nextUserId,
+          switchUserOnBackend: false,
+          forceSettings: true,
+          silent: true,
+        );
+        _restoreDraft(nextUserId);
+      }
+      runtimeHint = '当前用户已删除。';
+      notifyListeners();
+    });
+  }
+
   Future<void> startTasks() async {
     final userId = selectedUserId;
     final input = composerController.text.trim();
@@ -495,7 +614,7 @@ class AntbotController extends ChangeNotifier {
     }
 
     final waiting = _userHasLiveWork(userId);
-    final localId = _pushOptimisticMessage(userId, input, waiting: waiting);
+    final localIds = _pushOptimisticMessages(userId, input, waiting: waiting);
     taskDrafts[userId] = '';
     composerController.clear();
     runtimeHint = waiting ? '任务已提交，等待执行。' : '任务发送中...';
@@ -510,8 +629,11 @@ class AntbotController extends ChangeNotifier {
           body: <String, dynamic>{'inputText': input},
         );
         final queued = boolOf(payload['queued']);
-        _patchOptimisticMessage(userId, localId, <String, dynamic>{
+        final taskIds = listOfStrings(payload['taskIds']);
+        _patchOptimisticMessage(userId, localIds, <String, dynamic>{
           'runId': stringOf(payload['runId']),
+          'taskIds': taskIds,
+          'taskCount': taskIds.isNotEmpty ? taskIds.length : splitTaskLinesForUi(input).length,
           'status': queued ? 'queued' : 'running',
           'message': queued ? '任务已进入等待队列' : '任务已开始执行',
         });
@@ -525,7 +647,7 @@ class AntbotController extends ChangeNotifier {
         notifyListeners();
       });
     } catch (error) {
-      _patchOptimisticMessage(userId, localId, <String, dynamic>{
+      _patchOptimisticMessage(userId, localIds, <String, dynamic>{
         'status': 'failed',
         'message': _describeError(error),
       });
@@ -564,7 +686,35 @@ class AntbotController extends ChangeNotifier {
     });
   }
 
-  Future<void> patchSettings(JsonMap patch) async {
+  Future<void> stopSingleTask(String taskId) async {
+    final userId = selectedUserId;
+    if (userId.isEmpty || taskId.trim().isEmpty) {
+      return;
+    }
+
+    await _guardAction(() async {
+      await _request(
+        '/api/task/stop-one',
+        method: 'POST',
+        userId: userId,
+        body: <String, dynamic>{'taskId': taskId.trim()},
+      );
+      runtimeHint = '已取消选中的任务。';
+      await _refreshWorkspace(
+        userId,
+        switchUserOnBackend: false,
+        forceSettings: false,
+        silent: true,
+      );
+      notifyListeners();
+    });
+  }
+
+  Future<void> patchSettings(
+    JsonMap patch, {
+    String scope = 'user-profile',
+    bool? profileSettingsEnabled,
+  }) async {
     final userId = selectedUserId;
     if (userId.isEmpty) {
       return;
@@ -574,11 +724,18 @@ class AntbotController extends ChangeNotifier {
     notifyListeners();
 
     try {
+      final body = <String, dynamic>{
+        'settings': patch,
+        'scope': scope,
+      };
+      if (profileSettingsEnabled != null) {
+        body['profileSettingsEnabled'] = profileSettingsEnabled;
+      }
       final payload = await _request(
         '/api/settings',
         method: 'POST',
         userId: userId,
-        body: <String, dynamic>{'settings': patch},
+        body: body,
       );
       settingsCache[userId] = mapOf(payload['settings']);
       lastVisibleSettings = settingsCache[userId]!;
@@ -597,13 +754,36 @@ class AntbotController extends ChangeNotifier {
     }
   }
 
+  Future<void> patchGlobalSettings(JsonMap patch) async {
+    await patchSettings(patch, scope: 'global');
+  }
+
+  Future<void> patchUserSettings(
+    JsonMap patch, {
+    bool enableOverrides = true,
+  }) async {
+    await patchSettings(
+      patch,
+      scope: 'user-profile',
+      profileSettingsEnabled: enableOverrides,
+    );
+  }
+
+  Future<void> setUserProfileSettingsEnabled(bool enabled) async {
+    await patchSettings(
+      const <String, dynamic>{},
+      scope: 'user-profile',
+      profileSettingsEnabled: enabled,
+    );
+  }
+
   Future<void> adjustVoiceSpeed(int direction) async {
     final current = readDouble(visibleSettings, const [
       'style',
       'voiceSpeed',
     ], 1.1);
     final next = (current + direction * 0.1).clamp(0.5, 2.0);
-    await patchSettings(<String, dynamic>{
+    await patchUserSettings(<String, dynamic>{
       'style': <String, dynamic>{
         'voiceSpeed': double.parse(next.toStringAsFixed(1)),
       },
@@ -616,14 +796,14 @@ class AntbotController extends ChangeNotifier {
       'failedTaskRetries',
     ], 0);
     final next = (current + direction).clamp(0, 20);
-    await patchSettings(<String, dynamic>{
+    await patchUserSettings(<String, dynamic>{
       'retry': <String, dynamic>{'failedTaskRetries': next},
     });
   }
 
   Future<void> togglePublish() async {
     final next = !readBool(visibleSettings, const ['publish', 'enabled'], true);
-    await patchSettings(<String, dynamic>{
+    await patchUserSettings(<String, dynamic>{
       'publish': <String, dynamic>{'enabled': next},
     });
   }
@@ -634,7 +814,7 @@ class AntbotController extends ChangeNotifier {
       'voiceoverEnabled',
     ], true);
     final next = !current;
-    await patchSettings(<String, dynamic>{
+    await patchUserSettings(<String, dynamic>{
       'style': <String, dynamic>{
         'voiceoverEnabled': next,
         'subtitleEnabled': next
@@ -659,7 +839,7 @@ class AntbotController extends ChangeNotifier {
       'style',
       'subtitleEnabled',
     ], true);
-    await patchSettings(<String, dynamic>{
+    await patchUserSettings(<String, dynamic>{
       'style': <String, dynamic>{'subtitleEnabled': next},
     });
   }
@@ -670,7 +850,7 @@ class AntbotController extends ChangeNotifier {
       'enabled',
     ], false);
     final next = !current;
-    await patchSettings(<String, dynamic>{
+    await patchGlobalSettings(<String, dynamic>{
       'remote': <String, dynamic>{
         'enabled': next,
         'publicMode': next ? 'cloudflare-quick' : 'off',
@@ -679,19 +859,19 @@ class AntbotController extends ChangeNotifier {
   }
 
   Future<void> changeSubtitleColor(Color color) async {
-    await patchSettings(<String, dynamic>{
+    await patchUserSettings(<String, dynamic>{
       'style': <String, dynamic>{'subtitleTextColor': colorToHex(color)},
     });
   }
 
   Future<void> changeStrokeColor(Color color) async {
-    await patchSettings(<String, dynamic>{
+    await patchUserSettings(<String, dynamic>{
       'style': <String, dynamic>{'subtitleStrokeColor': colorToHex(color)},
     });
   }
 
   Future<void> updateVoiceId(String voiceId) async {
-    await patchSettings(<String, dynamic>{
+    await patchUserSettings(<String, dynamic>{
       'voiceClone': <String, dynamic>{'voiceId': voiceId.trim()},
     });
   }
@@ -1127,12 +1307,14 @@ class DashboardView extends StatelessWidget {
 
 enum WorkspaceAction {
   renameUser,
+  openUserSettings,
   openSettings,
   openRemote,
   openVoiceClone,
   openLogs,
   refreshNow,
   stopTasks,
+  deleteUser,
 }
 
 class Sidebar extends StatelessWidget {
@@ -1144,7 +1326,7 @@ class Sidebar extends StatelessWidget {
   Widget build(BuildContext context) {
     final app = controller.appInfo;
     final geminiReady = loginReady(controller.loginState, 'gemini');
-    final remoteEnabled = readBool(controller.visibleSettings, const <String>[
+    final remoteEnabled = readBool(controller.globalSettings, const <String>[
       'remote',
       'enabled',
     ], false);
@@ -1287,7 +1469,7 @@ class Sidebar extends StatelessWidget {
                 Row(
                   children: <Widget>[
                     SidebarFooterButton(
-                      label: '全部设置',
+                      label: '全局设置',
                       active: false,
                       onTap: () => openSettingsDialog(context, controller),
                     ),
@@ -1326,6 +1508,8 @@ class UserTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final avatarId = readInt(user, const <String>['avatarId'], 1).clamp(1, 5);
     final liveCount = readInt(user, const <String>['liveTaskCount'], 0);
+    final waitingCount = readInt(user, const <String>['waitingTaskCount'], 0);
+    final runningCount = readInt(user, const <String>['runningTaskCount'], 0);
     final accent = Theme.of(context).colorScheme.primary;
     final activeBackground = active
         ? (isDarkMode(context)
@@ -1416,13 +1600,19 @@ class UserTile extends StatelessWidget {
                         Text(
                           loading
                               ? '切换中...'
-                              : (liveCount > 0 ? '当前：$liveCount' : '无任务'),
+                              : buildLiveTaskSummary(
+                                  waitingCount: waitingCount,
+                                  runningCount: runningCount,
+                                  liveCount: liveCount,
+                                ),
                           style: TextStyle(fontSize: 10, color: infoTextColor),
                         ),
                       ],
                     ),
                     const SizedBox(height: 4),
                     Container(
+                      width: double.infinity,
+                      alignment: Alignment.centerLeft,
                       padding: const EdgeInsets.symmetric(
                         horizontal: 6,
                         vertical: 2,
@@ -1545,7 +1735,12 @@ class TaskWorkspace extends StatelessWidget {
                 ),
               ),
             ),
-          Expanded(child: TaskFeed(controller: controller)),
+          Expanded(
+            child: TaskFeed(
+              key: ValueKey<String>('task-feed-${controller.selectedUserId}'),
+              controller: controller,
+            ),
+          ),
           ComposerBar(controller: controller),
         ],
       ),
@@ -1553,14 +1748,68 @@ class TaskWorkspace extends StatelessWidget {
   }
 }
 
-class TaskFeed extends StatelessWidget {
+class TaskFeed extends StatefulWidget {
   const TaskFeed({super.key, required this.controller});
 
   final AntbotController controller;
 
   @override
+  State<TaskFeed> createState() => _TaskFeedState();
+}
+
+class _TaskFeedState extends State<TaskFeed> {
+  final Set<String> expandedBatchIds = <String>{};
+  final ScrollController scrollController = ScrollController(
+    keepScrollOffset: false,
+  );
+  String lastScrollSignature = '';
+
+  bool _isExpanded(JsonMap entry) {
+    final batchId = stringOf(entry['id']);
+    return batchId.isNotEmpty && expandedBatchIds.contains(batchId);
+  }
+
+  void _toggleBatch(String batchId) {
+    if (batchId.isEmpty) {
+      return;
+    }
+    setState(() {
+      if (!expandedBatchIds.add(batchId)) {
+        expandedBatchIds.remove(batchId);
+      }
+    });
+  }
+
+  void _scheduleJumpToLatest(String signature) {
+    if (lastScrollSignature == signature) {
+      return;
+    }
+    lastScrollSignature = signature;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !scrollController.hasClients) {
+        return;
+      }
+      final target = scrollController.position.maxScrollExtent;
+      if (!target.isFinite) {
+        return;
+      }
+      scrollController.jumpTo(target);
+    });
+  }
+
+  @override
+  void dispose() {
+    scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final entries = buildConversationEntries(controller);
+    final entries = buildConversationEntries(widget.controller);
+    final newestEntryId = entries.isNotEmpty ? stringOf(entries.last['id']) : '';
+    _scheduleJumpToLatest(
+      '${widget.controller.selectedUserId}:${entries.length}:$newestEntryId',
+    );
 
     if (entries.isEmpty) {
       return Center(
@@ -1578,78 +1827,129 @@ class TaskFeed extends StatelessWidget {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final maxBubbleWidth = constraints.maxWidth > 620
-            ? 428.0
-            : constraints.maxWidth * 0.72;
-        final children = entries.reversed
-            .map((entry) {
-              final kind = stringOf(entry['kind']);
-              if (kind == 'sent') {
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: Align(
-                    alignment: Alignment.centerRight,
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: <Widget>[
-                        Padding(
-                          padding: const EdgeInsets.only(right: 8, bottom: 6),
-                          child: Text(
-                            formatBubbleTime(stringOf(entry['time'])),
-                            style: bubbleTimeTextStyle(context),
-                          ),
-                        ),
-                        ConstrainedBox(
-                          constraints: BoxConstraints(maxWidth: maxBubbleWidth),
-                          child: TaskBubble(
-                            text: stringOf(entry['text']),
-                            selectable: true,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              }
+        final maxBubbleWidth = constraints.maxWidth > 720
+            ? 520.0
+            : constraints.maxWidth * 0.78;
+        final children = entries.map((entry) {
+            try {
+              final batchId = stringOf(entry['id']);
+              final timeText = formatBubbleTime(stringOf(entry['time']));
+              final tasks = listOfMaps(entry['tasks']);
+              final expanded = _isExpanded(entry);
+              final taskCount = readInt(
+                entry,
+                const <String>['taskCount'],
+                tasks.length,
+              );
 
               return Padding(
                 padding: const EdgeInsets.only(bottom: 12),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: <Widget>[
-                      ConstrainedBox(
-                        constraints: BoxConstraints(maxWidth: maxBubbleWidth),
-                        child: TaskStatusStrip(
-                          title: stringOf(entry['title']),
-                          detail: stringOf(entry['detail']),
-                          status: stringOf(entry['status']),
-                          progress: readDouble(entry, const <String>[
-                            'progress',
-                          ], 0).clamp(0, 1),
-                        ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    if (stringOf(entry['inputText']).isNotEmpty)
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: <Widget>[
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: ConstrainedBox(
+                              constraints: BoxConstraints(
+                                maxWidth: maxBubbleWidth,
+                              ),
+                              child: TaskBubble(
+                                text: sanitizeUiText(
+                                  stringOf(entry['inputText']),
+                                ),
+                                selectable: true,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: Text(
+                              timeText,
+                              style: bubbleTimeTextStyle(context),
+                            ),
+                          ),
+                        ],
                       ),
-                      Padding(
-                        padding: const EdgeInsets.only(left: 8, bottom: 6),
-                        child: Text(
-                          formatBubbleTime(stringOf(entry['time'])),
-                          style: bubbleTimeTextStyle(context),
-                        ),
+                    const SizedBox(height: 10),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          ConstrainedBox(
+                            constraints: BoxConstraints(
+                              maxWidth: maxBubbleWidth,
+                            ),
+                            child: TaskBatchStrip(
+                              batchId: batchId,
+                              taskCount: taskCount,
+                              status: stringOf(entry['status']),
+                              summary: sanitizeUiText(
+                                stringOf(entry['summary']),
+                              ),
+                              preview: sanitizeUiText(stringOf(entry['preview'])),
+                              tasks: tasks,
+                              expanded: expanded,
+                              onToggle: batchId.isNotEmpty && tasks.isNotEmpty
+                                  ? () => _toggleBatch(batchId)
+                                  : null,
+                              onCancelTask: (taskId) =>
+                                  widget.controller.stopSingleTask(taskId),
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Padding(
+                            padding: const EdgeInsets.only(left: 2),
+                            child: Text(
+                              timeText,
+                              style: bubbleTimeTextStyle(context),
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
+                  ],
+                ),
+              );
+            } catch (error) {
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF4F4),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: const Color(0xFFF1D0D1)),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                    child: Text(
+                      '任务记录渲染失败：${sanitizeUiText(error.toString())}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF8F3D40),
+                        height: 1.5,
+                      ),
+                    ),
                   ),
                 ),
               );
-            })
-            .toList(growable: false);
-
-        return ListView(
-          reverse: true,
+            }
+        }).toList(growable: false);
+        return SingleChildScrollView(
+          key: ValueKey<String>(
+            'conversation-list-${widget.controller.selectedUserId}',
+          ),
+          controller: scrollController,
           padding: const EdgeInsets.fromLTRB(18, 18, 18, 12),
-          children: children,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: children,
+          ),
         );
       },
     );
@@ -1797,7 +2097,7 @@ class ComposerBar extends StatelessWidget {
                         ),
                         optionLabel: (value) => value.toStringAsFixed(1),
                         onSelected: (value) =>
-                            controller.patchSettings(<String, dynamic>{
+                            controller.patchUserSettings(<String, dynamic>{
                               'style': <String, dynamic>{'voiceSpeed': value},
                             }),
                       ),
@@ -1827,7 +2127,7 @@ class ComposerBar extends StatelessWidget {
                         options: List<int>.generate(11, (index) => index),
                         optionLabel: (value) => '$value',
                         onSelected: (value) =>
-                            controller.patchSettings(<String, dynamic>{
+                            controller.patchUserSettings(<String, dynamic>{
                               'retry': <String, dynamic>{
                                 'failedTaskRetries': value,
                               },
@@ -1928,8 +2228,12 @@ class HeaderMenuButton extends StatelessWidget {
           child: Text('重命名用户'),
         ),
         PopupMenuItem<WorkspaceAction>(
+          value: WorkspaceAction.openUserSettings,
+          child: Text('用户设置'),
+        ),
+        PopupMenuItem<WorkspaceAction>(
           value: WorkspaceAction.openSettings,
-          child: Text('全部设置'),
+          child: Text('全局设置'),
         ),
         PopupMenuItem<WorkspaceAction>(
           value: WorkspaceAction.openRemote,
@@ -1950,6 +2254,10 @@ class HeaderMenuButton extends StatelessWidget {
         PopupMenuItem<WorkspaceAction>(
           value: WorkspaceAction.stopTasks,
           child: Text('停止任务'),
+        ),
+        PopupMenuItem<WorkspaceAction>(
+          value: WorkspaceAction.deleteUser,
+          child: Text('删除用户'),
         ),
       ],
       child: Container(
@@ -1998,7 +2306,7 @@ class TaskBubble extends StatelessWidget {
         color: const Color(0xFF45AB6A),
         borderRadius: BorderRadius.circular(12),
       ),
-      child: selectable ? SelectionArea(child: content) : content,
+      child: content,
     );
   }
 }
@@ -2029,12 +2337,14 @@ class TaskStatusStrip extends StatelessWidget {
     required this.detail,
     required this.status,
     required this.progress,
+    this.onCancel,
   });
 
   final String title;
   final String detail;
   final String status;
   final double progress;
+  final Future<void> Function()? onCancel;
 
   @override
   Widget build(BuildContext context) {
@@ -2042,6 +2352,16 @@ class TaskStatusStrip extends StatelessWidget {
     final showProgress = status == 'running' && progress > 0;
     final showStoppedIcon = status == 'stopped';
     final showFailedIcon = status == 'failed' || status == 'partial_failed';
+    final detailLineCount = RegExp(r'\r?\n').allMatches(detail).length + 1;
+    final useScrollableDetail = detail.length > 240 || detailLineCount > 6;
+    final detailText = Text(
+      detail,
+      style: TextStyle(
+        fontSize: 12,
+        color: secondaryTextColor(context),
+        height: 1.45,
+      ),
+    );
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -2076,6 +2396,33 @@ class TaskStatusStrip extends StatelessWidget {
                     ),
                   ),
                 ),
+                if (onCancel != null) ...<Widget>[
+                  const SizedBox(width: 8),
+                  InkWell(
+                    onTap: () {
+                      onCancel?.call();
+                    },
+                    borderRadius: BorderRadius.circular(999),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(color: theme.border),
+                      ),
+                      child: Text(
+                        '取消',
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: secondaryTextColor(context),
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
                 if (showFailedIcon || showStoppedIcon) ...<Widget>[
                   const SizedBox(width: 8),
                   _SvgAssetIcon(
@@ -2101,16 +2448,24 @@ class TaskStatusStrip extends StatelessWidget {
             ],
             if (detail.isNotEmpty) ...<Widget>[
               const SizedBox(height: 4),
-              SelectionArea(
-                child: Text(
-                  detail,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: secondaryTextColor(context),
-                    height: 1.45,
+              if (useScrollableDetail)
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 168),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: isDarkMode(context)
+                          ? const Color(0x22182129)
+                          : const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                      child: detailText,
+                    ),
                   ),
-                ),
-              ),
+                )
+              else
+                detailText,
             ],
             if (showProgress) ...<Widget>[
               const SizedBox(height: 10),
@@ -2126,6 +2481,154 @@ class TaskStatusStrip extends StatelessWidget {
                   ),
                 ),
               ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class TaskBatchStrip extends StatelessWidget {
+  const TaskBatchStrip({
+    super.key,
+    required this.batchId,
+    required this.taskCount,
+    required this.status,
+    required this.summary,
+    required this.preview,
+    required this.tasks,
+    required this.expanded,
+    this.onToggle,
+    required this.onCancelTask,
+  });
+
+  final String batchId;
+  final int taskCount;
+  final String status;
+  final String summary;
+  final String preview;
+  final List<JsonMap> tasks;
+  final bool expanded;
+  final VoidCallback? onToggle;
+  final Future<void> Function(String taskId) onCancelTask;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = taskStatusTheme(context, status);
+    final canToggle = onToggle != null && tasks.isNotEmpty;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: theme.background,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: theme.border),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(13, 11, 13, 11),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            InkWell(
+              onTap: onToggle,
+              borderRadius: BorderRadius.circular(12),
+              child: Padding(
+                padding: EdgeInsets.zero,
+                child: Row(
+                  children: <Widget>[
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: theme.badge,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        taskStatusLabel(status),
+                        style: const TextStyle(
+                          fontSize: 10,
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: theme.badge.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        '$taskCount 个任务',
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: primaryTextColor(context),
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    const Spacer(),
+                    if (canToggle)
+                      Text(
+                        expanded ? '收起' : '展开',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: secondaryTextColor(context),
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              summary,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: primaryTextColor(context),
+                height: 1.35,
+              ),
+            ),
+            if (preview.isNotEmpty) ...<Widget>[
+              const SizedBox(height: 4),
+              Text(
+                preview,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: secondaryTextColor(context),
+                  height: 1.45,
+                ),
+              ),
+            ],
+            if (expanded && tasks.isNotEmpty) ...<Widget>[
+              const SizedBox(height: 10),
+              ...tasks.map((task) {
+                final taskId = stringOf(task['taskId']);
+                final cancellable =
+                    boolOf(task['cancellable']) && taskId.isNotEmpty;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: TaskStatusStrip(
+                    title: stringOf(task['title']),
+                    detail: stringOf(task['detail']),
+                    status: stringOf(task['status']),
+                    progress: readDouble(
+                      task,
+                      const <String>['progress'],
+                      0,
+                    ).clamp(0, 1),
+                    onCancel: cancellable ? () => onCancelTask(taskId) : null,
+                  ),
+                );
+              }),
             ],
           ],
         ),
@@ -2955,7 +3458,10 @@ Future<Color?> openColorPaletteDialog(
             children: <Widget>[
               Text(
                 '当前颜色 ${colorToHex(currentColor)}',
-                style: const TextStyle(fontSize: 12, color: Color(0xFF6B7688)),
+                style: TextStyle(
+                  fontSize: 12,
+                  color: secondaryTextColor(context),
+                ),
               ),
               const SizedBox(height: 14),
               Wrap(
@@ -2977,7 +3483,7 @@ Future<Color?> openColorPaletteDialog(
                             border: Border.all(
                               color: selected
                                   ? const Color(0xFF2978FF)
-                                  : const Color(0xFFD5DCE7),
+                                  : subtleBorderColor(context),
                               width: selected ? 2 : 1,
                             ),
                           ),
@@ -3489,15 +3995,20 @@ class SettingsSectionCard extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFFF7F9FC),
+        color: inputSurfaceColor(context),
         borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: subtleBorderColor(context)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Text(
             title,
-            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: primaryTextColor(context),
+            ),
           ),
           const SizedBox(height: 14),
           child,
@@ -3532,7 +4043,7 @@ class SettingsTextField extends StatelessWidget {
       children: <Widget>[
         Text(
           label,
-          style: const TextStyle(fontSize: 12, color: Color(0xFF495366)),
+          style: TextStyle(fontSize: 12, color: secondaryTextColor(context)),
         ),
         const SizedBox(height: 6),
         TextField(
@@ -3543,11 +4054,23 @@ class SettingsTextField extends StatelessWidget {
           decoration: InputDecoration(
             hintText: hint,
             isDense: true,
+            filled: true,
+            fillColor: inputSurfaceColor(context),
             contentPadding: const EdgeInsets.symmetric(
               horizontal: 12,
               vertical: 12,
             ),
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: subtleBorderColor(context)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(
+                color: Theme.of(context).colorScheme.primary,
+              ),
+            ),
           ),
         ),
       ],
@@ -3573,6 +4096,9 @@ Future<void> handleWorkspaceAction(
       }
       await controller.renameCurrentUser(nextName);
       return;
+    case WorkspaceAction.openUserSettings:
+      await openUserSettingsDialog(context, controller);
+      return;
     case WorkspaceAction.openSettings:
       await openSettingsDialog(context, controller);
       return;
@@ -3591,6 +4117,411 @@ Future<void> handleWorkspaceAction(
     case WorkspaceAction.stopTasks:
       await controller.stopTasks();
       return;
+    case WorkspaceAction.deleteUser:
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) {
+          return AlertDialog(
+            title: const Text('删除用户'),
+            content: Text(
+              '确认删除“${stringOf(controller.activeUser['name']).isNotEmpty ? stringOf(controller.activeUser['name']) : '当前用户'}”？历史记录和登录状态会一起删除。',
+            ),
+            actions: <Widget>[
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                child: const Text('删除'),
+              ),
+            ],
+          );
+        },
+      );
+      if (confirmed == true) {
+        await controller.deleteCurrentUser();
+      }
+      return;
+  }
+}
+
+Future<void> openUserSettingsDialog(
+  BuildContext context,
+  AntbotController controller,
+) async {
+  final settings = controller.visibleSettings;
+  final inherited = controller.globalSettings;
+  final retryController = TextEditingController(
+    text:
+        '${readInt(settings, const <String>['retry', 'failedTaskRetries'], 0)}',
+  );
+  final voiceSpeedController = TextEditingController(
+    text: readDouble(settings, const <String>[
+      'style',
+      'voiceSpeed',
+    ], 1.1).toStringAsFixed(1),
+  );
+  final subtitlePositionController = TextEditingController(
+    text:
+        '${readInt(settings, const <String>['style', 'subtitlePositionPercent'], 12)}',
+  );
+  final subtitleColorController = TextEditingController(
+    text: readString(settings, const <String>[
+      'style',
+      'subtitleTextColor',
+    ], '#FFA100'),
+  );
+  final strokeColorController = TextEditingController(
+    text: readString(settings, const <String>[
+      'style',
+      'subtitleStrokeColor',
+    ], '#000000'),
+  );
+  final voiceIdController = TextEditingController(
+    text: readString(settings, const <String>['voiceClone', 'voiceId'], ''),
+  );
+
+  bool useCustomSettings = controller.userProfileSettingsEnabled;
+  bool publishEnabled = readBool(settings, const <String>[
+    'publish',
+    'enabled',
+  ], true);
+  bool voiceoverEnabled = readBool(settings, const <String>[
+    'style',
+    'voiceoverEnabled',
+  ], true);
+  bool subtitleEnabled = readBool(settings, const <String>[
+    'style',
+    'subtitleEnabled',
+  ], true);
+  String language = readString(settings, const <String>[
+    'voiceClone',
+    'language',
+  ], 'zh');
+  final geminiProfileName = readString(
+    settings,
+    const <String>['__geminiProfileName'],
+    '默认 Gemini',
+  );
+
+  try {
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (dialogContext, setState) {
+            final inheritedRetry = readInt(
+              inherited,
+              const <String>['retry', 'failedTaskRetries'],
+              0,
+            );
+            final inheritedVoiceSpeed = readDouble(
+              inherited,
+              const <String>['style', 'voiceSpeed'],
+              1.1,
+            ).toStringAsFixed(1);
+            final inheritedVoiceId = readString(
+              inherited,
+              const <String>['voiceClone', 'voiceId'],
+              '',
+            );
+            return AlertDialog(
+              title: const Text('用户专属设置'),
+              content: SizedBox(
+                width: 760,
+                child: SingleChildScrollView(
+                  child: Column(
+                    children: <Widget>[
+                      SettingsSectionCard(
+                        title: '继承方式',
+                        child: Column(
+                          children: <Widget>[
+                            SwitchListTile.adaptive(
+                              contentPadding: EdgeInsets.zero,
+                              title: const Text('使用专属设置'),
+                              subtitle: Text(
+                                useCustomSettings
+                                    ? '当前用户正在覆盖全局默认值。'
+                                    : '当前默认继承全局设置。',
+                              ),
+                              value: useCustomSettings,
+                              onChanged: (value) {
+                                setState(() {
+                                  useCustomSettings = value;
+                                });
+                              },
+                            ),
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                '当前全局默认：重试 $inheritedRetry 次，语速 $inheritedVoiceSpeed，音色 ${inheritedVoiceId.isEmpty ? '未配置' : inheritedVoiceId}',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: secondaryTextColor(context),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      SettingsSectionCard(
+                        title: '专属 Gemini',
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Row(
+                              children: <Widget>[
+                                Expanded(
+                                  child: Text(
+                                    loginReady(controller.loginState, 'gemini')
+                                        ? '当前用户的 Gemini 已登录'
+                                        : '当前用户的 Gemini 未登录',
+                                    style: const TextStyle(fontSize: 13),
+                                  ),
+                                ),
+                                TextButton(
+                                  onPressed: () async {
+                                    Navigator.of(dialogContext).pop();
+                                    await openLoginPreviewDialog(
+                                      context,
+                                      controller,
+                                      'gemini',
+                                    );
+                                  },
+                                  child: Text(
+                                    loginReady(controller.loginState, 'gemini')
+                                        ? '重新登录'
+                                        : '登录 Gemini',
+                                  ),
+                                ),
+                              ],
+                            ),
+                            Text(
+                              'Gemini 登录只作用于当前用户。当前会话：$geminiProfileName',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: secondaryTextColor(context),
+                                height: 1.5,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      Opacity(
+                        opacity: useCustomSettings ? 1 : 0.58,
+                        child: IgnorePointer(
+                          ignoring: !useCustomSettings,
+                          child: SettingsSectionCard(
+                            title: '专属参数',
+                            child: Column(
+                              children: <Widget>[
+                                Wrap(
+                                  spacing: 14,
+                                  runSpacing: 14,
+                                  children: <Widget>[
+                                    SizedBox(
+                                      width: 180,
+                                      child: SettingsTextField(
+                                        label: '失败重试次数',
+                                        controller: retryController,
+                                        keyboardType: TextInputType.number,
+                                      ),
+                                    ),
+                                    SizedBox(
+                                      width: 160,
+                                      child: SettingsTextField(
+                                        label: '语速',
+                                        controller: voiceSpeedController,
+                                        keyboardType:
+                                            const TextInputType.numberWithOptions(
+                                              decimal: true,
+                                            ),
+                                      ),
+                                    ),
+                                    SizedBox(
+                                      width: 180,
+                                      child: SettingsTextField(
+                                        label: '字幕位置 (%)',
+                                        controller: subtitlePositionController,
+                                        keyboardType: TextInputType.number,
+                                      ),
+                                    ),
+                                    SizedBox(
+                                      width: 220,
+                                      child: SettingsTextField(
+                                        label: '字幕颜色',
+                                        controller: subtitleColorController,
+                                      ),
+                                    ),
+                                    SizedBox(
+                                      width: 220,
+                                      child: SettingsTextField(
+                                        label: '字幕描边颜色',
+                                        controller: strokeColorController,
+                                      ),
+                                    ),
+                                    SizedBox(
+                                      width: 220,
+                                      child: SettingsTextField(
+                                        label: '音色 ID',
+                                        controller: voiceIdController,
+                                      ),
+                                    ),
+                                    SizedBox(
+                                      width: 200,
+                                      child: DropdownButtonFormField<String>(
+                                        initialValue: language,
+                                        decoration: InputDecoration(
+                                          labelText: '旁白语言',
+                                          isDense: true,
+                                          border: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(
+                                              12,
+                                            ),
+                                          ),
+                                        ),
+                                        items:
+                                            const <DropdownMenuItem<String>>[
+                                              DropdownMenuItem<String>(
+                                                value: 'zh',
+                                                child: Text('中文'),
+                                              ),
+                                              DropdownMenuItem<String>(
+                                                value: 'en',
+                                                child: Text('English'),
+                                              ),
+                                            ],
+                                        onChanged: (value) {
+                                          setState(() {
+                                            language = value ?? 'zh';
+                                          });
+                                        },
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 10),
+                                SwitchListTile.adaptive(
+                                  contentPadding: EdgeInsets.zero,
+                                  title: const Text('自动发布'),
+                                  value: publishEnabled,
+                                  onChanged: (value) {
+                                    setState(() {
+                                      publishEnabled = value;
+                                    });
+                                  },
+                                ),
+                                SwitchListTile.adaptive(
+                                  contentPadding: EdgeInsets.zero,
+                                  title: const Text('自动旁白'),
+                                  subtitle: const Text('关闭后不生成旁白，也会同时关闭字幕。'),
+                                  value: voiceoverEnabled,
+                                  onChanged: (value) {
+                                    setState(() {
+                                      voiceoverEnabled = value;
+                                      if (!voiceoverEnabled) {
+                                        subtitleEnabled = false;
+                                      }
+                                    });
+                                  },
+                                ),
+                                SwitchListTile.adaptive(
+                                  contentPadding: EdgeInsets.zero,
+                                  title: const Text('字幕'),
+                                  value: subtitleEnabled,
+                                  onChanged: voiceoverEnabled
+                                      ? (value) {
+                                          setState(() {
+                                            subtitleEnabled = value;
+                                          });
+                                        }
+                                      : null,
+                                ),
+                                Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: TextButton(
+                                    onPressed: () async {
+                                      Navigator.of(dialogContext).pop();
+                                      await openVoiceCloneDialog(
+                                        context,
+                                        controller,
+                                      );
+                                    },
+                                    child: const Text('打开语音克隆'),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              actions: <Widget>[
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('取消'),
+                ),
+                FilledButton(
+                  onPressed: () async {
+                    if (!useCustomSettings) {
+                      await controller.setUserProfileSettingsEnabled(false);
+                    } else {
+                      await controller.patchUserSettings(<String, dynamic>{
+                        'retry': <String, dynamic>{
+                          'failedTaskRetries':
+                              int.tryParse(retryController.text.trim()) ?? 0,
+                        },
+                        'publish': <String, dynamic>{
+                          'enabled': publishEnabled,
+                        },
+                        'style': <String, dynamic>{
+                          'voiceSpeed':
+                              double.tryParse(voiceSpeedController.text.trim()) ??
+                              1.1,
+                          'subtitlePositionPercent':
+                              int.tryParse(
+                                subtitlePositionController.text.trim(),
+                              ) ??
+                              12,
+                          'subtitleTextColor': subtitleColorController.text
+                              .trim(),
+                          'subtitleStrokeColor': strokeColorController.text
+                              .trim(),
+                          'voiceoverEnabled': voiceoverEnabled,
+                          'subtitleEnabled':
+                              voiceoverEnabled && subtitleEnabled,
+                        },
+                        'voiceClone': <String, dynamic>{
+                          'voiceId': voiceIdController.text.trim(),
+                          'language': language,
+                        },
+                      });
+                    }
+                    if (dialogContext.mounted) {
+                      Navigator.of(dialogContext).pop();
+                    }
+                  },
+                  child: Text(useCustomSettings ? '保存专属设置' : '恢复全局默认'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  } finally {
+    retryController.dispose();
+    voiceSpeedController.dispose();
+    subtitlePositionController.dispose();
+    subtitleColorController.dispose();
+    strokeColorController.dispose();
+    voiceIdController.dispose();
   }
 }
 
@@ -3598,7 +4529,7 @@ Future<void> openSettingsDialog(
   BuildContext context,
   AntbotController controller,
 ) async {
-  final settings = controller.visibleSettings;
+  final settings = controller.globalSettings;
   final tempDirController = TextEditingController(
     text: readString(settings, const <String>['paths', 'tempDir'], ''),
   );
@@ -3681,9 +4612,6 @@ Future<void> openSettingsDialog(
   final remotePortController = TextEditingController(
     text: '${readInt(settings, const <String>['remote', 'port'], 17888)}',
   );
-  final remotePasswordController = TextEditingController(
-    text: readString(settings, const <String>['remote', 'password'], ''),
-  );
 
   final disposables = <TextEditingController>[
     tempDirController,
@@ -3707,7 +4635,6 @@ Future<void> openSettingsDialog(
     voiceIdController,
     modelPathController,
     remotePortController,
-    remotePasswordController,
   ];
 
   bool publishEnabled = readBool(settings, const <String>[
@@ -3734,6 +4661,14 @@ Future<void> openSettingsDialog(
     'remote',
     'publicMode',
   ], 'off');
+  bool preventSleepOnTasks = readBool(settings, const <String>[
+    'system',
+    'preventSleepOnTasks',
+  ], true);
+  bool launchAtLogin = readBool(settings, const <String>[
+    'system',
+    'launchAtLogin',
+  ], true);
 
   try {
     await showDialog<void>(
@@ -3744,7 +4679,7 @@ Future<void> openSettingsDialog(
             return AlertDialog(
               title: Row(
                 children: <Widget>[
-                  const Expanded(child: Text('全部设置')),
+                  const Expanded(child: Text('全局设置')),
                   TextButton(
                     onPressed: () async {
                       Navigator.of(dialogContext).pop();
@@ -4011,7 +4946,7 @@ Future<void> openSettingsDialog(
                               SwitchListTile.adaptive(
                                 contentPadding: EdgeInsets.zero,
                                 title: const Text('开启远程访问'),
-                                subtitle: const Text('开启后会一并启用内网地址和公网访问。'),
+                                subtitle: const Text('开启后会生成局域网地址，推荐填到飞牛中转 app 里给手机访问。'),
                                 value: remoteEnabled,
                                 onChanged: (value) {
                                   setState(() {
@@ -4036,14 +4971,6 @@ Future<void> openSettingsDialog(
                                     ),
                                   ),
                                   SizedBox(
-                                    width: 320,
-                                    child: SettingsTextField(
-                                      label: '当前用户远程密码',
-                                      controller: remotePasswordController,
-                                      obscureText: true,
-                                    ),
-                                  ),
-                                  SizedBox(
                                     width: 250,
                                     child: DropdownButtonFormField<String>(
                                       initialValue: remotePublicMode,
@@ -4064,7 +4991,7 @@ Future<void> openSettingsDialog(
                                         DropdownMenuItem<String>(
                                           value: 'cloudflare-quick',
                                           child: Text(
-                                            'Cloudflare Quick Tunnel',
+                                            'Cloudflare Quick Tunnel（可选）',
                                           ),
                                         ),
                                       ],
@@ -4076,6 +5003,36 @@ Future<void> openSettingsDialog(
                                     ),
                                   ),
                                 ],
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        SettingsSectionCard(
+                          title: '系统行为',
+                          child: Column(
+                            children: <Widget>[
+                              SwitchListTile.adaptive(
+                                contentPadding: EdgeInsets.zero,
+                                title: const Text('任务执行时防止系统休眠'),
+                                subtitle: const Text('默认开启，有任务执行时保持系统唤醒。'),
+                                value: preventSleepOnTasks,
+                                onChanged: (value) {
+                                  setState(() {
+                                    preventSleepOnTasks = value;
+                                  });
+                                },
+                              ),
+                              SwitchListTile.adaptive(
+                                contentPadding: EdgeInsets.zero,
+                                title: const Text('开机自动启动应用'),
+                                subtitle: const Text('默认开启，登录 macOS 后自动打开搬运蚁。'),
+                                value: launchAtLogin,
+                                onChanged: (value) {
+                                  setState(() {
+                                    launchAtLogin = value;
+                                  });
+                                },
                               ),
                             ],
                           ),
@@ -4151,16 +5108,19 @@ Future<void> openSettingsDialog(
                         'port':
                             int.tryParse(remotePortController.text.trim()) ??
                             17888,
-                        'password': remotePasswordController.text.trim(),
                         'publicMode': remoteEnabled ? remotePublicMode : 'off',
                       },
+                      'system': <String, dynamic>{
+                        'preventSleepOnTasks': preventSleepOnTasks,
+                        'launchAtLogin': launchAtLogin,
+                      },
                     };
-                    await controller.patchSettings(patch);
+                    await controller.patchGlobalSettings(patch);
                     if (dialogContext.mounted) {
                       Navigator.of(dialogContext).pop();
                     }
                   },
-                  child: const Text('保存设置'),
+                  child: const Text('保存全局设置'),
                 ),
               ],
             );
@@ -4185,9 +5145,6 @@ Future<void> openRemoteDialog(
   final publicInfo = mapOf(server['public']);
   final portController = TextEditingController(
     text: '${readInt(settings, const <String>['remote', 'port'], 17888)}',
-  );
-  final passwordController = TextEditingController(
-    text: readString(settings, const <String>['remote', 'password'], ''),
   );
   bool remoteEnabled = readBool(settings, const <String>[
     'remote',
@@ -4214,13 +5171,13 @@ Future<void> openRemoteDialog(
                   children: <Widget>[
                     Text(
                       boolOf(server['online'])
-                          ? '本地服务在线'
+                          ? '本地服务在线，可供飞牛中转 app 代理'
                           : (stringOf(server['lastError']).isNotEmpty
                                 ? stringOf(server['lastError'])
                                 : '当前未开启'),
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 13,
-                        color: Color(0xFF495366),
+                        color: secondaryTextColor(context),
                       ),
                     ),
                     const SizedBox(height: 14),
@@ -4228,12 +5185,6 @@ Future<void> openRemoteDialog(
                       label: '端口',
                       controller: portController,
                       keyboardType: TextInputType.number,
-                    ),
-                    const SizedBox(height: 14),
-                    SettingsTextField(
-                      label: '当前用户远程密码',
-                      controller: passwordController,
-                      obscureText: true,
                     ),
                     const SizedBox(height: 14),
                     DropdownButtonFormField<String>(
@@ -4252,7 +5203,7 @@ Future<void> openRemoteDialog(
                         ),
                         DropdownMenuItem<String>(
                           value: 'cloudflare-quick',
-                          child: Text('Cloudflare Quick Tunnel'),
+                          child: Text('Cloudflare Quick Tunnel（可选）'),
                         ),
                       ],
                       onChanged: (value) {
@@ -4263,7 +5214,7 @@ Future<void> openRemoteDialog(
                     ),
                     SwitchListTile.adaptive(
                       contentPadding: EdgeInsets.zero,
-                      title: const Text('开启公网 + 内网访问'),
+                      title: const Text('开启远程访问'),
                       value: remoteEnabled,
                       onChanged: (value) {
                         setState(() {
@@ -4336,12 +5287,11 @@ Future<void> openRemoteDialog(
                 ),
                 FilledButton(
                   onPressed: () async {
-                    await controller.patchSettings(<String, dynamic>{
+                    await controller.patchGlobalSettings(<String, dynamic>{
                       'remote': <String, dynamic>{
                         'enabled': remoteEnabled,
                         'port':
                             int.tryParse(portController.text.trim()) ?? 17888,
-                        'password': passwordController.text.trim(),
                         'publicMode': remoteEnabled ? publicMode : 'off',
                       },
                     });
@@ -4359,7 +5309,6 @@ Future<void> openRemoteDialog(
     );
   } finally {
     portController.dispose();
-    passwordController.dispose();
   }
 }
 
@@ -4529,9 +5478,9 @@ Future<void> openVoiceCloneDialog(
                         const SizedBox(height: 8),
                         Text(
                           '$message${running ? ' ($percent%)' : ''}',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 12,
-                            color: Color(0xFF495366),
+                            color: secondaryTextColor(context),
                             height: 1.5,
                           ),
                         ),
@@ -4602,10 +5551,10 @@ Future<void> openLogsDialog(
           width: 780,
           height: 420,
           child: controller.logs.isEmpty
-              ? const Center(
+              ? Center(
                   child: Text(
                     '暂无日志。',
-                    style: TextStyle(color: Color(0xFF6B7688)),
+                    style: TextStyle(color: secondaryTextColor(context)),
                   ),
                 )
               : ListView.separated(
@@ -4695,9 +5644,9 @@ Future<void> openLoginPreviewDialog(
               if (controller.loginPreviewUrl.isNotEmpty) ...<Widget>[
                 Text(
                   controller.loginPreviewUrl,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
-                    color: Color(0xFF6B7688),
+                    color: secondaryTextColor(context),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -4928,46 +5877,134 @@ class TaskStatusVisualTheme {
 }
 
 List<JsonMap> buildConversationEntries(AntbotController controller) {
-  final runs = <String, JsonMap>{};
+  final entries = <JsonMap>[];
+  final historyRunIds = <String>{};
 
-  void mergeRun(String key, JsonMap patch) {
-    final current = runs[key] ?? <String, dynamic>{'key': key, 'progress': 0.0};
-    final next = <String, dynamic>{...current};
-
-    for (final entry in patch.entries) {
-      final value = entry.value;
-      if (value == null) {
-        continue;
-      }
-      if (value is String) {
-        if (value.isEmpty) {
-          continue;
-        }
-        next[entry.key] = value;
-        continue;
-      }
-      next[entry.key] = value;
+  final history = controller.history.toList(growable: false)
+    ..sort(
+      (left, right) => entryTimestampMs(
+        firstNonEmptyString(<String>[
+          stringOf(left['submittedAt']),
+          stringOf(left['startedAt']),
+          stringOf(left['endedAt']),
+        ]),
+      ).compareTo(
+        entryTimestampMs(
+          firstNonEmptyString(<String>[
+            stringOf(right['submittedAt']),
+            stringOf(right['startedAt']),
+            stringOf(right['endedAt']),
+          ]),
+        ),
+      ),
+    );
+  for (final run in history) {
+    final runId = stringOf(run['id']);
+    if (runId.isNotEmpty) {
+      historyRunIds.add(runId);
     }
-
-    final sentAt = stringOf(patch['sentAt']);
-    if (sentAt.isNotEmpty) {
-      final existing = stringOf(current['sentAt']);
-      if (existing.isEmpty ||
-          entryTimestampMs(sentAt) < entryTimestampMs(existing)) {
-        next['sentAt'] = sentAt;
-      }
+    final entry = buildHistoryConversationBatch(run);
+    if (shouldDisplayConversationEntry(entry)) {
+      entries.add(entry);
     }
+  }
 
-    final statusAt = stringOf(patch['statusAt']);
-    if (statusAt.isNotEmpty) {
-      final existing = stringOf(current['statusAt']);
-      if (existing.isEmpty ||
-          entryTimestampMs(statusAt) >= entryTimestampMs(existing)) {
-        next['statusAt'] = statusAt;
-      }
+  final queuedBatchLookup = <String, JsonMap>{};
+  final queuedBatches = controller.queueBatches.toList(growable: false)
+    ..sort(
+      (left, right) => entryTimestampMs(
+        firstNonEmptyString(<String>[
+          stringOf(left['enqueuedAt']),
+          stringOf(left['submittedAt']),
+        ]),
+      ).compareTo(
+        entryTimestampMs(
+          firstNonEmptyString(<String>[
+            stringOf(right['enqueuedAt']),
+            stringOf(right['submittedAt']),
+          ]),
+        ),
+      ),
+    );
+  for (final batch in queuedBatches) {
+    final runId = stringOf(batch['runId']);
+    if (runId.isEmpty || historyRunIds.contains(runId)) {
+      continue;
     }
+    queuedBatchLookup[runId] = batch;
+  }
 
-    runs[key] = next;
+  final liveGroups = <String, JsonMap>{};
+  final liveTasks = <JsonMap>[...controller.queuedTasks, ...controller.runningTasks]
+    ..sort(
+      (left, right) => entryTimestampMs(
+        firstNonEmptyString(<String>[
+          stringOf(left['submittedAt']),
+          stringOf(left['enqueuedAt']),
+          stringOf(left['updatedAt']),
+        ]),
+      ).compareTo(
+        entryTimestampMs(
+          firstNonEmptyString(<String>[
+            stringOf(right['submittedAt']),
+            stringOf(right['enqueuedAt']),
+            stringOf(right['updatedAt']),
+          ]),
+        ),
+      ),
+    );
+  for (final task in liveTasks) {
+    final runId = firstNonEmptyString(<String>[
+      stringOf(task['batchRunId']),
+      stringOf(task['runId']),
+      stringOf(task['id']),
+    ]);
+    if (runId.isEmpty || historyRunIds.contains(runId)) {
+      continue;
+    }
+    final queuedBatch = queuedBatchLookup[runId] ?? <String, dynamic>{};
+    final current = liveGroups[runId] ??
+        <String, dynamic>{
+          'id': runId,
+          'time': firstNonEmptyString(<String>[
+            stringOf(queuedBatch['enqueuedAt']),
+            stringOf(task['submittedAt']),
+            stringOf(task['enqueuedAt']),
+            stringOf(task['updatedAt']),
+          ]),
+          'inputText': firstNonEmptyString(<String>[
+            stringOf(task['inputText']),
+            stringOf(queuedBatch['inputText']),
+          ]),
+          'tasks': <JsonMap>[],
+        };
+    final nextTasks = listOfMaps(current['tasks']).toList(growable: true)
+      ..add(task);
+    current['tasks'] = nextTasks;
+    if (stringOf(current['inputText']).isEmpty) {
+      current['inputText'] = stringOf(task['inputText']);
+    }
+    liveGroups[runId] = current;
+  }
+  final liveRunIds = liveGroups.keys.toSet();
+  for (final group in liveGroups.values) {
+    final entry = buildLiveConversationBatch(group);
+    if (shouldDisplayConversationEntry(entry)) {
+      entries.add(entry);
+    }
+  }
+
+  for (final batch in queuedBatches) {
+    final runId = stringOf(batch['runId']);
+    if (runId.isEmpty ||
+        historyRunIds.contains(runId) ||
+        liveRunIds.contains(runId)) {
+      continue;
+    }
+    final entry = buildQueuedConversationBatch(batch);
+    if (shouldDisplayConversationEntry(entry)) {
+      entries.add(entry);
+    }
   }
 
   final optimistic = controller.optimisticChatMessages.toList(growable: false)
@@ -4976,315 +6013,409 @@ List<JsonMap> buildConversationEntries(AntbotController controller) {
         stringOf(left['createdAt']),
       ).compareTo(entryTimestampMs(stringOf(right['createdAt']))),
     );
-  for (final item in optimistic) {
+  for (var index = 0; index < optimistic.length; index += 1) {
+    final item = optimistic[index];
     final runId = stringOf(item['runId']);
-    final localId = stringOf(item['localId']);
-    mergeRun(
-      conversationRunKey(runId: runId, localId: localId),
-      buildOptimisticConversationRun(item),
-    );
+    if (runId.isNotEmpty &&
+        (historyRunIds.contains(runId) || liveRunIds.contains(runId))) {
+      continue;
+    }
+    final entry = buildOptimisticConversationBatch(item, index);
+    if (shouldDisplayConversationEntry(entry)) {
+      entries.add(entry);
+    }
   }
 
-  final queueBatches = controller.queueBatches.toList(growable: false)
-    ..sort(
-      (left, right) => entryTimestampMs(
-        stringOf(left['enqueuedAt']),
-      ).compareTo(entryTimestampMs(stringOf(right['enqueuedAt']))),
-    );
-  for (final batch in queueBatches) {
-    final runId = stringOf(batch['runId']);
-    mergeRun(
-      conversationRunKey(runId: runId, localId: runId),
-      buildQueuedConversationRun(batch),
-    );
-  }
-
-  final groupedLiveRuns = <String, List<JsonMap>>{};
-  for (final task in <JsonMap>[
-    ...controller.runningTasks,
-    ...controller.queuedTasks,
-  ]) {
-    final key = conversationRunKey(
-      runId: stringOf(task['batchRunId']),
-      localId: stringOf(task['id']),
-    );
-    groupedLiveRuns.putIfAbsent(key, () => <JsonMap>[]).add(task);
-  }
-  final liveRuns = groupedLiveRuns.entries.toList(growable: false)
-    ..sort(
-      (left, right) => entryTimestampMs(
-        stringOf(left.value.first['updatedAt']),
-      ).compareTo(entryTimestampMs(stringOf(right.value.first['updatedAt']))),
-    );
-  for (final entry in liveRuns) {
-    mergeRun(entry.key, buildLiveConversationRun(entry.value));
-  }
-
-  final history = controller.history.reversed.toList(growable: false);
-  for (final run in history) {
-    final runId = stringOf(run['id']);
-    mergeRun(
-      conversationRunKey(runId: runId, localId: runId),
-      buildHistoryConversationRun(run),
-    );
-  }
-
-  final entries = <JsonMap>[];
-  final ordered = runs.values.toList(growable: false)
-    ..sort((left, right) {
-      final leftTime = entryTimestampMs(stringOf(left['sentAt']));
-      final rightTime = entryTimestampMs(stringOf(right['sentAt']));
+  entries.sort((left, right) {
+    final leftTime = entryTimestampMs(stringOf(left['time']));
+    final rightTime = entryTimestampMs(stringOf(right['time']));
+    if (leftTime != rightTime) {
       return leftTime.compareTo(rightTime);
-    });
-  for (final run in ordered) {
-    final sentAt = stringOf(run['sentAt']).isNotEmpty
-        ? stringOf(run['sentAt'])
-        : stringOf(run['statusAt']);
-    final statusAt = stringOf(run['statusAt']).isNotEmpty
-        ? stringOf(run['statusAt'])
-        : sentAt;
-    final inputText = stringOf(run['inputText']);
-    if (inputText.isNotEmpty) {
-      entries.add(<String, dynamic>{
-        'kind': 'sent',
-        'time': sentAt,
-        'text': inputText,
-      });
     }
-    final title = stringOf(run['statusTitle']);
-    final detail = stringOf(run['statusDetail']);
-    if (title.isNotEmpty || detail.isNotEmpty) {
-      entries.add(<String, dynamic>{
-        'kind': 'status',
-        'time': statusAt,
-        'title': title,
-        'detail': detail,
-        'status': stringOf(run['status']),
-        'progress': run['progress'] ?? 0.0,
-      });
-    }
-  }
-
+    return readInt(left, const <String>['sequence'], 0).compareTo(
+      readInt(right, const <String>['sequence'], 0),
+    );
+  });
   return entries;
 }
 
-String conversationRunKey({required String runId, required String localId}) {
-  if (runId.isNotEmpty) {
-    return 'run:$runId';
-  }
-  return 'local:$localId';
+bool shouldDisplayConversationEntry(JsonMap entry) {
+  return stringOf(entry['inputText']).isNotEmpty ||
+      listOfMaps(entry['tasks']).isNotEmpty;
 }
 
-JsonMap buildOptimisticConversationRun(JsonMap item) {
+JsonMap buildOptimisticConversationBatch(JsonMap item, int sequence) {
   final status = stringOf(item['status']).isNotEmpty
       ? stringOf(item['status'])
       : 'sending';
-  final detail = stringOf(item['message']);
-  return <String, dynamic>{
-    'runId': stringOf(item['runId']),
-    'inputText': stringOf(item['inputText']),
-    'sentAt': stringOf(item['createdAt']),
-    'statusAt': stringOf(item['createdAt']),
-    'status': status,
-    'statusTitle': switch (status) {
-      'failed' => '发送失败',
-      'queued' => '等待执行',
-      'running' => '任务已开始',
-      _ => '正在发送',
-    },
-    'statusDetail': detail,
-    'progress': switch (status) {
-      'running' => 0.18,
-      'sending' => 0.08,
-      _ => 0.0,
-    },
-  };
+  final lines = splitTaskLinesForUi(stringOf(item['inputText']));
+  final taskIds = listOfStrings(item['taskIds']);
+  final tasks = List<JsonMap>.generate(lines.length, (index) {
+    return <String, dynamic>{
+      'taskId': index < taskIds.length ? taskIds[index] : '',
+      'title': lines.length == 1 ? '待发送任务' : '任务${index + 1}',
+      'detail': lines[index],
+      'status': status,
+      'progress': switch (status) {
+        'running' => 0.18,
+        'sending' => 0.08,
+        _ => 0.0,
+      },
+      'cancellable': false,
+    };
+  });
+  return buildConversationBatchEntry(
+    id: firstNonEmptyString(<String>[
+      stringOf(item['runId']),
+      stringOf(item['localId']),
+    ]),
+    time: stringOf(item['createdAt']),
+    inputText: stringOf(item['inputText']),
+    tasks: tasks,
+    fallbackStatus: status,
+    sequence: sequence,
+  );
 }
 
-JsonMap buildQueuedConversationRun(JsonMap batch) {
-  final taskCount = readInt(batch, const <String>['taskCount'], 0);
-  final detail = taskCount > 0 ? '已提交 $taskCount 条任务，等待当前队列完成后执行' : '任务已进入等待队列';
-  return <String, dynamic>{
-    'runId': stringOf(batch['runId']),
-    'inputText': stringOf(batch['inputText']).isNotEmpty
-        ? stringOf(batch['inputText'])
-        : buildQueueBubbleText(batch),
-    'sentAt': stringOf(batch['enqueuedAt']),
-    'statusAt': stringOf(batch['enqueuedAt']),
-    'status': 'queued',
-    'statusTitle': '等待执行',
-    'statusDetail': detail,
-    'progress': 0.0,
-  };
-}
-
-JsonMap buildLiveConversationRun(List<JsonMap> tasks) {
-  final ordered = tasks.toList(growable: false)
+JsonMap buildLiveConversationBatch(JsonMap group) {
+  final rawTasks = listOfMaps(group['tasks'])
     ..sort(
-      (left, right) =>
-          entryTimestampMs(
-            stringOf(left['updatedAt']).isNotEmpty
-                ? stringOf(left['updatedAt'])
-                : stringOf(left['enqueuedAt']),
-          ).compareTo(
-            entryTimestampMs(
-              stringOf(right['updatedAt']).isNotEmpty
-                  ? stringOf(right['updatedAt'])
-                  : stringOf(right['enqueuedAt']),
-            ),
-          ),
+      (left, right) => readInt(
+        left,
+        const <String>['index'],
+        readInt(left, const <String>['queueIndex'], 0),
+      ).compareTo(
+        readInt(
+          right,
+          const <String>['index'],
+          readInt(right, const <String>['queueIndex'], 0),
+        ),
+      ),
     );
-  final activeTask = ordered.firstWhere(
-    (task) => isTaskActiveStatus(stringOf(task['status'])),
-    orElse: () => ordered.isNotEmpty ? ordered.last : <String, dynamic>{},
+  final tasks = <JsonMap>[
+    for (var index = 0; index < rawTasks.length; index += 1)
+      buildConversationTaskCard(rawTasks[index], sequence: index + 1, live: true),
+  ];
+  final inputText = stringOf(group['inputText']).isNotEmpty
+      ? stringOf(group['inputText'])
+      : rawTasks
+            .map((task) => resolveConversationInputText(task))
+            .where((line) => line.trim().isNotEmpty)
+            .join('\n');
+  return buildConversationBatchEntry(
+    id: stringOf(group['id']),
+    time: stringOf(group['time']),
+    inputText: inputText,
+    tasks: tasks,
+    sequence: 100,
   );
-  final overallStatus = summarizeLiveRunStatus(ordered);
-  final total = ordered.length;
-  final completed = ordered
-      .where((task) => stringOf(task['status']) == 'completed')
-      .length;
-  final failed = ordered.where((task) {
-    final status = stringOf(task['status']);
-    return status == 'failed' || status == 'partial_failed';
-  }).length;
-  final stopped = ordered
-      .where((task) => stringOf(task['status']) == 'stopped')
-      .length;
-  final progress = ordered.fold<double>(
-    0,
-    (current, task) =>
-        mathMax(current, readDouble(task, const <String>['progress'], 0) / 100),
-  );
-  final detailMessage = firstNonEmptyString(<String>[
-    stringOf(activeTask['message']),
-    stringOf(ordered.isNotEmpty ? ordered.last['message'] : ''),
-  ]);
-
-  return <String, dynamic>{
-    'runId': stringOf(activeTask['batchRunId']),
-    'inputText': firstNonEmptyString(
-      ordered.map((task) => stringOf(task['inputText'])),
-    ),
-    'sentAt': firstNonEmptyString(
-      ordered.map(
-        (task) => stringOf(task['updatedAt']).isNotEmpty
-            ? stringOf(task['updatedAt'])
-            : stringOf(task['enqueuedAt']),
-      ),
-    ),
-    'statusAt': firstNonEmptyString(
-      ordered.reversed.map(
-        (task) => stringOf(task['updatedAt']).isNotEmpty
-            ? stringOf(task['updatedAt'])
-            : stringOf(task['enqueuedAt']),
-      ),
-    ),
-    'status': overallStatus,
-    'statusTitle': switch (overallStatus) {
-      'running' =>
-        stringOf(activeTask['step']).isNotEmpty
-            ? stringOf(activeTask['step'])
-            : '正在执行',
-      'failed' => '执行失败',
-      'stopped' => '任务已取消',
-      'completed' => '任务完成',
-      _ => '等待执行',
-    },
-    'statusDetail': switch (overallStatus) {
-      'running' => [
-        if (total > 0) '已完成 $completed/$total 条',
-        if (detailMessage.isNotEmpty) detailMessage,
-      ].join('，'),
-      'failed' =>
-        detailMessage.isNotEmpty
-            ? detailMessage
-            : (failed > 0 ? '共有 $failed 条任务失败' : '任务执行失败'),
-      'stopped' =>
-        detailMessage.isNotEmpty
-            ? detailMessage
-            : (stopped > 0 ? '共有 $stopped 条任务已取消' : '任务已停止'),
-      'completed' => total > 1 ? '共 $total 条任务已完成' : '任务已完成',
-      _ =>
-        detailMessage.isNotEmpty
-            ? detailMessage
-            : (total > 1 ? '共 $total 条任务等待执行' : '任务排队中'),
-    },
-    'progress': progress,
-  };
 }
 
-JsonMap buildHistoryConversationRun(JsonMap run) {
-  final items = listOfMaps(run['items']);
-  final status = stringOf(run['status']).isNotEmpty
-      ? stringOf(run['status'])
-      : 'completed';
-  final completed = items
-      .where((item) => stringOf(item['status']) == 'completed')
-      .length;
-  final failed = items.where((item) {
-    final current = stringOf(item['status']);
-    return current == 'failed' || current == 'partial_failed';
-  }).length;
-  final stopped = items
-      .where((item) => stringOf(item['status']) == 'stopped')
-      .length;
-  final firstMessage = firstNonEmptyString(
-    items.map((item) => stringOf(item['message'])),
+JsonMap buildQueuedConversationBatch(JsonMap batch) {
+  final inputText = buildQueueBubbleText(batch);
+  final lines = splitTaskLinesForUi(inputText);
+  final taskCount = readInt(
+    batch,
+    const <String>['taskCount'],
+    lines.length,
   );
+  final resolvedTaskCount = taskCount > 0 ? taskCount : mathMax(lines.length.toDouble(), 1).round();
+  final tasks = List<JsonMap>.generate(resolvedTaskCount, (index) {
+    final detail = index < lines.length ? lines[index] : '排队中';
+    return <String, dynamic>{
+      'taskId': '',
+      'title': resolvedTaskCount == 1 ? '待执行任务' : '任务${index + 1}',
+      'detail': detail,
+      'status': 'queued',
+      'progress': 0.0,
+      'cancellable': false,
+    };
+  });
+  return buildConversationBatchEntry(
+    id: stringOf(batch['runId']),
+    time: firstNonEmptyString(<String>[
+      stringOf(batch['enqueuedAt']),
+      stringOf(batch['submittedAt']),
+    ]),
+    inputText: inputText,
+    tasks: tasks,
+    fallbackStatus: 'queued',
+    sequence: 90,
+  );
+}
 
-  return <String, dynamic>{
-    'runId': stringOf(run['id']),
-    'inputText': buildRunBubbleText(run),
-    'sentAt': firstNonEmptyString(<String>[
+JsonMap buildHistoryConversationBatch(JsonMap run) {
+  final runItems = listOfMaps(run['items']);
+  final tasks = <JsonMap>[
+    for (var index = 0; index < runItems.length; index += 1)
+      buildConversationTaskCard(runItems[index], sequence: index + 1, live: false),
+  ];
+  return buildConversationBatchEntry(
+    id: stringOf(run['id']),
+    time: firstNonEmptyString(<String>[
       stringOf(run['submittedAt']),
       stringOf(run['startedAt']),
       stringOf(run['endedAt']),
     ]),
-    'statusAt': firstNonEmptyString(<String>[
-      stringOf(run['endedAt']),
-      stringOf(run['startedAt']),
-    ]),
+    inputText: buildRunBubbleText(run),
+    tasks: tasks,
+    sequence: 10,
+  );
+}
+
+JsonMap buildConversationBatchEntry({
+  required String id,
+  required String time,
+  required String inputText,
+  required List<JsonMap> tasks,
+  String fallbackStatus = '',
+  int sequence = 0,
+}) {
+  final status = resolveBatchStatus(tasks, fallbackStatus: fallbackStatus);
+  return <String, dynamic>{
+    'id': id,
+    'time': time,
+    'inputText': sanitizeUiText(inputText),
+    'tasks': tasks,
+    'taskCount': tasks.length,
     'status': status,
-    'statusTitle': switch (status) {
-      'partial_failed' => '部分失败',
-      'failed' => '任务失败',
-      'stopped' => '任务已取消',
-      _ => '任务完成',
-    },
-    'statusDetail': switch (status) {
-      'partial_failed' =>
-        '完成 $completed 条，失败 $failed 条${firstMessage.isNotEmpty ? '，$firstMessage' : ''}',
-      'failed' => firstMessage.isNotEmpty ? firstMessage : '任务未能成功执行',
-      'stopped' => stopped > 0 ? '已取消 $stopped 条任务' : '任务已停止',
-      _ => items.isNotEmpty ? '共 ${items.length} 条任务已完成' : '任务已完成',
-    },
-    'progress': status == 'completed' ? 1.0 : 0.0,
+    'summary': sanitizeUiText(
+      buildBatchSummary(tasks, fallbackStatus: fallbackStatus),
+    ),
+    'preview': sanitizeUiText(buildBatchPreview(tasks)),
+    'sequence': sequence,
   };
 }
 
-String summarizeLiveRunStatus(List<JsonMap> tasks) {
-  if (tasks.any((task) => stringOf(task['status']) == 'running')) {
+JsonMap buildConversationTaskCard(
+  JsonMap task, {
+  required int sequence,
+  required bool live,
+}) {
+  final status = stringOf(task['status']).isNotEmpty
+      ? stringOf(task['status'])
+      : (live ? 'queued' : 'completed');
+  return <String, dynamic>{
+    'taskId': firstNonEmptyString(<String>[
+      stringOf(task['id']),
+      stringOf(task['taskId']),
+    ]),
+    'title': sanitizeUiText(
+      buildConversationTaskTitle(task, sequence: sequence),
+    ),
+    'detail': sanitizeUiText(buildConversationTaskDetail(task)),
+    'status': status,
+    'progress': status == 'completed'
+        ? 1.0
+        : readDouble(task, const <String>['progress'], 0) / 100,
+    'cancellable': live && isCancellableConversationStatus(status),
+  };
+}
+
+String resolveConversationInputText(JsonMap task) {
+  final direct = firstNonEmptyString(<String>[
+    stringOf(task['rawLine']),
+    stringOf(mapOf(task['taskSnapshot'])['rawLine']),
+    stringOf(task['inputText']),
+  ]);
+  if (direct.isNotEmpty) {
+    return direct;
+  }
+  final snapshot = mapOf(task['taskSnapshot']);
+  final title = firstNonEmptyString(<String>[
+    stringOf(task['taskName']),
+    stringOf(snapshot['taskName']),
+  ]);
+  final url = firstNonEmptyString(<String>[
+    stringOf(task['videoUrl']),
+    stringOf(snapshot['videoUrl']),
+    stringOf(task['sourceUrl']),
+    stringOf(snapshot['sourceUrl']),
+    stringOf(task['url']),
+  ]);
+  if (title.isNotEmpty && url.isNotEmpty) {
+    return '$title，$url';
+  }
+  return title.isNotEmpty ? title : url;
+}
+
+String buildConversationTaskTitle(JsonMap task, {required int sequence}) {
+  return firstNonEmptyString(<String>[
+    stringOf(task['taskName']),
+    stringOf(mapOf(task['taskSnapshot'])['taskName']),
+    '任务$sequence',
+  ]);
+}
+
+String buildConversationTaskDetail(JsonMap task) {
+  final step = stringOf(task['step']);
+  final message = stringOf(task['message']);
+  final platform = firstNonEmptyString(<String>[
+    if (task['platforms'] is List)
+      (task['platforms'] as List)
+          .whereType<String>()
+          .map((item) => item.trim())
+          .where((item) => item.isNotEmpty)
+          .join(' / '),
+    stringOf(task['publishMode']),
+  ]);
+  final pieces = <String>[
+    if (message.isNotEmpty && message != step)
+      message
+    else if (step.isNotEmpty)
+      step
+    else
+      taskStatusLabel(stringOf(task['status'])),
+    if (platform.isNotEmpty) platform,
+  ];
+  return pieces.join(' · ');
+}
+
+bool isCancellableConversationStatus(String status) {
+  return status == 'queued' || status == 'pending' || status == 'running';
+}
+
+String resolveBatchStatus(List<JsonMap> tasks, {String fallbackStatus = ''}) {
+  final statuses = tasks
+      .map((task) => stringOf(task['status']))
+      .where((status) => status.isNotEmpty)
+      .toList(growable: false);
+  if (statuses.contains('running')) {
     return 'running';
   }
-  if (tasks.any((task) {
-    final status = stringOf(task['status']);
-    return status == 'queued' || status == 'pending';
-  })) {
+  if (statuses.contains('queued') || statuses.contains('pending')) {
     return 'queued';
   }
-  if (tasks.any((task) {
-    final status = stringOf(task['status']);
-    return status == 'failed' || status == 'partial_failed';
-  })) {
-    return 'failed';
+  if (statuses.isEmpty) {
+    return fallbackStatus.isNotEmpty ? fallbackStatus : 'queued';
   }
-  if (tasks.any((task) => stringOf(task['status']) == 'stopped')) {
-    return 'stopped';
-  }
-  if (tasks.any((task) => stringOf(task['status']) == 'completed')) {
+  if (statuses.every((status) => status == 'completed')) {
     return 'completed';
   }
-  return 'queued';
+  if (statuses.every((status) => status == 'stopped')) {
+    return 'stopped';
+  }
+  if (statuses.any((status) => status == 'failed' || status == 'partial_failed')) {
+    return statuses.every(
+          (status) => status == 'failed' || status == 'partial_failed',
+        )
+        ? 'failed'
+        : 'partial_failed';
+  }
+  return fallbackStatus.isNotEmpty ? fallbackStatus : statuses.first;
+}
+
+String buildBatchSummary(List<JsonMap> tasks, {String fallbackStatus = ''}) {
+  final taskCount = tasks.length;
+  if (taskCount <= 0) {
+    return fallbackStatus.isNotEmpty
+        ? taskStatusLabel(fallbackStatus)
+        : '暂无任务';
+  }
+  final statusText = buildTaskCollectionSummary(tasks, fallbackStatus: fallbackStatus);
+  return statusText.isEmpty ? '$taskCount 个任务' : '$taskCount 个任务 · $statusText';
+}
+
+String buildBatchPreview(List<JsonMap> tasks) {
+  if (tasks.isEmpty) {
+    return '';
+  }
+  if (tasks.length == 1) {
+    final task = tasks.first;
+    final title = compactPreviewText(stringOf(task['title']), maxLength: 36);
+    final detail = compactPreviewText(stringOf(task['detail']));
+    if (detail.isEmpty) {
+      return title;
+    }
+    if (title.isEmpty || detail == title) {
+      return detail;
+    }
+    return '$title · $detail';
+  }
+  final labels = tasks
+      .map((task) => firstNonEmptyString(<String>[
+            stringOf(task['title']),
+            stringOf(task['detail']),
+          ]))
+      .where((item) => item.trim().isNotEmpty)
+      .toList(growable: false);
+  if (labels.isEmpty) {
+    return '';
+  }
+  if (labels.length == 1) {
+    return compactPreviewText(labels.first);
+  }
+  final previewLines = labels
+      .take(2)
+      .map((item) => compactPreviewText(item, maxLength: 52))
+      .toList(growable: true);
+  if (labels.length > 2) {
+    previewLines.add('另有 ${labels.length - 2} 个任务');
+  }
+  return previewLines.join('\n');
+}
+
+String buildTaskCollectionSummary(
+  List<JsonMap> tasks, {
+  String fallbackStatus = '',
+}) {
+  int waitingCount = 0;
+  int runningCount = 0;
+  int completedCount = 0;
+  int failedCount = 0;
+  int stoppedCount = 0;
+
+  for (final task in tasks) {
+    switch (stringOf(task['status'])) {
+      case 'queued':
+      case 'pending':
+      case 'sending':
+        waitingCount += 1;
+        break;
+      case 'running':
+        runningCount += 1;
+        break;
+      case 'completed':
+        completedCount += 1;
+        break;
+      case 'failed':
+      case 'partial_failed':
+        failedCount += 1;
+        break;
+      case 'stopped':
+        stoppedCount += 1;
+        break;
+      default:
+        break;
+    }
+  }
+
+  final parts = <String>[
+    if (waitingCount > 0) '$waitingCount个等待',
+    if (runningCount > 0) '$runningCount个进行中',
+    if (completedCount > 0) '$completedCount个已完成',
+    if (failedCount > 0) '$failedCount个失败',
+    if (stoppedCount > 0) '$stoppedCount个已取消',
+  ];
+  if (parts.isNotEmpty) {
+    return parts.join('、');
+  }
+  return fallbackStatus.isNotEmpty ? taskStatusLabel(fallbackStatus) : '';
+}
+
+String buildLiveTaskSummary({
+  required int waitingCount,
+  required int runningCount,
+  required int liveCount,
+}) {
+  final parts = <String>[
+    if (waitingCount > 0) '$waitingCount个等待',
+    if (runningCount > 0) '$runningCount个进行中',
+  ];
+  if (parts.isNotEmpty) {
+    return parts.join('、');
+  }
+  return liveCount > 0 ? '$liveCount个任务' : '无任务';
 }
 
 TaskStatusVisualTheme taskStatusTheme(BuildContext context, String status) {
@@ -5365,6 +6496,33 @@ String firstNonEmptyString(Iterable<String> values) {
     }
   }
   return '';
+}
+
+String sanitizeUiText(String input) {
+  return input
+      .replaceAll(RegExp(r'[\u0000-\u0008\u000B\u000C\u000E-\u001F]'), ' ')
+      .trim();
+}
+
+List<String> splitTaskLinesForUi(String inputText) {
+  final trimmed = inputText.trim();
+  if (trimmed.isEmpty) {
+    return const <String>[];
+  }
+  final lines = inputText
+      .split(RegExp(r'\r?\n'))
+      .map((line) => line.trim())
+      .where((line) => line.isNotEmpty)
+      .toList(growable: false);
+  return lines.isEmpty ? <String>[trimmed] : lines;
+}
+
+String compactPreviewText(String input, {int maxLength = 110}) {
+  final normalized = input.replaceAll(RegExp(r'\s+'), ' ').trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return '${normalized.substring(0, maxLength - 1)}…';
 }
 
 double mathMax(double left, double right) {
@@ -5568,10 +6726,16 @@ String formatDate(String input) {
     return input;
   }
   final local = date.toLocal();
-  final mm = local.month.toString().padLeft(2, '0');
-  final dd = local.day.toString().padLeft(2, '0');
   final hh = local.hour.toString().padLeft(2, '0');
   final min = local.minute.toString().padLeft(2, '0');
+  final now = DateTime.now();
+  if (local.year == now.year &&
+      local.month == now.month &&
+      local.day == now.day) {
+    return '$hh:$min';
+  }
+  final mm = local.month.toString().padLeft(2, '0');
+  final dd = local.day.toString().padLeft(2, '0');
   return '$mm-$dd $hh:$min';
 }
 
