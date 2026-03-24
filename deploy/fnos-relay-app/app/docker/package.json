@@ -1,0 +1,10 @@
+{
+  "name": "antbot-fnos-relay",
+  "version": "0.3.6",
+  "private": true,
+  "type": "module",
+  "description": "AntBot fnOS relay proxy",
+  "scripts": {
+    "start": "node server.mjs"
+  }
+}

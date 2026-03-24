@@ -1,0 +1,14 @@
+services:
+  antbot-relay:
+    build: .
+    container_name: antbot-relay-server
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      TZ: Asia/Shanghai
+      PORT: "8080"
+      ANTBOT_PROXY_DATA_ROOT: /data
+      ANTBOT_DESKTOP_BASE_URL: ""
+    volumes:
+      - "/var/apps/antbot-relay/shares/antbot-relay/data:/data"

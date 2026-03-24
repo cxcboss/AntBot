@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>搬运蚁</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <div class="sidebar-brand-copy">
+          <div class="sidebar-logo">搬运蚁</div>
+          <div class="sidebar-version" id="app-badge">antbot</div>
+        </div>
+        <div class="sidebar-brand-mark"></div>
+      </div>
+
+      <div class="user-list" id="user-list"></div>
+
+      <button id="add-user-btn" class="sidebar-add-btn" type="button">添加用户</button>
+
+      <div class="sidebar-footer">
+        <button id="gemini-login-btn" class="sidebar-login-btn" type="button">Gemini 登录</button>
+        <div class="sidebar-footer-actions">
+          <button id="voice-clone-btn" class="sidebar-voice-btn" type="button">音色克隆</button>
+          <button id="remote-btn" class="sidebar-icon-btn" type="button" aria-label="远程控制"></button>
+          <button id="settings-btn" class="sidebar-icon-btn" type="button" aria-label="打开设置"></button>
+        </div>
+      </div>
+    </aside>
+
+    <main class="workspace">
+      <section class="workspace-surface">
+        <header class="workspace-header">
+          <div class="workspace-headline">
+            <div class="workspace-kicker">多平台任务工作台</div>
+            <h1 id="current-user-name" class="workspace-title">蚂蚁1</h1>
+            <div id="startup-status" class="workspace-status">等待启动检查</div>
+          </div>
+          <div class="workspace-actions">
+            <button type="button" class="header-action-btn service-action-btn" data-login-service="videoChannel" id="video-login-btn" aria-label="登录视频号"></button>
+            <button type="button" class="header-action-btn service-action-btn" data-login-service="douyin" id="douyin-login-btn" aria-label="登录抖音"></button>
+            <button type="button" class="header-action-btn account-action-btn" id="account-btn" aria-label="当前用户设置"></button>
+          </div>
+        </header>
+
+        <section class="chat-shell">
+          <div id="chat-scroll" class="chat-scroll">
+            <div id="chat-stream" class="chat-stream"></div>
+          </div>
+
+          <div class="composer-shell">
+            <div class="composer-topline">
+              <div id="task-summary" class="task-summary">等待输入任务</div>
+              <button id="refresh-startup-btn" class="btn btn-ghost btn-inline" type="button">检查环境</button>
+            </div>
+            <div class="composer-card">
+              <label class="input-guide" for="task-input">
+                视频文案、话题、发布时间(3月8日17时38分)、任务名/原创/不原创、视频链接、时间段(0:12-1:30)。文案、话题、时间都可以留空。
+              </label>
+              <div class="task-input-wrap">
+                <textarea
+                  id="task-input"
+                  class="task-input"
+                  placeholder="每行一条任务。平台关键词：微信=发布到视频号；抖音=发布到抖音；都写=双平台；都不写=默认视频号。"
+                ></textarea>
+                <button id="run-btn" class="send-btn" type="button" aria-label="发送任务"></button>
+              </div>
+            </div>
+            <div id="setting-chips" class="setting-chips"></div>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="account-dialog" class="settings-dialog compact-dialog">
+    <form id="account-form" method="dialog">
+      <h3>当前用户设置</h3>
+
+      <div class="settings-grid compact-grid">
+        <label>用户名
+          <input id="account-user-name" name="userName" type="text" />
+        </label>
+        <label>Gemini 引用
+          <select id="account-gemini-profile" name="geminiProfileId"></select>
+        </label>
+      </div>
+
+      <div class="task-summary" id="account-summary">当前用户默认引用默认 Gemini。</div>
+
+      <div class="dialog-actions">
+        <button type="button" id="account-save-btn" class="btn btn-start">保存用户设置</button>
+        <button type="button" id="account-gemini-login-btn" class="btn btn-ghost">登录当前 Gemini</button>
+        <button type="button" id="account-create-gemini-btn" class="btn btn-ghost">新增 Gemini</button>
+        <button type="button" id="account-delete-btn" class="btn btn-stop">删除当前用户</button>
+        <button type="button" id="account-close-btn" class="btn btn-ghost">关闭</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="settings-dialog" class="settings-dialog">
+    <form id="settings-form" method="dialog">
+      <h3 id="settings-dialog-title">设置</h3>
+
+      <div class="settings-grid">
+        <label>临时目录
+          <input name="tempDir" type="text" />
+        </label>
+        <label>输出根目录
+          <input name="outputBaseDir" type="text" />
+        </label>
+        <label>YouTube 项目目录
+          <input name="youtubeProjectPath" type="text" />
+        </label>
+        <label>剪辑项目目录
+          <input name="editProjectPath" type="text" />
+        </label>
+        <label>发布项目目录
+          <input name="publishProjectPath" type="text" />
+        </label>
+        <label>下载命令
+          <input name="downloadCmd" type="text" placeholder='例：python main.py --url "{url}" --out "{output}"' />
+        </label>
+        <label>Gemini 命令（可选）
+          <input name="geminiCmd" type="text" placeholder="留空则走内置浏览器自动化" />
+        </label>
+        <label>Gemini 字幕网址（可选）
+          <input name="geminiSubtitleUrl" type="text" placeholder="留空使用默认 Gemini 地址" />
+        </label>
+        <label>剪辑命令
+          <input name="editCmd" type="text" placeholder='例：python run.py --in "{inputVideo}" --sub "{subtitleFile}" --out "{outputVideo}"' />
+        </label>
+        <label>发布命令
+          <input name="publishCmd" type="text" placeholder='例：python publish.py --video "{video}" --time "{scheduleAt}"' />
+        </label>
+        <label>自动发布
+          <select name="publishEnabled">
+            <option value="true">开启</option>
+            <option value="false">关闭</option>
+          </select>
+        </label>
+        <label>失败重试次数
+          <input name="failedRetryCount" type="number" min="0" step="1" placeholder="0=不重试" />
+        </label>
+        <label>语音克隆命令（高级可选）
+          <input name="voiceCloneCmd" type="text" placeholder="留空则使用内置 Voicebox 克隆流程" />
+        </label>
+        <label>语速
+          <input name="voiceSpeed" type="number" step="0.1" min="0.5" max="2.0" />
+        </label>
+        <label>旁白语音
+          <select name="voiceoverEnabled">
+            <option value="true">开启</option>
+            <option value="false">关闭</option>
+          </select>
+        </label>
+        <label>字幕
+          <select name="subtitleEnabled">
+            <option value="true">开启</option>
+            <option value="false">关闭</option>
+          </select>
+        </label>
+        <label>字幕颜色
+          <input name="subtitleTextColor" type="text" />
+        </label>
+        <label>描边颜色
+          <input name="subtitleStrokeColor" type="text" />
+        </label>
+        <label>字幕位置（0-100，100=顶部）
+          <input name="subtitlePositionPercent" type="number" min="0" max="100" step="1" />
+        </label>
+        <label>任务间隔毫秒
+          <input name="pauseBetweenTasksMs" type="number" min="0" step="500" />
+        </label>
+        <label>动作等待毫秒
+          <input name="actionDelayMs" type="number" min="500" step="100" />
+        </label>
+        <label>显示自动化窗口
+          <select name="showAutomationWindow">
+            <option value="true">是（调试）</option>
+            <option value="false">否（后台）</option>
+          </select>
+        </label>
+        <label>克隆音色 ID（可留空，克隆成功后自动写入）
+          <input name="voiceId" type="text" placeholder="通常无需手填" />
+        </label>
+        <label>克隆模型路径（兼容旧流程，可留空）
+          <input name="modelPath" type="text" placeholder="通常无需手填" />
+        </label>
+      </div>
+
+      <div class="login-actions">
+        <button type="button" class="btn btn-ghost" data-login-service="videoChannel">登录视频号</button>
+        <button type="button" class="btn btn-ghost" data-login-service="douyin">登录抖音</button>
+      </div>
+
+      <div class="dependency-status-box">
+        <div class="dependency-status-line"><span>运行依赖</span><strong id="dependency-status-text">未检查</strong></div>
+        <div id="dependency-status-detail" class="dependency-status-detail">
+          Windows 版本会自动管理 Node.js、cloudflared、yt-dlp、FFmpeg；Python 和 Git Bash 会检测状态并提供下载入口。
+        </div>
+        <div class="dependency-action-row">
+          <button type="button" id="refresh-deps-btn" class="btn btn-ghost btn-inline">检查环境</button>
+          <button type="button" id="repair-deps-btn" class="btn btn-debug btn-inline">下载缺失依赖</button>
+          <button type="button" id="open-python-download-btn" class="btn btn-ghost btn-inline">Python</button>
+          <button type="button" id="open-gitbash-download-btn" class="btn btn-ghost btn-inline">Git Bash</button>
+        </div>
+      </div>
+
+      <div class="dialog-actions">
+        <button type="button" id="save-settings-btn" class="btn btn-start">保存设置</button>
+        <button type="button" id="close-settings-btn" class="btn btn-stop">关闭</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="voice-clone-dialog" class="settings-dialog voice-clone-dialog">
+    <form id="voice-clone-form" method="dialog">
+      <h3 id="voice-clone-dialog-title">语音克隆</h3>
+
+      <div class="voice-clone-note">
+        上传样本音频并填写对应文本，系统会自动准备 voicebox 后端。克隆完成后会写入全局音色，所有用户都可引用。
+      </div>
+
+      <div class="voice-clone-grid">
+        <label class="wide-field">样本音频
+          <div class="input-with-action">
+            <input name="samplePath" type="text" placeholder="选择或粘贴 wav/mp3 路径" />
+            <button type="button" id="voice-clone-pick-sample-btn" class="btn btn-ghost btn-inline">选择</button>
+          </div>
+        </label>
+
+        <label class="wide-field">样本参考文本（必须和音频内容一致）
+          <textarea name="referenceText" rows="4" placeholder="例如：大家好，欢迎来到今天的视频解说。"></textarea>
+        </label>
+
+        <label>克隆档案名（可选）
+          <input name="profileName" type="text" placeholder="例如：我的旁白音色" />
+        </label>
+
+        <label>语言
+          <select name="language">
+            <option value="zh">中文（zh）</option>
+            <option value="en">英文（en）</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="voice-clone-progress-box">
+        <div class="voice-clone-progress-head">
+          <span id="voice-clone-progress-step">等待开始</span>
+          <strong id="voice-clone-progress-percent">0%</strong>
+        </div>
+        <div class="progress-track">
+          <div id="voice-clone-progress-bar" class="progress-bar" style="width: 0%"></div>
+        </div>
+        <div id="voice-clone-progress-log" class="voice-clone-progress-log">暂无日志</div>
+      </div>
+
+      <div class="dialog-actions">
+        <button type="button" id="voice-clone-run-btn" class="btn btn-start">开始克隆</button>
+        <button type="button" id="voice-clone-close-btn" class="btn btn-stop">关闭</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="remote-dialog" class="settings-dialog remote-dialog">
+    <form id="remote-form" method="dialog">
+      <h3 id="remote-dialog-title">远程设置</h3>
+
+      <div class="remote-note">
+        远程控制已改为全局共享配置。这里直接查看当前局域网和公网地址，按需刷新或统一开启/关闭。
+      </div>
+
+      <div class="remote-status-box">
+        <div class="remote-status-line"><span>服务状态</span><strong id="remote-status-text">未启用</strong></div>
+        <div class="remote-status-line">
+          <span>局域网地址</span>
+          <div class="remote-address-wrap">
+            <div id="remote-url-list" class="remote-url-list">保存后显示</div>
+            <button type="button" id="copy-remote-local-btn" class="btn btn-ghost btn-inline">复制</button>
+          </div>
+        </div>
+        <div class="remote-status-line">
+          <span>公网地址</span>
+          <div class="remote-address-wrap">
+            <div id="remote-public-url" class="remote-url-list">未开启</div>
+            <button type="button" id="copy-remote-public-btn" class="btn btn-ghost btn-inline">复制</button>
+          </div>
+        </div>
+        <div class="remote-status-line remote-qr-line">
+          <span>扫码访问</span>
+          <div class="remote-qr-wrap">
+            <img id="remote-qr-image" class="remote-qr-image hidden" alt="远程控制二维码" />
+            <div id="remote-qr-empty" class="remote-qr-empty">开启远程后显示二维码</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="dialog-actions">
+        <button type="button" id="toggle-remote-btn" class="btn btn-start">开启</button>
+        <button type="button" id="refresh-remote-btn" class="btn btn-ghost">刷新</button>
+        <button type="button" id="close-remote-btn" class="btn btn-stop">关闭</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

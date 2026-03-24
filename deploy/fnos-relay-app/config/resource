@@ -1,0 +1,30 @@
+{
+  "docker-project": {
+    "projects": [
+      {
+        "name": "antbot-relay",
+        "path": "docker"
+      }
+    ]
+  },
+  "data-share": {
+    "shares": [
+      {
+        "name": "antbot-relay",
+        "permission": {
+          "rw": [
+            "docker-antbot-relay"
+          ]
+        }
+      },
+      {
+        "name": "antbot-relay/data",
+        "permission": {
+          "rw": [
+            "docker-antbot-relay"
+          ]
+        }
+      }
+    ]
+  }
+}

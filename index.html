@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>AntBot Remote</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <main class="shell">
+    <section class="card auth-card" id="auth-card">
+      <h1>AntBot 远程控制</h1>
+      <p>输入远程密码后即可在手机端启动、停止，并查看任务进度。</p>
+      <label class="field">
+        <span>远程密码</span>
+        <input id="password-input" type="password" placeholder="请输入桌面端设置的密码" autocomplete="current-password" />
+      </label>
+      <div class="actions">
+        <button id="connect-btn" class="btn primary">连接</button>
+        <button id="forget-btn" class="btn ghost">清除密码</button>
+      </div>
+      <div class="status" id="auth-status">未连接</div>
+    </section>
+
+    <section class="card control-card hidden" id="control-card">
+      <div class="topbar">
+        <div>
+          <h2>任务控制</h2>
+          <div class="subtext" id="server-status">等待连接</div>
+        </div>
+        <div class="topbar-actions">
+          <button id="refresh-btn" class="btn ghost small">刷新</button>
+          <button id="disconnect-btn" class="btn ghost small">断开</button>
+        </div>
+      </div>
+
+      <div class="input-guide">
+        视频文案，话题，发布视频时间(3月8日17时38分)，任务名/原创，视频链接，时间段(0:12-1:30)。<br />
+        文案、话题、时间可以留空。
+      </div>
+
+      <label class="field">
+        <span>任务输入</span>
+        <textarea id="task-input" rows="6" placeholder="每行一条任务。微信=视频号；抖音=抖音；都写=双平台；都不写=默认视频号。"></textarea>
+      </label>
+
+      <div class="actions sticky-actions">
+        <button id="start-btn" class="btn primary">发送并启动</button>
+        <button id="stop-btn" class="btn danger">停止任务</button>
+      </div>
+
+      <div class="summary-grid">
+        <article class="mini-card">
+          <span class="label">运行状态</span>
+          <strong id="run-state">空闲</strong>
+        </article>
+        <article class="mini-card">
+          <span class="label">任务数量</span>
+          <strong id="task-count">0</strong>
+        </article>
+      </div>
+
+      <section class="panel">
+        <div class="panel-title">任务进度</div>
+        <div id="task-list" class="task-list"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-title">最新日志</div>
+        <pre id="log-list" class="log-list">暂无日志</pre>
+      </section>
+    </section>
+  </main>
+
+  <script src="./app.js" defer></script>
+</body>
+</html>

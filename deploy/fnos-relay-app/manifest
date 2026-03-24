@@ -1,0 +1,10 @@
+appname               = antbot-relay
+version               = 0.3.6
+display_name          = 搬运蚁远程中转
+desc                  = 手机先访问飞牛 NAS，再由 NAS 代理到同局域网中的搬运蚁桌面端远程控制页面。
+arch                  = x86_64
+source                = thirdparty
+maintainer            = chenxincheng
+distributor           = chenxincheng
+desktop_uidir         = ui
+desktop_applaunchname = antbot-relay.Application

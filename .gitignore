@@ -1,0 +1,23 @@
+node_modules
+release
+release_flutter
+release_fnos_app
+release_flutter_figma
+release_flutter_windows
+dist
+.build
+.tools/fnpack
+.codex-tmp
+.antbot-runtime
+交付整理
+assets/icon.iconset.gen
+assets/icon-build.iconset
+assets/icon-build\ 2.iconset
+.DS_Store
+*.log
+src/main/**/tmp
+vendors/ms-playwright/*
+!vendors/ms-playwright/.gitkeep
+clients/antbot_flutter/build
+clients/antbot_flutter/.dart_tool
+clients/antbot_flutter/macos/Flutter/ephemeral
