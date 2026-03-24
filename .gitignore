@@ -9,6 +9,7 @@ dist
 .tools/fnpack
 .codex-tmp
 .antbot-runtime
+交付整理
 assets/icon.iconset.gen
 assets/icon-build.iconset
 assets/icon-build\ 2.iconset
@@ -17,3 +18,6 @@ assets/icon-build\ 2.iconset
 src/main/**/tmp
 vendors/ms-playwright/*
 !vendors/ms-playwright/.gitkeep
+clients/antbot_flutter/build
+clients/antbot_flutter/.dart_tool
+clients/antbot_flutter/macos/Flutter/ephemeral
