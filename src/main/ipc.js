@@ -33,6 +33,7 @@ let _storeRef = null;
 const { runStartupChecks, getProfileDir, getProfileScopeKey } = require('./services/startupCheck');
 const { runVoiceClone } = require('./services/voiceClone');
 const { getDependencyState, repairMissingDependencies } = require('./services/dependencyManager');
+const { installDependencies } = require('./services/dependencyInstaller');
 const { launchPersistentChromiumContext } = require('./services/playwrightUtil');
 const { getAppInfo } = require('./services/appInfo');
 
@@ -379,49 +380,101 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
     return { ok: allOk, items: results, venvPath: info.venvDir, message: allOk ? '所有依赖就绪' : '部分依赖缺失' };
   });
 
+  // ── Voicebox dependency installation with granular progress ──
+  const activeVoiceboxAbortControllers = new Map();
+
   ipcMain.handle('voicebox:install', async () => {
     const { spawn } = require('node:child_process');
     const win = mainWindowRef();
     const send = (p) => { if (win && !win.isDestroyed()) win.webContents.send('voicebox:progress', p); };
+    const sendDeps = (p) => { if (win && !win.isDestroyed()) win.webContents.send('voicebox:deps-progress', { ...p, timestamp: new Date().toISOString() }); };
     const info = await getVoiceboxVenvPath();
     if (!info) return { ok: false, message: 'auto_dub_web 目录未找到' };
 
-    send({ status: 'installing', message: '正在安装语音克隆依赖...' });
+    send({ status: 'installing', message: '正在准备安装环境...' });
     appLog('info', '开始安装 voicebox 依赖');
 
-    const setupScript = path.join(info.projectPath, 'scripts', 'setup_voicebox_backend.sh');
-    try { await fs.access(setupScript); } catch { return { ok: false, message: '缺少 setup_voicebox_backend.sh' }; }
+    // 1. 确保 voicebox 源码存在
+    const requirementsPath = path.join(info.projectPath, 'vendor', 'voicebox', 'backend', 'requirements.txt');
+    const hasReqs = await fs.access(requirementsPath).then(() => true).catch(() => false);
+    if (!hasReqs) {
+      const setupScript = path.join(info.projectPath, 'scripts', 'setup_voicebox_backend.sh');
+      try { await fs.access(setupScript); } catch { return { ok: false, message: '缺少 setup_voicebox_backend.sh 和 requirements.txt' }; }
+      send({ status: 'installing', message: '正在下载 voicebox 源码...' });
+      await new Promise((resolve) => {
+        const child = spawn('bash', [setupScript], {
+          cwd: info.projectPath,
+          env: { ...process.env, PYTHON_BIN: 'python3.12' },
+          stdio: ['ignore', 'pipe', 'pipe']
+        });
+        child.stdout.on('data', d => { const m = d.toString().trim(); if (m) send({ status: 'installing', message: m.slice(0, 120) }); });
+        child.stderr.on('data', () => {});
+        child.on('close', (code) => resolve(code));
+        child.on('error', () => resolve(1));
+      });
+    }
 
-    return new Promise((resolve) => {
-      const child = spawn('bash', [setupScript], {
-        cwd: info.projectPath,
-        env: { ...process.env, PYTHON_BIN: 'python3.12' },
-        stdio: ['ignore', 'pipe', 'pipe']
+    // 2. 创建 venv（如果不存在）
+    const venvExists = await fs.access(info.venvPython).then(() => true).catch(() => false);
+    if (!venvExists) {
+      send({ status: 'installing', message: '正在创建虚拟环境...' });
+      await new Promise((resolve) => {
+        const child = spawn('python3.12', ['-m', 'venv', info.venvDir], {
+          cwd: info.projectPath, stdio: ['ignore', 'pipe', 'pipe']
+        });
+        child.on('close', () => resolve());
+        child.on('error', () => resolve());
       });
-      let stderr = '';
-      child.stdout.on('data', d => {
-        const msg = d.toString().trim();
-        if (msg) send({ status: 'installing', message: msg.slice(0, 120) });
+    }
+
+    // 3. 升级 pip
+    send({ status: 'installing', message: '正在升级 pip...' });
+    await new Promise((resolve) => {
+      const child = spawn(info.venvPython, ['-m', 'pip', 'install', '--upgrade', 'pip', 'wheel', 'setuptools'], {
+        cwd: info.projectPath, stdio: ['ignore', 'pipe', 'pipe']
       });
-      child.stderr.on('data', d => { stderr += d.toString(); });
-      child.on('close', async (code) => {
-        if (code === 0) {
-          // Write marker
-          await fs.writeFile(info.markerPath, JSON.stringify({ completedAt: new Date().toISOString() }), 'utf-8').catch(() => {});
-          send({ status: 'completed', message: '安装完成' });
-          appLog('info', 'voicebox 依赖安装完成');
-          resolve({ ok: true });
-        } else {
-          send({ status: 'failed', message: stderr.slice(0, 200) || '安装失败' });
-          appLog('error', `voicebox 依赖安装失败: ${stderr.slice(0, 200)}`);
-          resolve({ ok: false, message: stderr.slice(0, 200) });
-        }
-      });
-      child.on('error', (e) => {
-        send({ status: 'failed', message: e.message });
-        resolve({ ok: false, message: e.message });
-      });
+      child.on('close', () => resolve());
+      child.on('error', () => resolve());
     });
+
+    // 4. 逐包安装依赖，发送粒度进度
+    const hasReqsNow = await fs.access(requirementsPath).then(() => true).catch(() => false);
+    if (!hasReqsNow) {
+      send({ status: 'failed', message: 'requirements.txt 不存在' });
+      return { ok: false, message: 'requirements.txt 不存在' };
+    }
+
+    send({ status: 'installing', message: '开始逐包安装依赖...' });
+
+    const result = await installDependencies({
+      venvPython: info.venvPython,
+      requirementsPath,
+      env: process.env,
+      pushEvent: sendDeps,
+      abortControllers: activeVoiceboxAbortControllers
+    });
+
+    if (result.errors.length === 0) {
+      await fs.writeFile(info.markerPath, JSON.stringify({ completedAt: new Date().toISOString() }), 'utf-8').catch(() => {});
+      send({ status: 'completed', message: `安装完成（${result.done.length} 个包）` });
+      appLog('info', `voicebox 依赖安装完成: ${result.done.length} packages`);
+      return { ok: true };
+    } else {
+      const failedNames = result.errors.map(e => e.name).join(', ');
+      send({ status: 'failed', message: `以下依赖失败: ${failedNames}` });
+      appLog('error', `voicebox 部分依赖安装失败: ${failedNames}`);
+      return { ok: false, message: `失败: ${failedNames}` };
+    }
+  });
+
+  ipcMain.handle('voicebox:install-cancel', async (_event, packageName) => {
+    if (packageName) {
+      const ctrl = activeVoiceboxAbortControllers.get(packageName);
+      if (ctrl) { ctrl.abort(); return { ok: true }; }
+      return { ok: false };
+    }
+    for (const [, ctrl] of activeVoiceboxAbortControllers) ctrl.abort();
+    return { ok: true };
   });
 
   ipcMain.handle('voicebox:open-dir', async () => {

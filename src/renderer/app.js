@@ -1155,10 +1155,46 @@ function bind(){
     }
   });
 
+  // ── Per-dependency progress tracking ──
+  const voiceboxDepsState = { packages: new Map(), order: [] };
+
+  function renderVoiceboxDepsList() {
+    const container = document.getElementById('voicebox-deps-list');
+    if (!container) return;
+    if (!voiceboxDepsState.order.length) { container.innerHTML = ''; return; }
+    container.innerHTML = voiceboxDepsState.order.map((key) => {
+      const pkg = voiceboxDepsState.packages.get(key);
+      if (!pkg) return '';
+      const s = pkg.status || 'queued';
+      const pct = Math.max(0, Math.min(100, pkg.percent || 0));
+      const st = s === 'done' ? '✓' : s === 'error' ? '失败' : s === 'cancelled' ? '已取消' : s === 'downloading' ? `${pct}%` : '等待';
+      const canCancel = s === 'downloading' || s === 'queued';
+      return `<div class="dep-item dep-${esc(s)}">
+        <div class="dep-item-head"><span class="dep-item-name">${esc(pkg.name)}</span><span class="dep-item-status">${esc(st)}</span>
+          ${canCancel ? `<button class="dep-item-cancel" data-dep-cancel="${esc(key)}">✕</button>` : ''}</div>
+        <div class="dep-item-track"><div class="dep-item-bar" style="width:${pct}%"></div></div>
+        <div class="dep-item-meta"><span class="dep-item-speed">${esc(pkg.speed || '')}</span><span class="dep-item-msg">${esc(pkg.message || '')}</span></div>
+      </div>`;
+    }).join('');
+    container.querySelectorAll('[data-dep-cancel]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        window.antbot.voiceboxInstallCancel(btn.dataset.depCancel);
+        const pkg = voiceboxDepsState.packages.get(btn.dataset.depCancel);
+        if (pkg && (pkg.status === 'downloading' || pkg.status === 'queued')) {
+          pkg.status = 'cancelled'; pkg.speed = ''; pkg.message = '已取消';
+          renderVoiceboxDepsList();
+        }
+      });
+    });
+  }
+
   // Voicebox dependency handlers
   document.getElementById('voicebox-install-btn')?.addEventListener('click', async () => {
     const btn = document.getElementById('voicebox-install-btn');
     if (btn) { btn.disabled = true; btn.innerHTML = `<span class="icon">${ICONS.loader}</span>安装中...`; }
+    voiceboxDepsState.packages = new Map();
+    voiceboxDepsState.order = [];
+    renderVoiceboxDepsList();
     try {
       const r = await window.antbot.voiceboxInstall();
       toast(r.ok ? '语音克隆依赖安装完成' : (r.message || '安装失败'), r.ok ? 'success' : 'error');
@@ -1195,6 +1231,22 @@ function bind(){
       injectIcons();
       toast(p.message || '安装失败', 'error');
     }
+  });
+
+  // Listen for per-dependency progress
+  window.antbot.onVoiceboxDepsProgress?.((event) => {
+    if (!event || !event.name) return;
+    const key = event.normalizedName || event.name;
+    const pkg = voiceboxDepsState.packages.get(key) || { name: event.name, constraint: event.constraint || '', status: 'queued', percent: 0, speed: '', size: '', message: '' };
+    if (event.type === 'package-start') { pkg.status = 'downloading'; pkg.percent = 0; pkg.message = event.message || '准备安装...'; }
+    else if (event.type === 'package-progress') { pkg.status = 'downloading'; if (event.percent >= 0) pkg.percent = event.percent; if (event.speed) pkg.speed = event.speed; if (event.message) pkg.message = event.message; }
+    else if (event.type === 'package-done') { pkg.status = 'done'; pkg.percent = 100; pkg.speed = ''; pkg.message = event.message || '安装完成'; }
+    else if (event.type === 'package-error') { pkg.status = 'error'; pkg.speed = ''; pkg.message = event.message || '安装失败'; }
+    else if (event.type === 'package-cancelled') { pkg.status = 'cancelled'; pkg.speed = ''; pkg.message = '已取消'; }
+    else return;
+    voiceboxDepsState.packages.set(key, pkg);
+    if (!voiceboxDepsState.order.includes(key)) voiceboxDepsState.order.push(key);
+    renderVoiceboxDepsList();
   });
 
   // Style reference events
