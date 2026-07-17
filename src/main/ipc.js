@@ -7,22 +7,51 @@ const { parseTaskInput, parsePublishDebugInput } = require('./services/parser');
 
 // ── App logger ──
 let _logStream = null;
-function getAppLogPath() {
-  try {
-    const dataDir = path.join(os.homedir(), 'AntBot');
-    return path.join(dataDir, 'logs', 'app.log');
-  } catch {
-    return path.join(os.tmpdir(), 'antbot-app.log');
-  }
+const LOG_DIR = path.join(os.homedir(), 'AntBot', 'logs');
+const LOG_MAX_AGE_DAYS = 7;
+
+function getLogFilePath() {
+  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  return path.join(LOG_DIR, `app-${ts}.log`);
 }
-function initAppLog() {
+
+function cleanOldLogs() {
   try {
-    const logPath = getAppLogPath();
-    fsSync.mkdirSync(path.dirname(logPath), { recursive: true });
-    _logStream = fsSync.createWriteStream(logPath, { flags: 'a' });
-    appLog('info', `App started, version=${app.getVersion()}`);
+    const files = fsSync.readdirSync(LOG_DIR).filter((f) => f.startsWith('app-') && f.endsWith('.log'));
+    const cutoff = Date.now() - LOG_MAX_AGE_DAYS * 24 * 60 * 60 * 1000;
+    for (const file of files) {
+      const filePath = path.join(LOG_DIR, file);
+      try {
+        const stat = fsSync.statSync(filePath);
+        if (stat.mtimeMs < cutoff) {
+          fsSync.unlinkSync(filePath);
+        }
+      } catch {}
+    }
   } catch {}
 }
+
+function initAppLog() {
+  try {
+    fsSync.mkdirSync(LOG_DIR, { recursive: true });
+    cleanOldLogs();
+    const logPath = getLogFilePath();
+    _logStream = fsSync.createWriteStream(logPath, { flags: 'a' });
+    // 记录环境信息
+    appLog('info', `═══ AntBot 启动 ═══`);
+    appLog('info', `版本: ${app.getVersion()}`);
+    appLog('info', `系统: ${os.type()} ${os.release()} (${os.arch()})`);
+    appLog('info', `Node: ${process.version}`);
+    appLog('info', `Electron: ${process.versions.electron || 'N/A'}`);
+    appLog('info', `Chrome: ${process.versions.chrome || 'N/A'}`);
+    appLog('info', `CPU: ${os.cpus()[0]?.model || 'N/A'} (${os.cpus().length} cores)`);
+    appLog('info', `内存: ${(os.totalmem() / 1073741824).toFixed(1)} GB (可用 ${(os.freemem() / 1073741824).toFixed(1)} GB)`);
+    appLog('info', `用户目录: ${os.homedir()}`);
+    appLog('info', `数据目录: ${path.join(os.homedir(), 'AntBot')}`);
+    appLog('info', `日志文件: ${logPath}`);
+  } catch {}
+}
+
 function appLog(level, message) {
   const ts = new Date().toISOString();
   const line = `[${ts}] [${level}] ${message}\n`;
