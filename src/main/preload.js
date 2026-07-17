@@ -35,6 +35,7 @@ contextBridge.exposeInMainWorld('antbot', {
   installDep: (tool) => ipcRenderer.invoke('deps:install', tool),
   voiceboxCheck: () => ipcRenderer.invoke('voicebox:check'),
   voiceboxInstall: () => ipcRenderer.invoke('voicebox:install'),
+  voiceboxInstallCancel: (packageName) => ipcRenderer.invoke('voicebox:install-cancel', packageName),
   voiceboxOpenDir: () => ipcRenderer.invoke('voicebox:open-dir'),
   voiceboxReset: () => ipcRenderer.invoke('voicebox:reset'),
   getDataInfo: () => ipcRenderer.invoke('app:get-data-info'),
@@ -71,5 +72,6 @@ contextBridge.exposeInMainWorld('antbot', {
   onDepProgress: (callback) => on('deps:progress', callback),
   onDepInstallProgress: (callback) => on('deps:install-progress', callback),
   onVoiceboxProgress: (callback) => on('voicebox:progress', callback),
+  onVoiceboxDepsProgress: (callback) => on('voicebox:deps-progress', callback),
   onStyleProgress: (callback) => on('style:progress', callback),
 });
