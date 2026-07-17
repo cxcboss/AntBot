@@ -1,4 +1,5 @@
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
 function configureBundledPlaywrightBrowsers() {
@@ -41,7 +42,7 @@ function configureBundledPlaywrightBrowsers() {
 
 configureBundledPlaywrightBrowsers();
 
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, protocol, net } = require('electron');
 
 function resolveStableUserDataPath() {
   return path.join(app.getPath('appData'), 'antbot');
@@ -90,7 +91,6 @@ configureStableUserDataPath();
 const { StoreService } = require('./services/store');
 const { TaskRunner } = require('./taskRunner');
 const { registerIpcHandlers } = require('./ipc');
-const { RemoteControlServer } = require('./services/remoteControl');
 const { ensureManagedBinDir, injectManagedBinIntoProcessEnv } = require('./services/dependencyManager');
 const { getAppInfo } = require('./services/appInfo');
 const { SystemControlService } = require('./services/systemControl');
@@ -135,26 +135,33 @@ function configureLinuxRuntimeFlags() {
 
 configureLinuxRuntimeFlags();
 
+// Register safe-file protocol for local video previews
+protocol.registerSchemesAsPrivileged([{
+  scheme: 'safe-file',
+  privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, bypassCSP: true }
+}]);
+
 const isHeadlessMode = parseBooleanEnv(process.env.ANTBOT_HEADLESS, false)
   || parseBooleanEnv(process.env.ANTBOT_NO_WINDOW, false);
 
 let mainWindow;
 let systemControl = null;
+let ipcCleanup = null;
 
 function createWindow() {
   const appInfo = getAppInfo();
   const isMac = process.platform === 'darwin';
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 860,
-    minWidth: 1080,
-    minHeight: 700,
+    width: 960,
+    height: 680,
+    minWidth: 600,
+    minHeight: 420,
     show: false,
     title: appInfo.displayName,
-    backgroundColor: '#eef2f7',
+    backgroundColor: '#f0f2f5',
     icon: path.join(__dirname, '..', '..', 'assets', 'icon.png'),
     titleBarStyle: isMac ? 'hiddenInset' : 'default',
-    trafficLightPosition: isMac ? { x: 20, y: 18 } : undefined,
+    trafficLightPosition: isMac ? { x: 14, y: 18 } : undefined,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -177,11 +184,17 @@ async function bootstrap() {
   await ensureManagedBinDir();
   injectManagedBinIntoProcessEnv();
 
-  const store = new StoreService();
+  // Determine data directory (from config or default)
+  const { buildDefaultSettings } = require('./services/config');
+  const defaultSettings = buildDefaultSettings();
+  const dataDir = defaultSettings.dataDir || path.join(os.homedir(), 'AntBot');
+  const fsPromises = require('node:fs/promises');
+  await fsPromises.mkdir(dataDir, { recursive: true }).catch(() => {});
+
+  const store = new StoreService(dataDir);
   await store.load();
   systemControl = new SystemControlService();
   systemControl.applySettings(await store.getSettings());
-  let remoteServer;
 
   const taskRunner = new TaskRunner({
     store,
@@ -190,58 +203,36 @@ async function bootstrap() {
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('task:progress', payload);
       }
-      remoteServer?.handleProgress(payload);
     },
     onLog: (payload) => {
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('task:log', payload);
       }
-      remoteServer?.handleLog(payload);
     },
     onRunDone: async () => {
       const history = await store.getHistory();
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('history:changed', history);
       }
-      remoteServer?.handleHistory(history);
     }
   });
 
-  remoteServer = new RemoteControlServer({
-    store,
-    taskRunner,
-    systemControl,
-    onStatusChange: (payload) => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('remote:status', payload);
-      }
-    },
-    onRemoteLog: (payload) => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('task:log', payload);
-      }
-      remoteServer?.handleLog(payload);
-    }
-  });
-
-  remoteServer.progress = taskRunner.getSnapshot();
-  systemControl.handleProgress(remoteServer.progress);
-  try {
-    await remoteServer.init();
-  } catch (error) {
-    console.error('[remote] init failed:', error);
-  }
-
-  registerIpcHandlers({
+  const ipc = registerIpcHandlers({
     mainWindowRef: () => mainWindow,
     store,
     taskRunner,
-    remoteServer,
     systemControl
   });
+  ipcCleanup = ipc.cleanup;
 }
 
 app.whenReady().then(async () => {
+  // Register safe-file protocol handler
+  protocol.handle('safe-file', (request) => {
+    const filePath = decodeURIComponent(request.url.replace('safe-file://', ''));
+    return net.fetch('file://' + filePath);
+  });
+
   if (isHeadlessMode && process.platform === 'darwin' && app.dock?.hide) {
     app.dock.hide();
   }
@@ -269,6 +260,7 @@ app.on('window-all-closed', () => {
   }
 });
 
-app.on('before-quit', () => {
+app.on('before-quit', async () => {
+  if (ipcCleanup) await ipcCleanup().catch(() => {});
   systemControl?.dispose();
 });

@@ -1,6 +1,7 @@
 const fsNative = require('node:fs');
 const fs = require('node:fs/promises');
 const http = require('node:http');
+const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { constants: fsConstants } = require('node:fs');
@@ -1224,7 +1225,13 @@ async function ensureVoiceCloneBackend(projectPath, logger = () => {}, progress 
   const scriptsDir = path.join(projectPath, 'scripts');
   const setupScript = path.join(scriptsDir, 'setup_voicebox_backend.sh');
   const startScript = path.join(scriptsDir, 'start_voicebox_backend.sh');
-  const venvDir = path.join(projectPath, '.venv-voicebox');
+  // Store venv in user data directory (not in project path which may be recreated)
+  const electronApp = getElectronApp();
+  const userDataDir = electronApp ? electronApp.getPath('userData') : path.join(os.homedir(), 'AntBot');
+  const voiceboxEnvDir = path.join(userDataDir, 'voicebox-env');
+  await fs.mkdir(voiceboxEnvDir, { recursive: true }).catch(() => {});
+  const venvDir = path.join(voiceboxEnvDir, '.venv-voicebox');
+  const setupMarker = path.join(voiceboxEnvDir, '.voicebox-setup-done');
   const venvPython = await resolveVoiceboxVenvPython(venvDir);
   const backendMain = path.join(projectPath, 'vendor', 'voicebox', 'backend', 'main.py');
   const backendRequirements = path.join(projectPath, 'vendor', 'voicebox', 'backend', 'requirements.txt');
@@ -1283,9 +1290,32 @@ async function ensureVoiceCloneBackend(projectPath, logger = () => {}, progress 
     }
   }
 
-  const hasCompleteBackendRepo = hasBackendMain && hasBackendRequirements;
-  if (!hasCompleteBackendRepo) {
-    logger('检测到 voicebox 仓库结构不完整，准备重新初始化。');
+  // Check setup completion marker (stored in data directory, survives app rebuilds)
+  // Marker is only valid if venv Python binary actually exists
+  const hasSetupMarker = await exists(setupMarker);
+  const venvPythonExists = venvOk && hasVenvPython && await exists(venvPython);
+  if (hasSetupMarker && venvPythonExists && hasCompleteBackendRepo && !forceRepair) {
+    logger('voicebox 环境已就绪，跳过依赖安装，直接启动后端。');
+    const existing = startedVoiceboxBackends.get(projectPath);
+    const existingChild = getStartedChild(existing);
+    if (!existingChild || existingChild.exitCode !== null) {
+      const bashBinary = await resolveBashBinary();
+      const launchCommand = process.platform === 'win32' ? venvPython : bashBinary;
+      const startScript = path.join(projectPath, 'scripts', 'start_voicebox_backend.sh');
+      const launchArgs = process.platform === 'win32'
+        ? ['-u', '-m', 'backend.main', '--host', '127.0.0.1', '--port', '17493', '--data-dir', path.join(projectPath, 'data')]
+        : [startScript];
+      const env = { ...process.env, VOICEBOX_PYTHON: venvPython, VENV_DIR: venvDir };
+      const logFilePath = await getVoiceboxLogFilePath(projectPath);
+      const child = spawn(launchCommand, launchArgs, { cwd: projectPath, env, stdio: ['ignore', 'pipe', 'pipe'], shell: process.platform === 'win32' });
+      startedVoiceboxBackends.set(projectPath, { child, logFilePath });
+      progress({ status: 'running', step: '启动后端', percent: 80, message: '正在启动 voicebox 后端...' });
+      await waitForVoiceboxReady(15000, logger);
+      logger('voicebox 后端已就绪（跳过安装）。');
+    } else {
+      logger('voicebox 后端已在运行。');
+    }
+    return;
   }
 
   const needsSetup = forceRepair || !(venvOk && hasCompleteBackendRepo);
@@ -1315,7 +1345,8 @@ async function ensureVoiceCloneBackend(projectPath, logger = () => {}, progress 
 
     const env = {
       ...process.env,
-      PYTHON_BIN: pythonBinary
+      PYTHON_BIN: pythonBinary,
+      VENV_DIR: venvDir  // Override default venv location to data directory
     };
     await runScriptWithLogs(setupScript, {
       cwd: projectPath,
@@ -1324,6 +1355,12 @@ async function ensureVoiceCloneBackend(projectPath, logger = () => {}, progress 
       logger,
       logPrefix: '[voicebox setup] '
     });
+    // Write setup completion marker
+    await fs.writeFile(setupMarker, JSON.stringify({
+      completedAt: new Date().toISOString(),
+      pythonBinary,
+      projectPath
+    }), 'utf-8').catch(() => {});
   }
 
   const resolvedVenvPython = await resolveVoiceboxVenvPython(venvDir);
@@ -1391,10 +1428,12 @@ async function ensureVoiceCloneBackend(projectPath, logger = () => {}, progress 
           PYTHONUNBUFFERED: '1',
           PYTHONPATH: buildVoiceboxPythonPath(projectPath),
           VOICEBOX_DATA_DIR: dataDir,
-          VOICEBOX_MODELS_DIR: modelsDir
+          VOICEBOX_MODELS_DIR: modelsDir,
+          VENV_DIR: venvDir
         })
       : withRuntimeEnv({
-          PYTHONUNBUFFERED: '1'
+          PYTHONUNBUFFERED: '1',
+          VENV_DIR: venvDir
         });
 
     const child = await spawnLoggedDetachedProcess(launchCommand, launchArgs, {

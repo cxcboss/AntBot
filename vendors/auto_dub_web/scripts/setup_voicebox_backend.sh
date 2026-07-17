@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENDOR_DIR="$ROOT_DIR/vendor/voicebox"
-VENV_DIR="$ROOT_DIR/.venv-voicebox"
+VENV_DIR="${VENV_DIR:-$ROOT_DIR/.venv-voicebox}"
 PYTHON_BIN="${PYTHON_BIN:-python3.11}"
 VOICEBOX_MAIN="$VENDOR_DIR/backend/main.py"
 VOICEBOX_REQUIREMENTS="$VENDOR_DIR/backend/requirements.txt"

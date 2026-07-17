@@ -40,7 +40,12 @@ class TaskRunner {
 
   buildRunId() {
     this.jobSequence += 1;
-    return `${Date.now()}-${this.jobSequence}`;
+    return `run-${Date.now()}-${this.jobSequence}`;
+  }
+
+  buildTaskId() {
+    this.jobSequence += 1;
+    return `task-${Date.now()}-${this.jobSequence}`;
   }
 
   createJob(kind, payload, userContext = {}) {
@@ -369,10 +374,27 @@ class TaskRunner {
       if (requestUserId && row.userId !== requestUserId) {
         throw new Error('不能恢复其他用户的任务。');
       }
-      const task = this.currentJob?.payload?.tasks?.find((item) => item.id === targetId)
-        || (this.currentJob?.payload?.task?.id === targetId ? this.currentJob.payload.task : null);
-      if (task) {
-        task.__stopped = false;
+      // Clear __stopped on both the job payload task AND the queue reference
+      const tasks = this.currentJob?.payload?.tasks || [];
+      const debugTask = this.currentJob?.payload?.task;
+      for (const t of tasks) {
+        if (t.id === targetId) {
+          t.__stopped = false;
+        }
+      }
+      if (debugTask?.id === targetId) {
+        debugTask.__stopped = false;
+      }
+      // Also clear __stopped on any queued jobs containing this task
+      for (const job of this.queue) {
+        const queuedTasks = job.kind === 'debug-publish'
+          ? [job.payload?.task].filter(Boolean)
+          : (Array.isArray(job.payload?.tasks) ? job.payload.tasks : []);
+        for (const t of queuedTasks) {
+          if (t.id === targetId) {
+            t.__stopped = false;
+          }
+        }
       }
       if (row.status === 'stopped') {
         this.setTaskState(targetId, {
@@ -406,7 +428,7 @@ class TaskRunner {
         : null;
       const clonedTask = {
         ...taskPayload,
-        id: this.buildRunId(),
+        id: this.buildTaskId(),
         publishAt: publishAt && !Number.isNaN(publishAt.getTime()) ? publishAt : null
       };
       const scheduled = this.enqueueTasks([clonedTask], {
@@ -435,22 +457,29 @@ class TaskRunner {
       tasks: []
     }, userContext);
     job.payload.tasks = tasks.map((task, index) => this.decorateTask(task, job, index));
-    const queued = this.running;
-    let queuePosition = 0;
     const activeQueuedCount = this.getQueuedTaskRows().filter((item) => item.status !== 'stopped').length;
 
-    if (queued) {
+    if (this.running) {
       this.queue.push(job);
-      queuePosition = activeQueuedCount + job.payload.tasks.filter((task) => !task.__stopped).length;
+      const queuePosition = activeQueuedCount + job.payload.tasks.filter((task) => !task.__stopped).length;
       this.log('', `收到 ${job.userName} 的新任务，已加入队列（前方还有 ${Math.max(0, activeQueuedCount)} 条）。`);
       this.emitProgress();
-    } else {
-      void this.runJob(job);
+      return {
+        queued: true,
+        queuePosition,
+        runId: job.runId,
+        taskIds: job.payload.tasks.map((task) => task.id),
+        promise: job.promise
+      };
     }
 
+    // Set running immediately to prevent TOCTOU race with concurrent calls
+    this.running = true;
+    void this.runJob(job);
+
     return {
-      queued,
-      queuePosition,
+      queued: false,
+      queuePosition: 0,
       runId: job.runId,
       taskIds: job.payload.tasks.map((task) => task.id),
       promise: job.promise
@@ -464,22 +493,28 @@ class TaskRunner {
 
     const job = this.createJob('debug-publish', { task: null, videoPath }, userContext);
     job.payload.task = this.decorateTask(task, job, 0);
-    const queued = this.running;
-    let queuePosition = 0;
     const activeQueuedCount = this.getQueuedTaskRows().filter((item) => item.status !== 'stopped').length;
 
-    if (queued) {
+    if (this.running) {
       this.queue.push(job);
-      queuePosition = activeQueuedCount + 1;
+      const queuePosition = activeQueuedCount + 1;
       this.log('', `${job.userName} 的调试发布已加入队列（前方还有 ${Math.max(0, activeQueuedCount)} 条）。`);
       this.emitProgress();
-    } else {
-      void this.runJob(job);
+      return {
+        queued: true,
+        queuePosition,
+        runId: job.runId,
+        taskIds: [job.payload.task.id],
+        promise: job.promise
+      };
     }
 
+    this.running = true;
+    void this.runJob(job);
+
     return {
-      queued,
-      queuePosition,
+      queued: false,
+      queuePosition: 0,
       runId: job.runId,
       taskIds: [job.payload.task.id],
       promise: job.promise
@@ -682,9 +717,9 @@ class TaskRunner {
             finishedAt: nowIso(),
             attempt: attemptIndex + 1,
             retryCount: attemptIndex,
-            retryable: false
+            retryable: true
           }));
-          return { status: 'failed', retryable: false };
+          return { status: 'failed', retryable: true };
         }
 
         this.currentTaskId = task.id;
@@ -872,7 +907,7 @@ class TaskRunner {
             return { status: 'completed', retryable: false };
           }
 
-          const isStopped = task.__stopped || (this.stopRequested && this.currentTaskId === task.id) || /任务已停止/.test(String(error?.message || ''));
+          const isStopped = task.__stopped || (this.stopRequested && this.currentTaskId === task.id);
           const noRetryEncryptedDownload = currentStep === 'download' && this.isEncryptedDownloadError(error);
           const status = isStopped ? 'stopped' : 'failed';
           const finalMessage = noRetryEncryptedDownload
@@ -1132,14 +1167,17 @@ class TaskRunner {
       return;
     }
 
-    const tempDir = path.dirname(uniquePaths[0]);
-    try {
-      const remain = await fs.readdir(tempDir);
-      if (!remain.length) {
-        await fs.rm(tempDir, { recursive: true, force: true });
+    // Collect all unique parent directories
+    const parentDirs = new Set(uniquePaths.map((p) => path.dirname(p)));
+    for (const tempDir of parentDirs) {
+      try {
+        const remain = await fs.readdir(tempDir);
+        if (!remain.length) {
+          await fs.rm(tempDir, { recursive: true, force: true });
+        }
+      } catch {
+        // noop
       }
-    } catch {
-      // noop
     }
   }
 }

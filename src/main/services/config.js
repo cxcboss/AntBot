@@ -1,6 +1,8 @@
 const os = require('node:os');
 const path = require('node:path');
 
+const DEFAULT_DATA_DIR = path.join(os.homedir(), 'AntBot');
+
 function formatCnDateFolder(date = new Date()) {
   const year = String(date.getFullYear()).slice(-2);
   return `${date.getMonth() + 1}月${date.getDate()}日${year}年`;
@@ -64,6 +66,13 @@ function deepMerge(target, source) {
 }
 
 const BASE_DEFAULT_SETTINGS = {
+  dataDir: DEFAULT_DATA_DIR,
+  ui: {
+    selectedStyle: '',
+    editDefaults: { style: '', voice: '', subtitle: '开启' },
+    sidebarOpen: true,
+    statPeriod: 'day',
+  },
   paths: {
     tempDir: path.join(os.homedir(), 'Desktop', '视频', '_临时'),
     outputBaseDir: path.join(os.homedir(), 'Desktop', '视频'),
@@ -87,10 +96,10 @@ const BASE_DEFAULT_SETTINGS = {
     failedTaskRetries: 0
   },
   remote: {
-    enabled: true,
+    enabled: false,
     port: 17888,
     password: '',
-    publicMode: 'cloudflare-quick',
+    publicMode: 'off',
     cloudflaredPath: ''
   },
   system: {
@@ -120,6 +129,13 @@ const BASE_DEFAULT_SETTINGS = {
     profileName: '',
     language: 'zh',
     lastUpdatedAt: ''
+  },
+  api: {
+    provider: 'agnes',
+    baseUrl: 'https://apihub.agnes-ai.com/v1',
+    apiKey: '',
+    modelId: '',
+    availableModels: []
   },
   loginHints: {
     videoChannel: {
@@ -234,6 +250,7 @@ const STEP_NAMES = {
 
 module.exports = {
   DEFAULT_SETTINGS,
+  DEFAULT_DATA_DIR,
   buildDefaultSettings,
   getSettingsOverridesFromEnv,
   STEP_NAMES,

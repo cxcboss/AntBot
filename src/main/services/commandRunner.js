@@ -1,12 +1,21 @@
 const { spawn } = require('node:child_process');
 const { withRuntimeEnv } = require('./runtimeEnv');
 
+function shellEscape(value) {
+  const raw = String(value ?? '');
+  if (!raw.length) {
+    return "''";
+  }
+  // Wrap in single quotes, escaping embedded single quotes
+  return "'" + raw.replace(/'/g, "'\\''") + "'";
+}
+
 function applyTemplate(template, variables) {
   return template.replace(/\{(\w+)\}/g, (_, key) => {
     if (!(key in variables)) {
       return '';
     }
-    return String(variables[key]);
+    return shellEscape(variables[key]);
   });
 }
 

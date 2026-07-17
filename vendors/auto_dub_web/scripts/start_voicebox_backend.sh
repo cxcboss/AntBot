@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENDOR_DIR="$ROOT_DIR/vendor/voicebox"
-VENV_DIR="$ROOT_DIR/.venv-voicebox"
+VENV_DIR="${VENV_DIR:-$ROOT_DIR/.venv-voicebox}"
 DATA_DIR="$ROOT_DIR/data"
 MODELS_DIR="$DATA_DIR/models"
 PORT="${VOICEBOX_PORT:-17493}"

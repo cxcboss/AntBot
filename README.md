@@ -231,7 +231,6 @@ src/remote/               远程控制页面
 vendors/auto_dub_web/     默认剪辑 / 配音能力
 deploy/fnos/              fnOS Docker 部署方案
 deploy/fnos-relay-app/    NAS 中转 app
-clients/antbot_flutter/   Flutter 客户端
 scripts/                  打包、环境准备、镜像导出脚本
 ```
 
@@ -251,7 +250,5 @@ scripts/                  打包、环境准备、镜像导出脚本
 
 ## 相关文档
 
-- [`AI_IMPLEMENTATION.md`](AI_IMPLEMENTATION.md)
-- [`DEV_LOG.md`](DEV_LOG.md)
 - [`deploy/fnos/README.md`](deploy/fnos/README.md)
 - [`deploy/fnos-relay-app/README.md`](deploy/fnos-relay-app/README.md)

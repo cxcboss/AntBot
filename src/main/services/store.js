@@ -383,8 +383,9 @@ function normalizeState(seed = {}) {
 }
 
 class StoreService {
-  constructor() {
-    this.filePath = path.join(app.getPath('userData'), STORE_FILE);
+  constructor(dataDir) {
+    const dir = dataDir || app.getPath('userData');
+    this.filePath = path.join(dir, STORE_FILE);
     this.state = buildDefaultState();
     this.loaded = false;
     this.writeQueue = Promise.resolve();
@@ -675,7 +676,9 @@ class StoreService {
 
   async persist() {
     this.writeQueue = this.writeQueue
-      .catch(() => {})
+      .catch((error) => {
+        console.warn('[store] previous write failed:', error?.message || error);
+      })
       .then(async () => {
         const payload = JSON.stringify(this.state, null, 2);
         const tempPath = `${this.filePath}.${process.pid}.${Date.now()}.tmp`;

@@ -7,307 +7,299 @@
   <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
-  <div class="app-shell">
-    <aside class="sidebar">
-      <div class="sidebar-brand">
-        <div class="sidebar-brand-copy">
-          <div class="sidebar-logo">搬运蚁</div>
-          <div class="sidebar-version" id="app-badge">antbot</div>
-        </div>
-        <div class="sidebar-brand-mark"></div>
+  <div class="splash" id="splash"><div class="splash-ball" id="splash-ball"></div></div>
+  <div class="titlebar" id="titlebar-drag"></div>
+
+  <div class="app">
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+    <nav class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <span class="sidebar-logo">搬运蚁</span>
+        <span class="sidebar-ver"><span id="app-badge"></span><button class="sidebar-update" id="check-update-btn" type="button">更新</button></span>
       </div>
 
-      <div class="user-list" id="user-list"></div>
-
-      <button id="add-user-btn" class="sidebar-add-btn" type="button">添加用户</button>
-
-      <div class="sidebar-footer">
-        <button id="gemini-login-btn" class="sidebar-login-btn" type="button">Gemini 登录</button>
-        <div class="sidebar-footer-actions">
-          <button id="voice-clone-btn" class="sidebar-voice-btn" type="button">音色克隆</button>
-          <button id="remote-btn" class="sidebar-icon-btn" type="button" aria-label="远程控制"></button>
-          <button id="settings-btn" class="sidebar-icon-btn" type="button" aria-label="打开设置"></button>
-        </div>
+      <!-- 侧边栏标签切换 -->
+      <div class="sidebar-tabs">
+        <button class="sb-tab active" data-sbtab="features" type="button">功能</button>
+        <button class="sb-tab" data-sbtab="history" type="button">历史</button>
       </div>
-    </aside>
 
-    <main class="workspace">
-      <section class="workspace-surface">
-        <header class="workspace-header">
-          <div class="workspace-headline">
-            <div class="workspace-kicker">多平台任务工作台</div>
-            <h1 id="current-user-name" class="workspace-title">蚂蚁1</h1>
-            <div id="startup-status" class="workspace-status">等待启动检查</div>
-          </div>
-          <div class="workspace-actions">
-            <button type="button" class="header-action-btn service-action-btn" data-login-service="videoChannel" id="video-login-btn" aria-label="登录视频号"></button>
-            <button type="button" class="header-action-btn service-action-btn" data-login-service="douyin" id="douyin-login-btn" aria-label="登录抖音"></button>
-            <button type="button" class="header-action-btn account-action-btn" id="account-btn" aria-label="当前用户设置"></button>
-          </div>
-        </header>
+      <!-- 功能面板 -->
+      <div class="sb-panel" id="sbpanel-features">
+        <button class="sb-btn sb-feat active" data-feat="main" type="button"><span class="icon" data-icon="play"></span><span>主控</span></button>
+        <button class="sb-btn sb-feat" data-feat="edit" type="button"><span class="icon" data-icon="settings"></span><span>剪辑</span></button>
+        <button class="sb-btn sb-feat" data-feat="publish" type="button"><span class="icon" data-icon="send"></span><span>发布</span></button>
+        <button class="sb-btn sb-feat" data-feat="style-ref" type="button"><span class="icon" data-icon="mic"></span><span>风格参考</span></button>
+        <button class="sb-btn sb-feat" data-feat="subtitle-voice" type="button"><span class="icon" data-icon="settings"></span><span>字幕与音色</span></button>
+      </div>
 
-        <section class="chat-shell">
-          <div id="chat-scroll" class="chat-scroll">
-            <div id="chat-stream" class="chat-stream"></div>
-          </div>
-
-          <div class="composer-shell">
-            <div class="composer-topline">
-              <div id="task-summary" class="task-summary">等待输入任务</div>
-              <button id="refresh-startup-btn" class="btn btn-ghost btn-inline" type="button">检查环境</button>
+      <!-- 历史面板 -->
+      <div class="sb-panel hidden" id="sbpanel-history">
+        <div class="stat-cards">
+          <div class="stat-card"><div class="stat-label">总发布</div><div class="stat-value" id="stat-total">0</div></div>
+          <div class="stat-card">
+            <div class="stat-label" id="stat-period-label">今日</div>
+            <div class="stat-value" id="stat-period">0</div>
+            <div class="stat-switch">
+              <button class="stat-sw active" data-period="day" type="button">日</button>
+              <button class="stat-sw" data-period="week" type="button">周</button>
+              <button class="stat-sw" data-period="month" type="button">月</button>
             </div>
-            <div class="composer-card">
-              <label class="input-guide" for="task-input">
-                视频文案、话题、发布时间(3月8日17时38分)、任务名/原创/不原创、视频链接、时间段(0:12-1:30)。文案、话题、时间都可以留空。
-              </label>
-              <div class="task-input-wrap">
-                <textarea
-                  id="task-input"
-                  class="task-input"
-                  placeholder="每行一条任务。平台关键词：微信=发布到视频号；抖音=发布到抖音；都写=双平台；都不写=默认视频号。"
-                ></textarea>
-                <button id="run-btn" class="send-btn" type="button" aria-label="发送任务"></button>
+          </div>
+        </div>
+        <div class="sb-divider"></div>
+        <button class="sb-btn plat-btn" id="open-video-channel" type="button"><span>视频号创作者中心</span><span class="icon sb-arrow" data-icon="chevronRight"></span></button>
+        <button class="sb-btn plat-btn" id="open-douyin" type="button"><span>抖音创作者中心</span><span class="icon sb-arrow" data-icon="chevronRight"></span></button>
+      </div>
+
+      <!-- 底部设置 -->
+      <div class="sidebar-foot">
+        <button class="sb-btn" id="open-settings-btn" type="button"><span class="icon" data-icon="settings"></span><span>设置</span></button>
+      </div>
+    </nav>
+
+    <main class="main">
+      <header class="topbar">
+        <button class="tb-btn tb-toggle" id="sidebar-toggle" type="button" aria-label="切换侧边栏"><span class="icon" data-icon="sidebar"></span></button>
+        <div class="tb-center">
+          <h1 class="tb-title" id="page-title">主控</h1>
+          <div class="tb-status" id="startup-status">没有任务</div>
+        </div>
+      </header>
+
+      <!-- 功能页面容器 -->
+      <div class="feat-views">
+
+        <!-- 主控页 -->
+        <div class="feat-view active" id="view-main">
+          <div class="chat-area" id="chat-area">
+            <div class="chat-scroll" id="chat-scroll"><div class="chat-stream" id="chat-stream"></div></div>
+          </div>
+          <div class="resize-handle" id="resize-handle"><div class="resize-grip"></div></div>
+          <div class="composer" id="composer">
+            <div class="composer-box">
+              <div class="composer-row">
+                <button class="composer-add" id="pick-video-btn" type="button" title="选择视频"><span class="icon" data-icon="plus"></span></button>
+                <textarea id="task-input" class="composer-input" rows="1" placeholder="推广任务名，是否原创，链接"></textarea>
+                <button class="composer-send" id="run-btn" type="button"><span class="icon" data-icon="send"></span></button>
               </div>
             </div>
-            <div id="setting-chips" class="setting-chips"></div>
+            <div class="chips" id="setting-chips"></div>
           </div>
-        </section>
-      </section>
+        </div>
+
+        <!-- 剪辑页 -->
+        <div class="feat-view" id="view-edit">
+          <div class="edit-layout">
+            <!-- 视频列表区 -->
+            <div class="edit-list" id="edit-list">
+              <div class="edit-empty" id="edit-empty">
+                <div class="edit-empty-icon"><span class="icon" data-icon="plus"></span></div>
+                <p>点击下方"添加"按钮导入视频文件</p>
+              </div>
+              <div class="edit-cards" id="edit-cards"></div>
+            </div>
+            <!-- 底部控制栏 -->
+            <div class="edit-bar">
+              <div class="edit-bar-left">
+                <button class="btn btn-ghost" id="edit-add-btn" type="button"><span class="icon" data-icon="plus"></span>添加</button>
+                <button class="btn btn-primary" id="edit-start-btn" type="button"><span class="icon" data-icon="play"></span>开始剪辑</button>
+              </div>
+              <div class="edit-bar-right">
+                <button class="edit-default-btn" data-edit-default="style" type="button"><span class="edit-default-label">风格</span><span class="edit-default-val" id="default-style-val">默认</span></button>
+                <button class="edit-default-btn" data-edit-default="voice" type="button"><span class="edit-default-label">音色</span><span class="edit-default-val" id="default-voice-val">默认</span></button>
+                <button class="edit-default-btn" data-edit-default="subtitle" type="button"><span class="edit-default-label">字幕</span><span class="edit-default-val" id="default-subtitle-val">开启</span></button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 其他占位页面 -->
+        <div class="feat-view" id="view-publish"><div class="feat-placeholder"><div class="feat-icon"><span class="icon" data-icon="send"></span></div><h2>发布</h2><p>多平台发布管理</p></div></div>
+        <div class="feat-view" id="view-style-ref">
+          <div class="style-layout">
+            <div class="style-list-area" id="style-list-area">
+              <div class="style-empty" id="style-empty">
+                <div class="edit-empty-icon"><span class="icon" data-icon="plus"></span></div>
+                <p>点击下方按钮添加风格</p>
+              </div>
+              <div class="style-cards" id="style-cards"></div>
+            </div>
+            <div class="edit-bar">
+              <div class="edit-bar-left">
+                <button class="btn btn-ghost" id="style-add-video-btn" type="button"><span class="icon" data-icon="plus"></span>添加视频</button>
+                <button class="btn btn-ghost" id="style-add-text-btn" type="button"><span class="icon" data-icon="plus"></span>添加文本</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- 字幕与音色页 -->
+        <div class="feat-view" id="view-subtitle-voice">
+          <div class="sv-scroll">
+
+            <!-- 字幕样式区 -->
+            <div class="sv-block">
+              <h3 class="sv-title">字幕样式</h3>
+              <p class="sv-desc">设置字幕的字体和外观</p>
+              <div class="sv-form">
+                <label>字体
+                  <div class="input-row">
+                    <input id="font-current-path" type="text" value="系统默认" readonly />
+                    <button class="btn btn-sm btn-ghost" id="pick-font-btn" type="button">使用自定义</button>
+                  </div>
+                </label>
+                <div class="sv-form-row">
+                  <label>字幕颜色<input id="sub-color" type="color" value="#FFA100" /></label>
+                  <label>描边颜色<input id="sub-stroke" type="color" value="#000000" /></label>
+                </div>
+                <label>字幕位置 (0-100)<input id="sub-position" type="number" min="0" max="100" value="12" /></label>
+              </div>
+            </div>
+
+            <div class="sv-sep"></div>
+
+            <!-- 音色克隆区 -->
+            <div class="sv-block">
+              <h3 class="sv-title">音色克隆</h3>
+              <p class="sv-desc">上传音频样本，克隆专属音色</p>
+              <div class="voice-list" id="voice-list"></div>
+              <div class="sv-sep"></div>
+              <div class="voice-dropzone" id="voice-dropzone">
+                <span class="icon" data-icon="mic"></span>
+                <span class="voice-drop-text" id="voice-drop-text">拖入音频或点击选择</span>
+              </div>
+              <div class="voice-form-col">
+                <textarea id="voice-ref-text" rows="3" placeholder="参考文本（必须与音频内容一致）"></textarea>
+                <input id="voice-profile-name" type="text" placeholder="音色名称" />
+              </div>
+              <div class="voice-clone-anim hidden" id="voice-clone-anim">
+                <div class="voice-anim-dot"></div>
+                <div class="voice-anim-dot"></div>
+                <div class="voice-anim-dot"></div>
+                <span class="voice-anim-text" id="voice-anim-text">正在克隆...</span>
+              </div>
+              <button class="btn btn-primary btn-block" id="voice-start-btn" type="button" disabled>开始克隆</button>
+            </div>
+          </div>
+        </div>
+      </div>
     </main>
   </div>
 
-  <dialog id="account-dialog" class="settings-dialog compact-dialog">
-    <form id="account-form" method="dialog">
-      <h3>当前用户设置</h3>
+  <!-- 右键菜单 -->
+  <div class="ctx-menu hidden" id="ctx-menu">
+    <button class="ctx-item" data-ctx="delete" type="button">删除此任务</button>
+  </div>
 
-      <div class="settings-grid compact-grid">
-        <label>用户名
-          <input id="account-user-name" name="userName" type="text" />
-        </label>
-        <label>Gemini 引用
-          <select id="account-gemini-profile" name="geminiProfileId"></select>
-        </label>
+  <!-- 设置弹窗 -->
+  <dialog id="settings-dialog" class="dlg dlg-wide"><div class="dlg-box">
+    <div class="dlg-head"><h3>设置</h3><button type="button" aria-label="关闭" class="dlg-close" id="close-settings-btn"><span class="icon" data-icon="x"></span></button></div>
+    <div class="dlg-body dlg-scroll" id="settings-body">
+
+      <div class="s-section-label">路径配置</div>
+      <div class="s-row"><span class="s-label">数据目录</span><div class="s-input-row"><input id="s-dataDir" type="text" placeholder="~/AntBot" /><button type="button" id="open-data-dir-setting-btn" class="btn btn-sm btn-ghost"><span class="icon" data-icon="folderOpen"></span></button></div></div>
+      <div class="s-row"><span class="s-label">输出根目录</span><div class="s-input-row"><input id="s-outputBaseDir" type="text" /><button type="button" id="open-output-dir-btn" class="btn btn-sm btn-ghost"><span class="icon" data-icon="folderOpen"></span></button></div></div>
+      <div class="s-row"><button type="button" id="migrate-old-btn" class="btn btn-ghost"><span class="icon" data-icon="package"></span>迁移旧版数据</button></div>
+
+      <div class="s-divider"></div>
+
+      <div class="s-section-label">AI 模型</div>
+      <div class="s-row"><span class="s-label">API Key</span><div class="s-input-row"><input id="s-apiKey" type="password" placeholder="输入 API Key 自动保存" /><button type="button" id="fetch-models-btn" class="btn btn-sm btn-ghost">获取模型</button></div></div>
+      <div class="s-hint">需要选取支持识别图片的模型</div>
+      <div class="s-row"><span class="s-label">Base URL</span><input id="s-apiBaseUrl" type="text" placeholder="https://apihub.agnes-ai.com/v1" /></div>
+      <div class="s-row"><span class="s-label">选择模型</span><select id="s-apiModelId"><option value="">请先获取模型</option></select></div>
+
+      <div class="s-divider"></div>
+
+      <div class="s-section-label">安装依赖</div>
+      <div class="deps-check-list" id="deps-check-list"></div>
+      <div class="s-row"><span class="s-label">模型存储</span><div class="s-input-row"><span id="models-dir-path" class="s-path">-</span><button type="button" id="models-open-dir-btn" class="btn btn-sm btn-ghost"><span class="icon" data-icon="folderOpen"></span></button></div></div>
+      <div class="models-list" id="models-list"></div>
+
+      <div class="s-divider"></div>
+
+      <div class="s-section-label">语音克隆环境</div>
+      <div class="voicebox-status" id="voicebox-status">
+        <div class="voicebox-items" id="voicebox-items"></div>
+        <div class="s-row"><span class="s-label">存储路径</span><div class="s-input-row"><span id="voicebox-path" class="s-path">-</span><button type="button" id="voicebox-open-btn" class="btn btn-sm btn-ghost"><span class="icon" data-icon="folderOpen"></span></button></div></div>
+      </div>
+      <div class="dlg-actions">
+        <button type="button" id="voicebox-reset-btn" class="btn btn-ghost"><span class="icon" data-icon="trash"></span>重置环境</button>
+        <button type="button" id="voicebox-install-btn" class="btn btn-primary"><span class="icon" data-icon="download"></span>安装依赖</button>
       </div>
 
-      <div class="task-summary" id="account-summary">当前用户默认引用默认 Gemini。</div>
+    </div>
+  </div></dialog>
+  </div></dialog>
 
-      <div class="dialog-actions">
-        <button type="button" id="account-save-btn" class="btn btn-start">保存用户设置</button>
-        <button type="button" id="account-gemini-login-btn" class="btn btn-ghost">登录当前 Gemini</button>
-        <button type="button" id="account-create-gemini-btn" class="btn btn-ghost">新增 Gemini</button>
-        <button type="button" id="account-delete-btn" class="btn btn-stop">删除当前用户</button>
-        <button type="button" id="account-close-btn" class="btn btn-ghost">关闭</button>
+  <!-- 语音克隆弹窗 -->
+  <dialog id="voice-clone-dialog" class="dlg"><div class="dlg-box">
+    <div class="dlg-head"><h3>语音克隆</h3><button type="button" aria-label="关闭" class="dlg-close" id="voice-clone-close-btn"><span class="icon" data-icon="x"></span></button></div>
+    <form id="voice-clone-form" method="dialog" class="dlg-body">
+      <p class="dlg-hint">上传音频样本，克隆完成后写入全局音色。</p>
+      <div class="dlg-grid">
+        <label class="full">样本音频<div class="input-row"><input name="samplePath" type="text" placeholder="路径" /><button type="button" id="voice-clone-pick-sample-btn" class="btn btn-sm btn-ghost"><span class="icon" data-icon="folder"></span></button></div></label>
+        <label class="full">参考文本<textarea name="referenceText" rows="3" placeholder="必须和音频内容一致"></textarea></label>
+        <label>档案名<input name="profileName" type="text" /></label>
+        <label>语言<select name="language"><option value="zh">中文</option><option value="en">英文</option></select></label>
       </div>
+      <div class="progress-box" id="voice-clone-progress-box">
+        <div class="prog-info"><span id="voice-clone-progress-step">等待</span><strong id="voice-clone-progress-percent">0%</strong></div>
+        <div class="prog-track"><div id="voice-clone-progress-bar" class="prog-bar"></div></div>
+        <pre class="log-box" id="voice-clone-progress-log">暂无日志</pre>
+      </div>
+      <div class="dlg-actions"><button type="button" id="voice-clone-run-btn" class="btn btn-primary"><span class="icon" data-icon="play"></span>开始克隆</button></div>
     </form>
-  </dialog>
+  </div></dialog>
 
-  <dialog id="settings-dialog" class="settings-dialog">
-    <form id="settings-form" method="dialog">
-      <h3 id="settings-dialog-title">设置</h3>
-
-      <div class="settings-grid">
-        <label>临时目录
-          <input name="tempDir" type="text" />
-        </label>
-        <label>输出根目录
-          <input name="outputBaseDir" type="text" />
-        </label>
-        <label>YouTube 项目目录
-          <input name="youtubeProjectPath" type="text" />
-        </label>
-        <label>剪辑项目目录
-          <input name="editProjectPath" type="text" />
-        </label>
-        <label>发布项目目录
-          <input name="publishProjectPath" type="text" />
-        </label>
-        <label>下载命令
-          <input name="downloadCmd" type="text" placeholder='例：python main.py --url "{url}" --out "{output}"' />
-        </label>
-        <label>Gemini 命令（可选）
-          <input name="geminiCmd" type="text" placeholder="留空则走内置浏览器自动化" />
-        </label>
-        <label>Gemini 字幕网址（可选）
-          <input name="geminiSubtitleUrl" type="text" placeholder="留空使用默认 Gemini 地址" />
-        </label>
-        <label>剪辑命令
-          <input name="editCmd" type="text" placeholder='例：python run.py --in "{inputVideo}" --sub "{subtitleFile}" --out "{outputVideo}"' />
-        </label>
-        <label>发布命令
-          <input name="publishCmd" type="text" placeholder='例：python publish.py --video "{video}" --time "{scheduleAt}"' />
-        </label>
-        <label>自动发布
-          <select name="publishEnabled">
-            <option value="true">开启</option>
-            <option value="false">关闭</option>
-          </select>
-        </label>
-        <label>失败重试次数
-          <input name="failedRetryCount" type="number" min="0" step="1" placeholder="0=不重试" />
-        </label>
-        <label>语音克隆命令（高级可选）
-          <input name="voiceCloneCmd" type="text" placeholder="留空则使用内置 Voicebox 克隆流程" />
-        </label>
-        <label>语速
-          <input name="voiceSpeed" type="number" step="0.1" min="0.5" max="2.0" />
-        </label>
-        <label>旁白语音
-          <select name="voiceoverEnabled">
-            <option value="true">开启</option>
-            <option value="false">关闭</option>
-          </select>
-        </label>
-        <label>字幕
-          <select name="subtitleEnabled">
-            <option value="true">开启</option>
-            <option value="false">关闭</option>
-          </select>
-        </label>
-        <label>字幕颜色
-          <input name="subtitleTextColor" type="text" />
-        </label>
-        <label>描边颜色
-          <input name="subtitleStrokeColor" type="text" />
-        </label>
-        <label>字幕位置（0-100，100=顶部）
-          <input name="subtitlePositionPercent" type="number" min="0" max="100" step="1" />
-        </label>
-        <label>任务间隔毫秒
-          <input name="pauseBetweenTasksMs" type="number" min="0" step="500" />
-        </label>
-        <label>动作等待毫秒
-          <input name="actionDelayMs" type="number" min="500" step="100" />
-        </label>
-        <label>显示自动化窗口
-          <select name="showAutomationWindow">
-            <option value="true">是（调试）</option>
-            <option value="false">否（后台）</option>
-          </select>
-        </label>
-        <label>克隆音色 ID（可留空，克隆成功后自动写入）
-          <input name="voiceId" type="text" placeholder="通常无需手填" />
-        </label>
-        <label>克隆模型路径（兼容旧流程，可留空）
-          <input name="modelPath" type="text" placeholder="通常无需手填" />
-        </label>
+  <!-- 数据管理弹窗 -->
+  <dialog id="data-dialog" class="dlg"><div class="dlg-box">
+    <div class="dlg-head"><h3>数据管理</h3><button type="button" aria-label="关闭" class="dlg-close" id="close-data-btn"><span class="icon" data-icon="x"></span></button></div>
+    <div class="dlg-body">
+      <div class="info-list">
+        <div class="info-row"><span>版本</span><strong id="data-version">-</strong></div>
+        <div class="info-row"><span>数据</span><div class="info-val"><span id="data-path" class="info-path">-</span><button id="open-data-dir-btn" class="btn btn-sm btn-ghost"><span class="icon" data-icon="folderOpen"></span></button></div></div>
+        <div class="info-row"><span>日志</span><div class="info-val"><span id="data-log-path" class="info-path">-</span><button id="open-log-dir-btn" class="btn btn-sm btn-ghost"><span class="icon" data-icon="folderOpen"></span></button></div></div>
       </div>
-
-      <div class="login-actions">
-        <button type="button" class="btn btn-ghost" data-login-service="videoChannel">登录视频号</button>
-        <button type="button" class="btn btn-ghost" data-login-service="douyin">登录抖音</button>
+      <div class="dlg-actions">
+        <button id="migrate-data-btn" class="btn btn-ghost"><span class="icon" data-icon="package"></span>迁移旧版数据</button>
+        <button id="open-data-dir-main-btn" class="btn btn-primary"><span class="icon" data-icon="folderOpen"></span>打开数据目录</button>
       </div>
+    </div>
+  </div></dialog>
 
-      <div class="dependency-status-box">
-        <div class="dependency-status-line"><span>运行依赖</span><strong id="dependency-status-text">未检查</strong></div>
-        <div id="dependency-status-detail" class="dependency-status-detail">
-          Windows 版本会自动管理 Node.js、cloudflared、yt-dlp、FFmpeg；Python 和 Git Bash 会检测状态并提供下载入口。
-        </div>
-        <div class="dependency-action-row">
-          <button type="button" id="refresh-deps-btn" class="btn btn-ghost btn-inline">检查环境</button>
-          <button type="button" id="repair-deps-btn" class="btn btn-debug btn-inline">下载缺失依赖</button>
-          <button type="button" id="open-python-download-btn" class="btn btn-ghost btn-inline">Python</button>
-          <button type="button" id="open-gitbash-download-btn" class="btn btn-ghost btn-inline">Git Bash</button>
-        </div>
+  <!-- 添加文本风格弹窗 -->
+  <dialog id="style-text-dialog" class="dlg"><div class="dlg-box">
+    <div class="dlg-head"><h3>添加文本风格</h3><button type="button" aria-label="关闭" class="dlg-close" id="close-style-text-btn"><span class="icon" data-icon="x"></span></button></div>
+    <div class="dlg-body">
+      <div class="dlg-grid">
+        <label class="full">风格名称<input id="style-text-name" type="text" placeholder="例如：专业讲解风格" /></label>
+        <label class="full">风格提示词<textarea id="style-text-prompt" rows="6" placeholder="输入该风格的详细描述提示词..."></textarea></label>
       </div>
-
-      <div class="dialog-actions">
-        <button type="button" id="save-settings-btn" class="btn btn-start">保存设置</button>
-        <button type="button" id="close-settings-btn" class="btn btn-stop">关闭</button>
+      <div class="dlg-actions">
+        <button type="button" id="style-text-save-btn" class="btn btn-primary"><span class="icon" data-icon="check"></span>学习</button>
       </div>
-    </form>
-  </dialog>
+    </div>
+  </div></dialog>
 
-  <dialog id="voice-clone-dialog" class="settings-dialog voice-clone-dialog">
-    <form id="voice-clone-form" method="dialog">
-      <h3 id="voice-clone-dialog-title">语音克隆</h3>
-
-      <div class="voice-clone-note">
-        上传样本音频并填写对应文本，系统会自动准备 voicebox 后端。克隆完成后会写入全局音色，所有用户都可引用。
+  <!-- 添加视频风格弹窗 -->
+  <dialog id="style-video-dialog" class="dlg"><div class="dlg-box">
+    <div class="dlg-head"><h3>添加视频风格</h3><button type="button" aria-label="关闭" class="dlg-close" id="close-style-video-btn"><span class="icon" data-icon="x"></span></button></div>
+    <div class="dlg-body">
+      <div class="dlg-grid">
+        <label class="full">风格名称<input id="style-video-name" type="text" placeholder="例如：电影感风格" /></label>
+        <label class="full">已选视频<div id="style-video-files" class="info-path">未选择</div></label>
       </div>
-
-      <div class="voice-clone-grid">
-        <label class="wide-field">样本音频
-          <div class="input-with-action">
-            <input name="samplePath" type="text" placeholder="选择或粘贴 wav/mp3 路径" />
-            <button type="button" id="voice-clone-pick-sample-btn" class="btn btn-ghost btn-inline">选择</button>
-          </div>
-        </label>
-
-        <label class="wide-field">样本参考文本（必须和音频内容一致）
-          <textarea name="referenceText" rows="4" placeholder="例如：大家好，欢迎来到今天的视频解说。"></textarea>
-        </label>
-
-        <label>克隆档案名（可选）
-          <input name="profileName" type="text" placeholder="例如：我的旁白音色" />
-        </label>
-
-        <label>语言
-          <select name="language">
-            <option value="zh">中文（zh）</option>
-            <option value="en">英文（en）</option>
-          </select>
-        </label>
+      <div class="dlg-actions">
+        <button type="button" id="style-video-pick-btn" class="btn btn-ghost"><span class="icon" data-icon="folder"></span>选择视频</button>
+        <button type="button" id="style-video-start-btn" class="btn btn-primary"><span class="icon" data-icon="play"></span>开始学习</button>
       </div>
+    </div>
+  </div></dialog>
 
-      <div class="voice-clone-progress-box">
-        <div class="voice-clone-progress-head">
-          <span id="voice-clone-progress-step">等待开始</span>
-          <strong id="voice-clone-progress-percent">0%</strong>
-        </div>
-        <div class="progress-track">
-          <div id="voice-clone-progress-bar" class="progress-bar" style="width: 0%"></div>
-        </div>
-        <div id="voice-clone-progress-log" class="voice-clone-progress-log">暂无日志</div>
-      </div>
-
-      <div class="dialog-actions">
-        <button type="button" id="voice-clone-run-btn" class="btn btn-start">开始克隆</button>
-        <button type="button" id="voice-clone-close-btn" class="btn btn-stop">关闭</button>
-      </div>
-    </form>
-  </dialog>
-
-  <dialog id="remote-dialog" class="settings-dialog remote-dialog">
-    <form id="remote-form" method="dialog">
-      <h3 id="remote-dialog-title">远程设置</h3>
-
-      <div class="remote-note">
-        远程控制已改为全局共享配置。这里直接查看当前局域网和公网地址，按需刷新或统一开启/关闭。
-      </div>
-
-      <div class="remote-status-box">
-        <div class="remote-status-line"><span>服务状态</span><strong id="remote-status-text">未启用</strong></div>
-        <div class="remote-status-line">
-          <span>局域网地址</span>
-          <div class="remote-address-wrap">
-            <div id="remote-url-list" class="remote-url-list">保存后显示</div>
-            <button type="button" id="copy-remote-local-btn" class="btn btn-ghost btn-inline">复制</button>
-          </div>
-        </div>
-        <div class="remote-status-line">
-          <span>公网地址</span>
-          <div class="remote-address-wrap">
-            <div id="remote-public-url" class="remote-url-list">未开启</div>
-            <button type="button" id="copy-remote-public-btn" class="btn btn-ghost btn-inline">复制</button>
-          </div>
-        </div>
-        <div class="remote-status-line remote-qr-line">
-          <span>扫码访问</span>
-          <div class="remote-qr-wrap">
-            <img id="remote-qr-image" class="remote-qr-image hidden" alt="远程控制二维码" />
-            <div id="remote-qr-empty" class="remote-qr-empty">开启远程后显示二维码</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="dialog-actions">
-        <button type="button" id="toggle-remote-btn" class="btn btn-start">开启</button>
-        <button type="button" id="refresh-remote-btn" class="btn btn-ghost">刷新</button>
-        <button type="button" id="close-remote-btn" class="btn btn-stop">关闭</button>
-      </div>
-    </form>
-  </dialog>
-
+  <div class="toasts" id="toast-container"></div>
+  <script src="./anime.min.js"></script>
   <script type="module" src="./app.js"></script>
 </body>
 </html>
