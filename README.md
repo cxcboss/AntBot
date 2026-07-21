@@ -219,6 +219,7 @@ npm run build:linux
 说明：
 
 - mac 打包会使用根目录 `icons.png` 生成 `assets/icon.icns`
+- mac 只生成 `release/mac-arm64/搬运蚁.app`，不生成 DMG
 - 打包时会携带 `vendors/auto_dub_web`
 - Windows 构建可使用单独的 portable 产物
 

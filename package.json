@@ -12,7 +12,7 @@
     "prepare:playwright:win": "node ./scripts/prepare-playwright-win.js",
     "prepare:voicebox": "node ./scripts/prepare-voicebox.js",
     "prepare:icon:mac": "bash ./scripts/generate-mac-icon.sh",
-    "build:mac": "npm run prepare:icon:mac && npm run prepare:voicebox && electron-builder --mac dmg && node ./scripts/fix-mac-update-metadata.js",
+    "build:mac": "npm run prepare:icon:mac && npm run prepare:voicebox && electron-builder --mac dir",
     "build:win": "npm run prepare:playwright:win && npm run prepare:voicebox && electron-builder --win nsis --x64 --publish never",
     "build:win:portable": "npm run prepare:playwright:win && npm run prepare:voicebox && electron-builder --win portable --x64 --config.win.artifactName='搬运蚁-${version}-win-${arch}-portable.${ext}'",
     "build:win:arm64": "npm run prepare:voicebox && electron-builder --win nsis --arm64",
@@ -71,7 +71,7 @@
     ],
     "mac": {
       "target": [
-        "dmg"
+        "dir"
       ],
       "artifactName": "搬运蚁-${version}-mac-${arch}.${ext}",
       "icon": "assets/icon.icns",

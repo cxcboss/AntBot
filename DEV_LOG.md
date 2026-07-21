@@ -47,6 +47,34 @@ AntBot（搬运蚁）是 Electron 桌面应用，核心做视频自动化流水�
 - App 产物：`/Users/chenxincheng/Desktop/my/Develop/Claude/AntBot/搬运蚁.app`
 - DMG 产物：`/Users/chenxincheng/Desktop/my/Develop/Claude/AntBot/release/搬运蚁-0.3.6-mac-arm64.dmg`
 
+## 2026-07-21 SRT 时间线被朗读与烧录修复
+
+### 故障
+
+剪辑任务日志显示字幕生成后只有 `1 句`，成品把后续字幕序号、时间线和正文全部作为第一句字幕烧录，Voicebox 也朗读了这些时间线。
+
+### 根因与修复
+
+- 原 `parseSrt()` 只按空行切分字幕块；AI 返回连续 SRT、没有空行时，后续整份字幕会落入第一条字幕正文。
+- 改为逐行识别字幕序号、时间线和正文，不再依赖空行分块。
+- 兼容 AI 常见的 `-->`、`->`、`→` 箭头，以及逗号或句点形式的 1-3 位毫秒。
+- 对带时间戳但无法可靠解析的行直接报错并停止任务，禁止继续烧录或配音污染文本。
+- macOS 构建改为只输出 `.app`，不再生成 DMG。
+
+### 回归测试
+
+- 连续 5 条标准 SRT 没有空行时，必须解析成 5 条独立字幕。
+- 常见箭头和毫秒格式变体必须规范化为正确时间。
+- 无法识别的时间线必须抛出格式错误，不能进入字幕正文。
+
+### 验证
+
+- `node --test src/main/services/tests/*.test.js vendors/auto_dub_web/tests/*.test.mjs`：10 项通过。
+- `node --check src/main/services/smartEditor.js` 与 `git diff --check` 通过。
+- `npm run build:mac` 只执行 `electron-builder --mac dir`，成功生成 `.app`。
+- `release/` 中不再生成 DMG、blockmap 或 `latest-mac.yml`。
+- App 产物：`/Users/chenxincheng/Desktop/my/Develop/Claude/AntBot/搬运蚁.app`
+
 ## 2026-07-21 Vision 图片批次 400 修复
 
 ### 故障
@@ -224,7 +252,7 @@ deploy/                 （已移除 fnOS 部署，保留目录结构）
 ```bash
 npm install
 npm run dev              # 本地运行
-npm run build:mac        # macOS DMG
+npm run build:mac        # macOS App
 npm run build:win        # Windows NSIS
 npm run build:linux      # Linux AppImage
 ```
