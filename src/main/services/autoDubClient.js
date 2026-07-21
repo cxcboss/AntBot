@@ -1226,16 +1226,17 @@ async function ensureVoiceCloneBackend(projectPath, logger = () => {}, progress 
   const setupScript = path.join(scriptsDir, 'setup_voicebox_backend.sh');
   const startScript = path.join(scriptsDir, 'start_voicebox_backend.sh');
   // Store venv in user data directory (not in project path which may be recreated)
-  const electronApp = getElectronApp();
-  const userDataDir = electronApp ? electronApp.getPath('userData') : path.join(os.homedir(), 'AntBot');
+  // 统一使用 ~/AntBot 作为数据目录，与 ipc.js 保持一致
+  const userDataDir = path.join(os.homedir(), 'AntBot');
   const voiceboxEnvDir = path.join(userDataDir, 'voicebox-env');
+  const voiceboxDataDir = path.join(userDataDir, 'voicebox-data');
   await fs.mkdir(voiceboxEnvDir, { recursive: true }).catch(() => {});
   const venvDir = path.join(voiceboxEnvDir, '.venv-voicebox');
   const setupMarker = path.join(voiceboxEnvDir, '.voicebox-setup-done');
   const venvPython = await resolveVoiceboxVenvPython(venvDir);
   const backendMain = path.join(projectPath, 'vendor', 'voicebox', 'backend', 'main.py');
   const backendRequirements = path.join(projectPath, 'vendor', 'voicebox', 'backend', 'requirements.txt');
-  const dataDir = path.join(projectPath, 'data');
+  const dataDir = voiceboxDataDir; // 使用固定数据目录，不随项目路径变化
   const modelsDir = path.join(dataDir, 'models');
 
   const [hasSetupScript, hasStartScript, hasVenvPython, hasBackendMain, hasBackendRequirements] = await Promise.all([
@@ -1249,6 +1250,8 @@ async function ensureVoiceCloneBackend(projectPath, logger = () => {}, progress 
   if (!hasStartScript && process.platform !== 'win32') {
     throw new Error('缺少 start_voicebox_backend.sh，无法启动语音克隆后端。');
   }
+
+  const hasCompleteBackendRepo = hasBackendMain && hasBackendRequirements;
 
   const readPythonVersion = (pythonPath) => {
     return new Promise((resolve) => {
@@ -1303,14 +1306,14 @@ async function ensureVoiceCloneBackend(projectPath, logger = () => {}, progress 
       const launchCommand = process.platform === 'win32' ? venvPython : bashBinary;
       const startScript = path.join(projectPath, 'scripts', 'start_voicebox_backend.sh');
       const launchArgs = process.platform === 'win32'
-        ? ['-u', '-m', 'backend.main', '--host', '127.0.0.1', '--port', '17493', '--data-dir', path.join(projectPath, 'data')]
+        ? ['-u', '-m', 'backend.main', '--host', '127.0.0.1', '--port', '17493', '--data-dir', voiceboxDataDir]
         : [startScript];
-      const env = { ...process.env, VOICEBOX_PYTHON: venvPython, VENV_DIR: venvDir };
+      const env = { ...process.env, VOICEBOX_PYTHON: venvPython, VENV_DIR: venvDir, VOICEBOX_DATA_DIR: voiceboxDataDir, VOICEBOX_MODELS_DIR: path.join(voiceboxDataDir, 'models') };
       const logFilePath = await getVoiceboxLogFilePath(projectPath);
       const child = spawn(launchCommand, launchArgs, { cwd: projectPath, env, stdio: ['ignore', 'pipe', 'pipe'], shell: process.platform === 'win32' });
       startedVoiceboxBackends.set(projectPath, { child, logFilePath });
       progress({ status: 'running', step: '启动后端', percent: 80, message: '正在启动 voicebox 后端...' });
-      await waitForVoiceboxReady(15000, logger);
+      await waitForVoiceCloneReady(15000);
       logger('voicebox 后端已就绪（跳过安装）。');
     } else {
       logger('voicebox 后端已在运行。');
@@ -1433,7 +1436,9 @@ async function ensureVoiceCloneBackend(projectPath, logger = () => {}, progress 
         })
       : withRuntimeEnv({
           PYTHONUNBUFFERED: '1',
-          VENV_DIR: venvDir
+          VENV_DIR: venvDir,
+          VOICEBOX_DATA_DIR: dataDir,
+          VOICEBOX_MODELS_DIR: modelsDir
         });
 
     const child = await spawnLoggedDetachedProcess(launchCommand, launchArgs, {
@@ -1560,7 +1565,29 @@ async function createVoiceCloneProfileWithAutoDub({
     logger(`检测到重名档案，自动改名为：${selectedProfileName}`);
   }
 
-  const audioBuffer = await fs.readFile(samplePath);
+  // 裁剪音频到 30 秒（voicebox 限制）
+  const trimmedPath = samplePath + '.trimmed.wav';
+  let finalSamplePath = samplePath;
+  try {
+    const { spawn: spawnTrim } = require('node:child_process');
+    const ffmpegBin = ['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg', 'ffmpeg'].find(p => { try { require('node:fs').accessSync(p); return true; } catch { return false; } }) || 'ffmpeg';
+    await new Promise((resolve, reject) => {
+      const child = spawnTrim(ffmpegBin, ['-i', samplePath, '-t', '30', '-ar', '24000', '-ac', '1', '-y', trimmedPath]);
+      let stderr = '';
+      child.stderr.on('data', d => { stderr += d.toString(); });
+      child.on('close', code => code === 0 ? resolve() : reject(new Error(stderr.slice(0, 200))));
+      child.on('error', reject);
+    });
+    finalSamplePath = trimmedPath;
+    logger('音频已裁剪到 30 秒以内');
+  } catch (e) {
+    logger(`音频裁剪失败，使用原始文件: ${e.message}`);
+  }
+
+  const audioBuffer = await fs.readFile(finalSamplePath);
+  // 清理临时裁剪文件
+  if (finalSamplePath !== samplePath) { await fs.unlink(trimmedPath).catch(() => {}); }
+
   let payload = null;
   let lastError = null;
   let repairedMissingLibrosa = false;
@@ -1821,32 +1848,43 @@ async function processWithAutoDub({
 
   log(`已向 auto_dub_web 提交处理请求（配音模式：${voiceoverOn ? (useVoiceClone ? 'voice_clone' : 'system') : 'off'}）。`);
 
-  let response;
-  try {
-    response = await postAutoDubProcessRequest({
-      fields: requestFields,
-      files: [
-        {
-          fieldName: 'video_file',
-          fileName: path.basename(inputVideoPath),
-          contentType: 'video/mp4',
-          buffer: videoBuffer
-        },
-        ...(needsSubtitleFile
-          ? [{
-            fieldName: 'srt_file',
-            fileName: path.basename(subtitlePath),
-            contentType: 'application/x-subrip',
+  const postArgs = {
+    fields: requestFields,
+    files: [
+      {
+        fieldName: 'video_file',
+        fileName: path.basename(inputVideoPath),
+        contentType: 'video/mp4',
+        buffer: videoBuffer
+      },
+      ...(needsSubtitleFile
+        ? [{
+          fieldName: 'srt_file',
+          fileName: path.basename(subtitlePath),
+          contentType: 'application/x-subrip',
             buffer: subtitleBuffer
           }]
           : [])
       ]
-    });
-  } catch (error) {
-    const details = await buildAutoDubFailureDetails();
-    throw new Error(
-      `auto_dub_web 请求失败：${stringifyErrorWithCause(error)}\n${details.join('\n')}`
-    );
+    };
+
+  // 带重试的请求（处理并发任务时 auto_dub_web 忙的情况）
+  let response;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      response = await postAutoDubProcessRequest(postArgs);
+      break;
+    } catch (error) {
+      if (attempt < 3) {
+        log(`auto_dub_web 请求失败（第 ${attempt} 次），${attempt * 5} 秒后重试...`);
+        await sleep(attempt * 5000);
+        // 确保服务还在运行
+        await ensureAutoDubServer(projectPath, log);
+      } else {
+        const details = await buildAutoDubFailureDetails();
+        throw new Error(`auto_dub_web 请求失败（重试 ${attempt} 次）：${stringifyErrorWithCause(error)}\n${details.join('\n')}`);
+      }
+    }
   }
 
   log(`auto_dub_web 已返回响应（HTTP ${response.statusCode}）。`);
@@ -1860,7 +1898,10 @@ async function processWithAutoDub({
 
   if (response.statusCode < 200 || response.statusCode >= 300 || !payload?.ok) {
     const message = payload?.error || `auto_dub_web 处理失败（HTTP ${response.statusCode}）`;
+    log(`错误: ${message}`);
+    log(`响应体: ${(response.bodyText || '').slice(0, 500)}`);
     const details = await buildAutoDubFailureDetails();
+    for (const d of details) log(d);
     throw new Error(`${message}\n${details.join('\n')}`);
   }
 
@@ -1876,6 +1917,7 @@ async function processWithAutoDub({
 
   const sourceOutputPath = path.join(projectPath, 'outputs', outputName);
   await fs.copyFile(sourceOutputPath, outputPath);
+  await fs.rm(sourceOutputPath, { force: true }).catch(() => {});
 
   return {
     mode: 'auto_dub_web',
@@ -1893,9 +1935,43 @@ async function processWithAutoDub({
   };
 }
 
+function getManagedChildren() {
+  const children = [];
+  for (const [, rec] of startedServers) {
+    const c = getStartedChild(rec);
+    if (c && c.exitCode === null) children.push(c);
+  }
+  for (const [, rec] of startedVoiceboxBackends) {
+    const c = getStartedChild(rec);
+    if (c && c.exitCode === null) children.push(c);
+  }
+  return children;
+}
+
+async function shutdownVoicebox(logger = () => {}) {
+  // 优雅关闭
+  await requestVoiceCloneShutdown();
+  // 等待进程退出，SIGTERM 无效则用 SIGKILL
+  for (const [key, rec] of startedVoiceboxBackends) {
+    const child = getStartedChild(rec);
+    if (child && child.exitCode === null) {
+      try { child.kill('SIGTERM'); } catch {}
+      // 3 秒后如果还没退出，强制杀
+      await new Promise(r => setTimeout(r, 3000));
+      try { if (child.exitCode === null) child.kill('SIGKILL'); } catch {}
+    }
+    startedVoiceboxBackends.delete(key);
+  }
+  // 确保端口释放
+  await killVoiceboxByPort(logger);
+  logger('voicebox 后端已关闭');
+}
+
 module.exports = {
   detectAutoDubProject,
   resolveAutoDubProjectPath,
   createVoiceCloneProfileWithAutoDub,
-  processWithAutoDub
+  processWithAutoDub,
+  getManagedChildren,
+  shutdownVoicebox
 };

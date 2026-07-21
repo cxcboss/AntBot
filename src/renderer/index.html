@@ -22,7 +22,7 @@
       <!-- 侧边栏标签切换 -->
       <div class="sidebar-tabs">
         <button class="sb-tab active" data-sbtab="features" type="button">功能</button>
-        <button class="sb-tab" data-sbtab="history" type="button">历史</button>
+        <button class="sb-tab" data-sbtab="history" type="button">状态</button>
       </div>
 
       <!-- 功能面板 -->
@@ -34,8 +34,12 @@
         <button class="sb-btn sb-feat" data-feat="subtitle-voice" type="button"><span class="icon" data-icon="settings"></span><span>字幕与音色</span></button>
       </div>
 
-      <!-- 历史面板 -->
+      <!-- 状态面板 -->
       <div class="sb-panel hidden" id="sbpanel-history">
+        <div class="sb-section-label">API 额度</div>
+        <div id="sidebar-api-usage" class="sidebar-api-usage"><div class="api-usage-empty">加载中...</div></div>
+        <div class="sb-divider"></div>
+        <div class="sb-section-label">发布统计</div>
         <div class="stat-cards">
           <div class="stat-card"><div class="stat-label">总发布</div><div class="stat-value" id="stat-total">0</div></div>
           <div class="stat-card">
@@ -92,6 +96,11 @@
         <!-- 剪辑页 -->
         <div class="feat-view" id="view-edit">
           <div class="edit-layout">
+            <!-- 标签栏 -->
+            <div class="edit-tabs">
+              <button class="edit-tab-btn active" data-tab="queue" type="button">任务队列</button>
+              <button class="edit-tab-btn" data-tab="history" type="button">历史记录</button>
+            </div>
             <!-- 视频列表区 -->
             <div class="edit-list" id="edit-list">
               <div class="edit-empty" id="edit-empty">
@@ -100,6 +109,7 @@
               </div>
               <div class="edit-cards" id="edit-cards"></div>
             </div>
+            <div id="edit-status" class="edit-status" style="display:none"></div>
             <!-- 底部控制栏 -->
             <div class="edit-bar">
               <div class="edit-bar-left">
@@ -204,8 +214,23 @@
 
       <div class="s-divider"></div>
 
+      <div class="s-section-label">剪辑设置</div>
+      <div class="s-row"><span class="s-label">抽帧精细度</span>
+        <select id="s-frameRate">
+          <option value="3">粗糙（3秒/帧）</option>
+          <option value="2">普通（2秒/帧）</option>
+          <option value="1" selected>均衡（1秒/帧）</option>
+          <option value="0.5">精细（1秒/2帧）</option>
+          <option value="0.125">还原（1秒/8帧）</option>
+        </select>
+      </div>
+
+      <div class="s-divider"></div>
+
       <div class="s-section-label">AI 模型</div>
-      <div class="s-row"><span class="s-label">API Key</span><div class="s-input-row"><input id="s-apiKey" type="password" placeholder="输入 API Key 自动保存" /><button type="button" id="fetch-models-btn" class="btn btn-sm btn-ghost">获取模型</button></div></div>
+      <div class="s-row"><span class="s-label">API Keys</span><div class="s-input-col"><div id="api-keys-list"><div class="s-input-row"><input name="apiKey" type="password" placeholder="Key 1" /><button type="button" class="btn btn-sm btn-ghost s-key-del" title="删除">✕</button></div></div><button type="button" id="add-api-key-btn" class="btn btn-sm btn-ghost">+ 添加 Key</button></div></div>
+      <div id="api-usage-box" class="api-usage-box"></div>
+      <div class="s-row"><button type="button" id="fetch-models-btn" class="btn btn-sm btn-ghost">获取模型</button></div>
       <div class="s-hint">需要选取支持识别图片的模型</div>
       <div class="s-row"><span class="s-label">Base URL</span><input id="s-apiBaseUrl" type="text" placeholder="https://apihub.agnes-ai.com/v1" /></div>
       <div class="s-row"><span class="s-label">选择模型</span><select id="s-apiModelId"><option value="">请先获取模型</option></select></div>

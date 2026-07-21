@@ -642,6 +642,7 @@ async def generate_speech(
         voice_prompt = await profiles.create_voice_prompt_for_profile(
             data.profile_id,
             db,
+            x_vector_only_mode=data.x_vector_only_mode,
         )
 
         audio, sample_rate = await tts_model.generate(
@@ -717,7 +718,11 @@ async def stream_speech(
     # Load the correct model before building the voice prompt (fixes issue #96)
     await tts_model.load_model_async(model_size)
 
-    voice_prompt = await profiles.create_voice_prompt_for_profile(data.profile_id, db)
+    voice_prompt = await profiles.create_voice_prompt_for_profile(
+        data.profile_id,
+        db,
+        x_vector_only_mode=data.x_vector_only_mode,
+    )
 
     audio, sample_rate = await tts_model.generate(
         data.text,

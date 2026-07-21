@@ -327,6 +327,7 @@ async def create_voice_prompt_for_profile(
     profile_id: str,
     db: Session,
     use_cache: bool = True,
+    x_vector_only_mode: bool = False,
 ) -> dict:
     """
     Create a combined voice prompt from all samples in a profile.
@@ -335,6 +336,7 @@ async def create_voice_prompt_for_profile(
         profile_id: Profile ID
         db: Database session
         use_cache: Whether to use cached prompts
+        x_vector_only_mode: Use only the speaker embedding, excluding reference audio codes
 
     Returns:
         Voice prompt dictionary
@@ -354,6 +356,7 @@ async def create_voice_prompt_for_profile(
             sample.audio_path,
             sample.reference_text,
             use_cache=use_cache,
+            x_vector_only_mode=x_vector_only_mode,
         )
         return voice_prompt
     else:
@@ -386,6 +389,7 @@ async def create_voice_prompt_for_profile(
             str(combined_path),
             combined_text,
             use_cache=use_cache,
+            x_vector_only_mode=x_vector_only_mode,
         )
         return voice_prompt
 

@@ -244,6 +244,7 @@ class PyTorchTTSBackend:
         audio_path: str,
         reference_text: str,
         use_cache: bool = True,
+        x_vector_only_mode: bool = False,
     ) -> Tuple[dict, bool]:
         """
         Create voice prompt from reference audio.
@@ -252,15 +253,21 @@ class PyTorchTTSBackend:
             audio_path: Path to reference audio file
             reference_text: Transcript of reference audio
             use_cache: Whether to use cached prompt if available
+            x_vector_only_mode: Use only speaker embedding to prevent reference audio leakage
             
         Returns:
             Tuple of (voice_prompt_dict, was_cached)
         """
         await self.load_model_async(None)
-        
+        cache_key = None
+
         # Check cache if enabled
         if use_cache:
-            cache_key = get_cache_key(audio_path, reference_text)
+            cache_key = get_cache_key(
+                audio_path,
+                reference_text,
+                x_vector_only_mode=x_vector_only_mode,
+            )
             cached_prompt = get_cached_voice_prompt(cache_key)
             if cached_prompt is not None:
                 # Cache stores as torch.Tensor but actual prompt is dict
@@ -278,16 +285,15 @@ class PyTorchTTSBackend:
             """Run synchronous voice prompt creation in thread pool."""
             return self.model.create_voice_clone_prompt(
                 ref_audio=str(audio_path),
-                ref_text=reference_text,
-                x_vector_only_mode=False,
+                ref_text=None if x_vector_only_mode else reference_text,
+                x_vector_only_mode=x_vector_only_mode,
             )
         
         # Run blocking operation in thread pool
         voice_prompt_items = await asyncio.to_thread(_create_prompt_sync)
-        
+
         # Cache if enabled
-        if use_cache:
-            cache_key = get_cache_key(audio_path, reference_text)
+        if cache_key is not None:
             cache_voice_prompt(cache_key, voice_prompt_items)
         
         return voice_prompt_items, False

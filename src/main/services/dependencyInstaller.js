@@ -77,8 +77,9 @@ function installSinglePackage(venvPython, pkg, env, pushEvent, abortSignal) {
     const spec = pkg.constraint ? `${pkg.rawName}${pkg.constraint}` : pkg.rawName;
     pushEvent({ type: 'package-start', name: pkg.rawName, normalizedName: pkg.name, constraint: pkg.constraint, percent: 0, speed: '', size: '', message: `准备安装 ${pkg.rawName}...` });
 
-    const child = spawn(venvPython, ['-m', 'pip', 'install', '--no-cache-dir', '--progress-bar', 'on', spec], {
-      env, stdio: ['ignore', 'pipe', 'pipe']
+    const child = spawn(venvPython, ['-u', '-m', 'pip', 'install', '--no-cache-dir', '--progress-bar', 'on', spec], {
+      env: { ...env, PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' },
+      stdio: ['ignore', 'pipe', 'pipe']
     });
 
     let killed = false;
@@ -93,7 +94,14 @@ function installSinglePackage(venvPython, pkg, env, pushEvent, abortSignal) {
 
     const processLine = (line) => {
       const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('Requirement already satisfied') || trimmed.startsWith('Collecting ')) return;
+      if (!trimmed || trimmed.startsWith('Requirement already satisfied')) return;
+
+      // "Collecting torch>=2.1.0" — pip 正在处理这个包
+      if (trimmed.startsWith('Collecting ')) {
+        pushEvent({ type: 'package-progress', name: pkg.rawName, normalizedName: pkg.name, constraint: pkg.constraint, percent: Math.max(lastPercent, 5), speed: '', size: '', message: '正在下载...' });
+        return;
+      }
+
       const progress = parsePipProgressLine(trimmed);
       if (progress.percent >= 0 || progress.speed || progress.size) {
         const percent = Math.max(0, Math.min(100, progress.percent >= 0 ? progress.percent : lastPercent));
@@ -111,8 +119,9 @@ function installSinglePackage(venvPython, pkg, env, pushEvent, abortSignal) {
     };
 
     child.stderr.on('data', (chunk) => {
+      // pip 用 \r 做进度条原地更新，需要按 \r 和 \n 都拆行
       stderrBuffer += chunk.toString('utf8');
-      const lines = stderrBuffer.split(/\r?\n/);
+      const lines = stderrBuffer.split(/\r\n|\r|\n/);
       stderrBuffer = lines.pop() || '';
       for (const line of lines) processLine(line);
     });

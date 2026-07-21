@@ -1,10 +1,51 @@
 # AntBot 开发记录
 
-> 最后更新：2026-07-17 | 版本：0.3.6 | 分支：main
+> 最后更新：2026-07-21 | 版本：0.3.6 | 分支：codex/fix-repeated-video-voice
 
 ## 项目概况
 
 AntBot（搬运蚁）是 Electron 桌面应用，核心做视频自动化流水线：下载 → 字幕生成 → 剪辑配音 → 发布。
+
+## 2026-07-21 剪辑缓存清理与语音生成修复
+
+### 背景
+
+用户反馈剪辑视频配音异常，多个剪辑视频会重复同一句参考语音。随后检查 `~/AntBot` 数据目录，发现旧剪辑流程通过 Voicebox `/generate` 生成了大量持久化历史 WAV，失败/取消/中断后也没有统一清理抽帧、字幕、TTS、合成中间文件。
+
+### 根因
+
+- 剪辑 TTS 使用 Voicebox `/generate` + `/audio/{id}`，会在 `~/AntBot/voicebox-data/generations` 写入历史记录和 WAV。
+- 智能剪辑准备阶段使用系统临时目录 `antbot-smart-edit-*`，只有部分取消路径会清理。
+- `auto_dub_web/workspace` 和 `auto_dub_web/outputs` 缺少成功/失败/启动时的完整清理。
+- App 启动恢复只重置任务状态，没有按任务归属回收残留缓存。
+
+### 代码变更
+
+- 新增 `src/main/services/clipArtifacts.js`，统一管理 `~/AntBot/clip-cache/<task-id>`，只删除应用明确拥有的剪辑缓存。
+- `smartEditor.js` 改为按任务写入 `clip-cache`；成功生成 SRT 后立即删除抽帧图，准备阶段异常会清理任务目录。
+- `editScheduler.js` 在失败、取消、移除、退出和启动恢复时清理相关缓存；中断的 `preparing/composing` 任务重置为 `pending`。
+- `vendors/auto_dub_web/server.mjs` 启动时清理旧 `workspace/outputs`；单个 job 在 `finally` 删除 workspace。
+- `autoDubClient.js` 复制最终输出后删除 auto_dub 的临时输出副本，最终成片保留在用户输出目录。
+- `voicebox-generation.mjs` 和 `server.mjs` 改用 `/generate/stream`，保留 `x_vector_only_mode: true`，避免继续产生 Voicebox history WAV。
+- 合并 Claude 工作树中的最新智能剪辑 UI/调度/API 实现，同时保留当前分支的参考音频泄漏修复。
+
+### 数据清理
+
+清理范围严格限制为剪辑过程垃圾：
+
+- 通过 Voicebox history API 删除 261 条剪辑生成记录。
+- `~/AntBot/voicebox-data/generations`：261 个 WAV，约 145 MB → 0 个 WAV，0B。
+- 删除 1 个 0 字节临时 store 文件：`antbot-store.json.63744.1784531909843.tmp`。
+- 未删除：`voicebox-data/models`、`voicebox-data/profiles`、`voicebox-env`、`models`、`browser-profiles`、App 设置、音色档案、最终输出视频。
+
+### 验证
+
+- `node --test src/main/services/tests/clipArtifacts.test.js vendors/auto_dub_web/tests/clip-workspace.test.mjs vendors/auto_dub_web/tests/voicebox-generation.test.mjs`
+- `PYTHONPATH=vendors/auto_dub_web/vendor/voicebox /Users/chenxincheng/AntBot/voicebox-env/.venv-voicebox/bin/python -m unittest vendors.auto_dub_web.vendor.voicebox.backend.tests.test_reference_audio_leak`
+- `node --check` 覆盖 `ipc.js`、`preload.js`、`renderer/app.js`、`editScheduler.js`、`smartEditor.js`、`autoDubClient.js`、`apiServer.js`、`server.mjs`
+- `npm run build:mac`
+- App 产物：`/Users/chenxincheng/Desktop/my/Develop/Claude/AntBot/搬运蚁.app`
+- DMG 产物：`/Users/chenxincheng/Desktop/my/Develop/Claude/AntBot/release/搬运蚁-0.3.6-mac-arm64.dmg`
 
 ## 当前架构
 

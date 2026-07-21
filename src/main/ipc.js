@@ -39,14 +39,7 @@ function initAppLog() {
     _logStream = fsSync.createWriteStream(logPath, { flags: 'a' });
     // 记录环境信息
     appLog('info', `═══ AntBot 启动 ═══`);
-    appLog('info', `版本: ${app.getVersion()}`);
-    appLog('info', `系统: ${os.type()} ${os.release()} (${os.arch()})`);
-    appLog('info', `Node: ${process.version}`);
-    appLog('info', `Electron: ${process.versions.electron || 'N/A'}`);
-    appLog('info', `Chrome: ${process.versions.chrome || 'N/A'}`);
-    appLog('info', `CPU: ${os.cpus()[0]?.model || 'N/A'} (${os.cpus().length} cores)`);
-    appLog('info', `内存: ${(os.totalmem() / 1073741824).toFixed(1)} GB (可用 ${(os.freemem() / 1073741824).toFixed(1)} GB)`);
-    appLog('info', `用户目录: ${os.homedir()}`);
+    appLog('info', `版本: ${app.getVersion()} | ${os.type()} ${os.release()} ${os.arch()} | Node ${process.version} | Electron ${process.versions.electron || 'N/A'}`);
     appLog('info', `数据目录: ${path.join(os.homedir(), 'AntBot')}`);
     appLog('info', `日志文件: ${logPath}`);
   } catch {}
@@ -141,6 +134,13 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
     return true;
   });
 
+  ipcMain.handle('app:reveal-in-folder', async (_event, filePath) => {
+    const target = String(filePath || '').trim();
+    if (!target) return false;
+    shell.showItemInFolder(target);
+    return true;
+  });
+
   ipcMain.handle('startup:check', async () => {
     const [settings, loginState] = await Promise.all([
       store.getSettings(), store.getLoginState()
@@ -229,6 +229,11 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
   ipcMain.handle('dialog:pick-video-files', async () => {
     const result = await dialog.showOpenDialog({ title: '选择视频文件', properties: ['openFile', 'multiSelections'], filters: [{ name: 'Video', extensions: ['mp4', 'mov', 'm4v', 'webm', 'mkv', 'avi', 'flv', 'wmv', 'ts'] }] });
     return result.canceled || !result.filePaths?.length ? [] : result.filePaths;
+  });
+
+  ipcMain.handle('dialog:pick-directory', async (_event, title) => {
+    const result = await dialog.showOpenDialog({ title: title || '选择文件夹', properties: ['openDirectory'] });
+    return result.canceled || !result.filePaths?.length ? '' : result.filePaths[0];
   });
 
   ipcMain.handle('task:parse', async (_event, inputText) => parseTaskInput(inputText));
@@ -369,7 +374,8 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
       projectPath,
       venvDir: path.join(voiceboxEnvDir, '.venv-voicebox'),
       venvPython: path.join(voiceboxEnvDir, '.venv-voicebox', 'bin', 'python3'),
-      markerPath: path.join(voiceboxEnvDir, '.voicebox-setup-done')
+      markerPath: path.join(voiceboxEnvDir, '.voicebox-setup-done'),
+      dataDir: path.join(dataDir, 'voicebox-data')
     };
   }
 
@@ -483,17 +489,54 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
       abortControllers: activeVoiceboxAbortControllers
     });
 
-    if (result.errors.length === 0) {
-      await fs.writeFile(info.markerPath, JSON.stringify({ completedAt: new Date().toISOString() }), 'utf-8').catch(() => {});
-      send({ status: 'completed', message: `安装完成（${result.done.length} 个包）` });
+    // 5. 安装完成后验证
+    send({ status: 'installing', message: '正在验证安装结果...' });
+
+    const { spawn: spawnCheck } = require('node:child_process');
+    const verifyImport = (moduleName) => new Promise((resolve) => {
+      try {
+        const child = spawnCheck(info.venvPython, ['-c', `import ${moduleName}; print("ok")`], {
+          stdio: ['ignore', 'pipe', 'pipe'], timeout: 30000
+        });
+        let out = '';
+        child.stdout.on('data', d => { out += d.toString(); });
+        child.on('close', (code) => resolve(code === 0));
+        child.on('error', () => resolve(false));
+      } catch { resolve(false); }
+    });
+
+    const importChecks = [
+      ['torch', 'torch'], ['librosa', 'librosa'], ['soundfile', 'soundfile'],
+      ['transformers', 'transformers'], ['fastapi', 'fastapi'], ['qwen_tts', 'qwen_tts'],
+      ['sklearn', 'sklearn'], ['numpy', 'numpy']
+    ];
+    const importResults = {};
+    for (const [mod, label] of importChecks) {
+      importResults[label] = await verifyImport(mod);
+    }
+    const importFailed = importChecks.filter(([, label]) => !importResults[label]).map(([, label]) => label);
+    const pipFailed = result.errors.map(e => e.name);
+
+    await fs.writeFile(info.markerPath, JSON.stringify({ completedAt: new Date().toISOString(), pipFailed, importFailed }), 'utf-8').catch(() => {});
+
+    if (pipFailed.length === 0 && importFailed.length === 0) {
+      send({ status: 'completed', message: `全部安装成功（${result.done.length} 个包）` });
       appLog('info', `voicebox 依赖安装完成: ${result.done.length} packages`);
       return { ok: true };
-    } else {
-      const failedNames = result.errors.map(e => e.name).join(', ');
-      send({ status: 'failed', message: `以下依赖失败: ${failedNames}` });
-      appLog('error', `voicebox 部分依赖安装失败: ${failedNames}`);
-      return { ok: false, message: `失败: ${failedNames}` };
     }
+
+    if (pipFailed.length === 0 && importFailed.length > 0) {
+      // pip 说装好了但 import 失败 — 需要重启 app
+      send({ status: 'completed', message: `安装完成，部分模块需重启后生效: ${importFailed.join(', ')}` });
+      appLog('info', `voicebox 安装完成但需重启: ${importFailed.join(', ')}`);
+      return { ok: true, needsRestart: true, restartPackages: importFailed };
+    }
+
+    // pip 安装失败的包
+    const failedNames = pipFailed.join(', ');
+    send({ status: 'failed', message: `以下依赖失败: ${failedNames}` });
+    appLog('error', `voicebox 部分依赖安装失败: ${failedNames}`);
+    return { ok: false, message: `失败: ${failedNames}`, failedPackages: pipFailed };
   });
 
   ipcMain.handle('voicebox:install-cancel', async (_event, packageName) => {
@@ -525,6 +568,99 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
     appLog('info', 'voicebox 环境已重置');
     return { ok: true };
   });
+
+  // ── Smart Edit Scheduler ──
+  const { EditScheduler } = require('./services/editScheduler');
+  const editScheduler = new EditScheduler({
+    onTaskUpdate: (t) => {
+      const win = mainWindowRef();
+      if (win && !win.isDestroyed()) win.webContents.send('edit:task-update', t);
+    },
+    onProgress: (p) => {
+      const win = mainWindowRef();
+      if (win && !win.isDestroyed()) win.webContents.send('edit:smart-progress', { ...p, timestamp: new Date().toISOString() });
+    },
+    log: (msg) => appLog('info', `[smart-edit] ${msg}`)
+  });
+  editScheduler.loadState().then(() => {
+    // 恢复后如有 ready/composing 任务，自动继续调度
+    const hasActive = [...editScheduler.tasks.values()].some(t => ['pending', 'ready', 'preparing', 'composing'].includes(t.status));
+    if (hasActive) editScheduler._tick();
+  });
+
+  ipcMain.handle('edit:add-tasks', async (_event, tasks) => {
+    const settings = await store.getSettings();
+    const results = [];
+    for (const taskData of tasks) {
+      const t = editScheduler.addTask({
+        ...taskData,
+        voiceProfileId: taskData.voiceProfileId || settings.voiceClone?.voiceId || '',
+        voiceProfileName: taskData.voiceProfileName || settings.voiceClone?.profileName || '',
+        voiceSpeed: taskData.voiceSpeed || settings.style?.voiceSpeed || 1.1,
+        apiConfig: taskData.apiConfig || {},
+        outputDir: taskData.outputDir || settings.paths?.outputBaseDir || '',
+        language: taskData.language || 'zh',
+        frameRate: settings.edit?.frameRate || 1,
+      });
+      results.push(t);
+    }
+    return results;
+  });
+
+  ipcMain.handle('edit:start-task', async (_event, taskId) => { await editScheduler.startTask(taskId); return { ok: true }; });
+  ipcMain.handle('edit:pause-task', async (_event, taskId) => { editScheduler.pauseTask(taskId); return { ok: true }; });
+  ipcMain.handle('edit:cancel-task', async (_event, taskId) => { await editScheduler.cancelTask(taskId); return { ok: true }; });
+  ipcMain.handle('edit:remove-task', async (_event, taskId) => { await editScheduler.removeTask(taskId); return { ok: true }; });
+  ipcMain.handle('edit:start-all', async () => { await editScheduler.startAll(); return { ok: true }; });
+  ipcMain.handle('edit:get-tasks', async () => editScheduler.getAllTasks());
+
+  ipcMain.handle('edit:get-history', async () => {
+    try {
+      const filePath = path.join(os.homedir(), 'AntBot', 'edit-history.json');
+      return JSON.parse(await fs.readFile(filePath, 'utf-8').catch(() => '[]'));
+    } catch { return []; }
+  });
+
+  ipcMain.handle('edit:save-history', async (_event, record) => {
+    try {
+      const filePath = path.join(os.homedir(), 'AntBot', 'edit-history.json');
+      let history = [];
+      try { history = JSON.parse(await fs.readFile(filePath, 'utf-8')); } catch {}
+      history.unshift(record);
+      history = history.slice(0, 100);
+      await fs.writeFile(filePath, JSON.stringify(history, null, 2), 'utf-8');
+      return { ok: true, history };
+    } catch (error) { return { ok: false, message: error.message }; }
+  });
+
+  ipcMain.handle('edit:delete-history', async (_event, { id, deleteFile }) => {
+    try {
+      const filePath = path.join(os.homedir(), 'AntBot', 'edit-history.json');
+      let history = [];
+      try { history = JSON.parse(await fs.readFile(filePath, 'utf-8')); } catch {}
+      const target = history.find(h => h.id === id);
+      if (target?.outputPath && deleteFile) await fs.unlink(target.outputPath).catch(() => {});
+      history = history.filter(h => h.id !== id);
+      await fs.writeFile(filePath, JSON.stringify(history, null, 2), 'utf-8');
+      return { ok: true, history };
+    } catch (error) { return { ok: false, message: error.message }; }
+  });
+
+  ipcMain.handle('api:usage', async () => {
+    const { getUsageSummary } = require('./services/usageTracker');
+    const settings = await store.getSettings();
+    const keys = settings.api?.apiKeys || (settings.api?.apiKey ? [settings.api.apiKey] : []);
+    return getUsageSummary(keys);
+  });
+
+  // 启动时清理过期缓存
+  { const { cleanupStaleCache } = require('./services/smartEditor'); cleanupStaleCache().catch(() => {}); }
+
+  // 启动 HTTP API 服务
+  {
+    const { startApiServer } = require('./services/apiServer');
+    startApiServer({ store, taskRunner, editScheduler, mainWindowRef, appLog });
+  }
 
   async function getModelsDir() {
     const settings = await store.getSettings();
@@ -701,39 +837,41 @@ except Exception as e:
     const win = mainWindowRef();
     const sendProgress = (p) => { if (win && !win.isDestroyed()) win.webContents.send('style:progress', p); };
 
-    // Track temp files for cleanup
-    const tempFiles = [];
-    const cleanup = async () => {
-      for (const f of tempFiles) {
-        await fsPromises.unlink(f).catch(() => {});
-      }
+    // ffmpeg/ffprobe 路径解析
+    const resolveBin = (name) => {
+      const candidates = [path.join('/opt/homebrew/bin', name), path.join('/usr/local/bin', name), path.join('/usr/bin', name), name];
+      for (const c of candidates) { try { if (require('node:fs').existsSync(c)) return c; } catch {} }
+      return name;
     };
 
+    const tempFiles = [];
+    const cleanup = async () => { for (const f of tempFiles) { await fsPromises.unlink(f).catch(() => {}); } };
+
     try {
+      appLog('info', `[style-learn] 开始学习: ${name || '(未命名)'}, video=${videoPath}`);
       sendProgress({ status: 'converting', message: '正在转换音频...' });
 
-      // Step 1: Convert video to mp3
+      const ffmpegBin = resolveBin('ffmpeg');
       const audioPath = path.join(cacheDir, `style-${Date.now()}.mp3`);
       tempFiles.push(audioPath);
+
       await new Promise((resolve, reject) => {
-        const child = spawn('ffmpeg', ['-i', videoPath, '-vn', '-acodec', 'libmp3lame', '-q:a', '2', '-y', audioPath]);
+        const child = spawn(ffmpegBin, ['-i', videoPath, '-vn', '-acodec', 'libmp3lame', '-q:a', '2', '-y', audioPath]);
         let stderr = '';
         child.stderr.on('data', d => { stderr += d.toString(); });
         child.on('close', code => {
           if (code === 0) resolve();
-          else reject(new Error(stderr.includes('Invalid data') ? '视频格式不支持或文件损坏' : (stderr.slice(0, 200) || 'FFmpeg 转换失败')));
+          else reject(new Error(stderr.includes('Invalid data') ? '视频格式不支持或文件损坏' : (stderr.slice(0, 300) || `FFmpeg 转换失败 (exit ${code})`)));
         });
-        child.on('error', (e) => reject(new Error(`FFmpeg 未找到: ${e.message}`)));
+        child.on('error', (e) => reject(new Error(`FFmpeg 未找到 (${ffmpegBin}): ${e.message}`)));
       });
 
-      // Verify audio file was created
-      try { await fsPromises.access(audioPath); } catch {
-        throw new Error('音频转换失败，未生成输出文件');
-      }
+      try { await fsPromises.access(audioPath); } catch { throw new Error('音频转换失败，未生成输出文件'); }
+      appLog('info', `[style-learn] 音频转换完成: ${audioPath}`);
 
       sendProgress({ status: 'transcribing', message: '正在语音识别...' });
 
-      // Step 2: Transcribe with Whisper
+      // 找 whisper 模型
       const modelsDir = path.join(dataDir, 'models');
       const localModelCandidates = [
         path.join(modelsDir, 'whisper-large-v3.pt'),
@@ -741,14 +879,17 @@ except Exception as e:
         path.join(modelsDir, 'base.pt'),
       ];
       let localModelPath = '';
-      for (const p of localModelCandidates) {
-        try { await fsPromises.access(p); localModelPath = p; break; } catch {}
+      for (const mp of localModelCandidates) {
+        try { await fsPromises.access(mp); localModelPath = mp; break; } catch {}
       }
 
       if (!localModelPath) {
+        appLog('error', '[style-learn] whisper 模型未找到');
         throw new Error('请先在设置 → 安装依赖中下载语音识别模型');
       }
+      appLog('info', `[style-learn] 使用模型: ${localModelPath}`);
 
+      // 自动检测语言（不硬编码中文）
       const pyScript = path.join(cacheDir, `_transcribe_${Date.now()}.py`);
       tempFiles.push(pyScript);
       await fsPromises.writeFile(pyScript, `
@@ -759,6 +900,8 @@ try:
     model = whisper.load_model(${JSON.stringify(localModelPath)})
     result = model.transcribe(${JSON.stringify(audioPath)}, language="zh")
     text = result.get("text", "").strip()
+    lang = result.get("language", "unknown")
+    print(f"LANG:{lang}", file=sys.stderr)
     if not text:
         print("ERR:未识别到任何文字", file=sys.stderr)
         sys.exit(1)
@@ -771,8 +914,9 @@ except Exception as e:
     sys.exit(1)
 `, 'utf-8');
 
+      const pythonBin = resolveBin('python3');
       const text = await new Promise((resolve, reject) => {
-        const child = spawn('python3', [pyScript], { stdio: ['ignore', 'pipe', 'pipe'] });
+        const child = spawn(pythonBin, [pyScript], { stdio: ['ignore', 'pipe', 'pipe'] });
         let stdout = '', stderr = '';
         child.stdout.on('data', d => { stdout += d.toString(); });
         child.stderr.on('data', d => { stderr += d.toString(); });
@@ -780,20 +924,24 @@ except Exception as e:
           if (code === 0 && stdout.trim() && !stdout.includes('ERR:')) resolve(stdout.trim());
           else {
             const errMsg = stderr.replace('ERR:', '').trim();
+            appLog('error', `[style-learn] 识别失败: code=${code}, stderr=${stderr.slice(0, 500)}`);
             reject(new Error(errMsg || '语音识别失败，未输出文字'));
           }
         });
-        child.on('error', (e) => reject(new Error(`Python 未找到: ${e.message}`)));
+        child.on('error', (e) => reject(new Error(`Python 未找到 (${pythonBin}): ${e.message}`)));
       });
 
+      appLog('info', `[style-learn] 识别完成: ${text.length} 字`);
       await cleanup();
       sendProgress({ status: 'completed', message: '学习完成' });
       return { ok: true, text, name };
 
     } catch (error) {
       await cleanup();
-      sendProgress({ status: 'failed', message: error.message });
-      return { ok: false, message: error.message };
+      const msg = String(error?.message || error);
+      appLog('error', `[style-learn] 失败: ${msg}`);
+      sendProgress({ status: 'failed', message: msg });
+      return { ok: false, message: msg };
     }
   });
 
@@ -1106,8 +1254,31 @@ except Exception as e:
     try {
       const filePath = await getVoicesFilePath();
       const raw = await fs.readFile(filePath, 'utf-8');
-      const voices = JSON.parse(raw);
+      let voices = JSON.parse(raw);
       const settings = await store.getSettings();
+
+      // 验证 voicebox 后端是否真的有这些 profile
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 3000);
+        const resp = await fetch('http://127.0.0.1:17493/profiles', { signal: controller.signal });
+        clearTimeout(timer);
+        if (resp.ok) {
+          const backendProfiles = await resp.json();
+          const backendIds = new Set((backendProfiles || []).map(p => p.id));
+          const validVoices = voices.filter(v => backendIds.has(v.id));
+          // 如果有失效的音色，更新 voices.json 并记录日志
+          if (validVoices.length < voices.length) {
+            const removed = voices.filter(v => !backendIds.has(v.id)).map(v => v.name);
+            appLog('info', `音色验证：${removed.join(', ')} 在 voicebox 后端不存在，已自动移除`);
+            voices = validVoices;
+            await fs.writeFile(filePath, JSON.stringify(voices, null, 2), 'utf-8').catch(() => {});
+          }
+        }
+      } catch {
+        // voicebox 后端未运行，不做过滤
+      }
+
       return { voices, activeVoiceId: settings.voiceClone?.voiceId || '' };
     } catch {
       return { voices: [], activeVoiceId: '' };
@@ -1154,6 +1325,13 @@ except Exception as e:
     cleanup: async () => {
       for (const [, context] of authContexts) { try { await context.close(); } catch {} }
       authContexts.clear();
+      // 杀掉所有 spawned 子进程
+      try {
+        const { getManagedChildren } = require('./services/autoDubClient');
+        const children = getManagedChildren();
+        for (const child of children) { try { child.kill('SIGTERM'); } catch {} }
+      } catch {}
+      try { await editScheduler.shutdown(); } catch {}
     }
   };
 }

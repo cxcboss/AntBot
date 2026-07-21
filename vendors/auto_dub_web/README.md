@@ -41,6 +41,8 @@ cd /Users/chenxincheng/Downloads/auto_dub_web
 2. 在“配音来源”里选“语音克隆档案”
 3. 处理视频时会按字幕逐句生成克隆语音并按时间线对齐
 
+视频剪辑请求使用 speaker embedding-only 模式，避免 Qwen3-TTS ICL 模式把参考音频尾句重复到每段配音开头。
+
 ## 使用步骤
 1. 上传视频文件（mp4/mov/mkv/avi/webm/m4v）
 2. 上传 `.srt` 字幕文件

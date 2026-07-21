@@ -7,6 +7,15 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 
+import {
+  cleanupJobArtifacts,
+  cleanupStaleRuntimeArtifacts,
+  createJobPaths,
+} from './clip-workspace.mjs';
+import {
+  buildVoiceboxGenerationRequest,
+} from './voicebox-generation.mjs';
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const WORKSPACE_DIR = path.join(__dirname, 'workspace');
@@ -41,8 +50,7 @@ const VOICE_PRIORITY = [
   'Daniel',
 ];
 
-await fs.mkdir(WORKSPACE_DIR, { recursive: true });
-await fs.mkdir(OUTPUT_DIR, { recursive: true });
+await cleanupStaleRuntimeArtifacts({ workspaceDir: WORKSPACE_DIR, outputDir: OUTPUT_DIR });
 
 let ffmpegFilterSupport = null;
 let cachedVoices = null;
@@ -542,6 +550,41 @@ async function fetchVoicebox(endpoint, options = {}) {
   }
 }
 
+async function fetchVoiceboxBinary(endpoint, options = {}) {
+  const timeoutMs = options.timeoutMs ?? 120000;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(buildVoiceboxUrl(endpoint), {
+      method: options.method ?? 'GET',
+      headers: options.headers,
+      body: options.body,
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const contentType = response.headers.get('content-type') || '';
+      const detail = contentType.includes('application/json')
+        ? await response.json().catch(() => null)
+        : await response.text().catch(() => '');
+      const message = typeof detail === 'object' && detail?.detail
+        ? detail.detail
+        : detail;
+      throw new Error(`Voice clone 引擎请求失败 (${response.status}): ${typeof message === 'string' ? message : JSON.stringify(message)}`);
+    }
+
+    return Buffer.from(await response.arrayBuffer());
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error(`Voice clone 引擎请求超时（${endpoint}，${timeoutMs}ms）`);
+    }
+    throw new Error(`Voice clone 引擎连接失败（${endpoint}）：${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function unwrapVoiceboxDetail(payload) {
   if (payload && typeof payload === 'object' && Object.prototype.hasOwnProperty.call(payload, 'detail')) {
     return payload.detail;
@@ -623,28 +666,15 @@ async function waitForVoiceboxModelReady(modelName, log = console.log, timeoutMs
 }
 
 async function generateVoiceboxClip(profileId, text, language, log = console.log) {
-  while (true) {
-    const payload = await fetchVoicebox('/generate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        profile_id: profileId,
-        text,
-        language,
-        model_size: '1.7B',
-      }),
-      timeoutMs: 15 * 60 * 1000,
-    });
-
-    const downloadState = getVoiceboxDownloadState(payload);
-    if (!downloadState?.downloading) {
-      return payload;
-    }
-
-    const modelName = downloadState.modelName || 'qwen-tts-1.7B';
-    log(`[voicebox] ${downloadState.message || `模型 ${modelName} 正在下载`}，自动等待完成...`);
-    await waitForVoiceboxModelReady(modelName, log);
-  }
+  const modelName = 'qwen-tts-1.7B';
+  await waitForVoiceboxModelReady(modelName, log);
+  const request = buildVoiceboxGenerationRequest({ profileId, text, language });
+  return fetchVoiceboxBinary(request.endpoint, {
+    method: 'POST',
+    headers: request.headers,
+    body: request.body,
+    timeoutMs: 15 * 60 * 1000,
+  });
 }
 
 async function checkVoiceboxHealth() {
@@ -1164,16 +1194,10 @@ async function synthesizeSpeechWithVoiceClone(clips, profileId, language, ttsDir
     const entry = clips[i];
     const lineText = entry.text.replace(/\s+/g, ' ').trim();
     console.log(`[voicebox] generating clip ${i + 1}/${clips.length}: ${lineText.slice(0, 60)}`);
-    const generated = await generateVoiceboxClip(profileId, entry.text, language, console.log);
-
-    const audioResp = await fetch(buildVoiceboxUrl(`/audio/${generated.id}`));
-    if (!audioResp.ok) {
-      throw new Error(`下载克隆语音失败: ${audioResp.status}`);
-    }
-    const audioBuffer = Buffer.from(await audioResp.arrayBuffer());
+    const audioBuffer = await generateVoiceboxClip(profileId, entry.text, language, console.log);
     const output = path.join(ttsDir, `line_${String(i + 1).padStart(5, '0')}.wav`);
     await fs.writeFile(output, audioBuffer);
-    console.log(`[voicebox] clip ready ${i + 1}/${clips.length}: ${generated.id}`);
+    console.log(`[voicebox] clip ready ${i + 1}/${clips.length}: streamed wav`);
     outputs.push({ startMs: entry.startMs, filePath: output });
   }
 
@@ -1478,20 +1502,21 @@ async function processJob(
   const subtitleTextColor = normalizeHexColor(subtitleTextColorRaw, '#FFA100');
   const subtitleStrokeColor = normalizeHexColor(subtitleStrokeColorRaw, '#000000');
 
-  const jobId = crypto.randomUUID().slice(0, 12);
-  const jobDir = path.join(WORKSPACE_DIR, jobId);
-  const ttsDir = path.join(jobDir, 'tts');
-  const subtitleTextDir = path.join(jobDir, 'subtitle_texts');
+  const job = createJobPaths({ workspaceDir: WORKSPACE_DIR, outputDir: OUTPUT_DIR, originalName: videoName });
+  const jobDir = job.jobDir;
+  const ttsDir = job.ttsDir;
+  const subtitleTextDir = job.subtitleTextDir;
   await fs.mkdir(ttsDir, { recursive: true });
   await fs.mkdir(subtitleTextDir, { recursive: true });
 
-  const videoPath = path.join(jobDir, `video${videoExt}`);
-  const subtitlePath = path.join(jobDir, 'subtitles.srt');
-  const voiceTrackPath = path.join(jobDir, 'voiceover.wav');
-  const voiceTrackSpedPath = path.join(jobDir, 'voiceover_sped.wav');
-  const outputName = `dubbed_${jobId}.mp4`;
-  const outputPath = path.join(OUTPUT_DIR, outputName);
+  const videoPath = job.videoPath;
+  const subtitlePath = job.subtitlePath;
+  const voiceTrackPath = job.voiceTrackPath;
+  const voiceTrackSpedPath = job.voiceTrackSpedPath;
+  const outputName = job.outputName;
+  const outputPath = job.outputPath;
 
+  try {
   const videoBuffer = Buffer.from(await videoFile.arrayBuffer());
   await fs.writeFile(videoPath, videoBuffer);
 
@@ -1569,6 +1594,9 @@ async function processJob(
     subtitleUrl: composeResult.subtitleUrl,
     dubSource: !voiceoverEnabled ? 'none' : useExternalDub ? 'external' : useVoiceClone ? 'voice_clone' : 'tts',
   };
+  } finally {
+    await cleanupJobArtifacts(job, { removeOutput: false });
+  }
 }
 
 const server = http.createServer(async (req, res) => {

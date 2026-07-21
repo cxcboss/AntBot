@@ -59,15 +59,15 @@ function closeDlg(dlg){if(!dlg)return;dlg.classList.add('closing');setTimeout(()
 /* ── Toast ── */
 function toast(msg,type='info',ms=3000){const c=$('#toast-container');if(!c)return;const t=document.createElement('div');t.className=`toast ${type}`;const im={success:ICONS.check,error:ICONS.alertCircle,info:ICONS.alertCircle};t.innerHTML=`<span class="icon">${im[type]||''}</span><span>${esc(msg)}</span>`;c.appendChild(t);setTimeout(()=>{t.classList.add('out');setTimeout(()=>t.remove(),200);},ms);}
 
+function showLoading(containerId){const el=document.getElementById(containerId);if(el)el.innerHTML='<div class="loading-box"><div class="spinner"></div><span>加载中...</span></div>';}
 /* ── Persist UI state ── */
 function saveUI(){
   const ui={
     selectedStyle:S.selectedStyle,
-    editDefaults:S.editDefaults,
+    editDefaults:{subtitle:S.editDefaults.subtitle},
     sidebarOpen:S.sidebarOpen,
     statPeriod:S.statPeriod,
   };
-  // Persist to dedicated UI settings file
   window.antbot.saveUISettings(ui).catch(()=>{});
 }
 
@@ -88,6 +88,7 @@ function switchFeature(feat){
   if(btn)btn.classList.add('active');
   const titles={main:'主控',edit:'剪辑',publish:'发布','style-ref':'风格参考','subtitle-voice':'字幕与音色'};
   if(el.pageTitle)el.pageTitle.textContent=titles[feat]||feat;
+  renderStatus();
   if(isMobile())closeSidebar();
 }
 
@@ -126,6 +127,40 @@ function calcStats(){
   const month=all.filter(i=>{const d=new Date(i.startedAt||i.finishedAt);return d.getFullYear()===now.getFullYear()&&d.getMonth()===now.getMonth()&&i.status==='completed'}).length;
   return{total,today,week,month};
 }
+async function loadSidebarApiUsage() {
+  const box = document.getElementById('sidebar-api-usage');
+  if (!box) return;
+  try {
+    const usage = await window.antbot.apiUsage();
+    if (!usage || !usage.length) { box.innerHTML = '<div class="api-usage-empty">未配置 API Key</div>'; return; }
+    const totalRemaining = usage.reduce((s, u) => s + u.remaining, 0);
+    const totalUsed = usage.reduce((s, u) => s + u.used, 0);
+    const totalLimit = usage.reduce((s, u) => s + u.limit, 0);
+    const frameRate = S.settings?.edit?.frameRate || 1;
+    const perMinute = Math.round(60 / frameRate);
+    const estMinutes = totalRemaining > 0 ? Math.round(totalRemaining / perMinute) : 0;
+    const estTime = estMinutes >= 60 ? `~${Math.round(estMinutes / 60)}小时` : estMinutes > 0 ? `~${estMinutes}分钟` : '已用尽';
+
+    box.innerHTML = `
+      <div class="sb-quota-total" id="sb-quota-toggle">
+        <span class="sb-quota-label">可用额度</span>
+        <span class="sb-quota-val">${totalRemaining} 次</span>
+        <span class="sb-quota-est">约可剪辑 ${estTime}</span>
+      </div>
+      <div class="sb-quota-details hidden" id="sb-quota-details">
+        ${usage.map(u => {
+      const pct = u.limit > 0 ? Math.round((u.used / u.limit) * 100) : 0;
+      return `<div class="sb-quota-key"><span class="sb-quota-key-name">${esc(u.keyMasked)}</span><span class="sb-quota-key-val">${u.remaining}/${u.limit}</span></div><div class="sb-quota-bar"><div class="sb-quota-bar-fill" style="width:${pct}%"></div></div>`;
+    }).join('')}
+        <div class="sb-quota-summary">已用 ${totalUsed} · 失败 ${usage.reduce((s, u) => s + u.failed, 0)} · 限频 ${usage.reduce((s, u) => s + u.rateLimited, 0)}</div>
+      </div>`;
+
+    document.getElementById('sb-quota-toggle')?.addEventListener('click', () => {
+      document.getElementById('sb-quota-details')?.classList.toggle('hidden');
+    });
+  } catch { box.innerHTML = '<div class="api-usage-empty">无法加载</div>'; }
+}
+
 function renderStats(){
   const s=calcStats();
   if(el.statTotal)el.statTotal.textContent=String(s.total);
@@ -282,19 +317,77 @@ function fillForm(){
   const subStroke=document.getElementById('sub-stroke');if(subStroke)subStroke.value=s.style?.subtitleStrokeColor||'#000000';
   const subPos=document.getElementById('sub-position');if(subPos)subPos.value=s.style?.subtitlePositionPercent??12;
   const fontPath=document.getElementById('font-current-path');if(fontPath)fontPath.value=s.fonts?.activeFont||'系统默认';
-  set('s-apiKey',s.api?.apiKey||'');set('s-apiBaseUrl',s.api?.baseUrl||'https://apihub.agnes-ai.com/v1');
+  set('s-apiBaseUrl',s.api?.baseUrl||'https://apihub.agnes-ai.com/v1');
+  // API keys — 多 key 支持
+  const keys = s.api?.apiKeys || (s.api?.apiKey ? [s.api.apiKey] : []);
+  const keysList = document.getElementById('api-keys-list');
+  if (keysList) {
+    keysList.innerHTML = keys.length ? keys.map((k, i) => `<div class="s-input-row"><input name="apiKey" type="password" value="${esc(k)}" placeholder="Key ${i + 1}" /><button type="button" class="btn btn-sm btn-ghost s-key-vis" title="显示/隐藏">👁</button><button type="button" class="btn btn-sm btn-ghost s-key-del" title="删除">✕</button></div>`).join('') : `<div class="s-input-row"><input name="apiKey" type="password" placeholder="Key 1" /><button type="button" class="btn btn-sm btn-ghost s-key-vis" title="显示/隐藏">👁</button><button type="button" class="btn btn-sm btn-ghost s-key-del" title="删除">✕</button></div>`;
+  }
+  const fr=document.getElementById('s-frameRate');if(fr)fr.value=String(s.edit?.frameRate??1);
   const ms=document.getElementById('s-apiModelId');
   if(ms){const m=s.api?.availableModels||[],c=s.api?.modelId||'';ms.innerHTML=m.length?m.map(x=>`<option value="${esc(x.id)}"${x.id===c?' selected':''}>${esc(x.name)}</option>`).join(''):'<option value="">请先获取模型</option>';}
 }
 function readForm(){
   const get=(id)=>{const e=document.getElementById(id);return e?.value?.trim()||'';};
-  return{dataDir:get('s-dataDir'),paths:{outputBaseDir:get('s-outputBaseDir')},style:S.settings?.style||{},voiceClone:S.settings?.voiceClone||{},commands:S.settings?.commands||{},api:{baseUrl:get('s-apiBaseUrl')||'https://apihub.agnes-ai.com/v1',apiKey:get('s-apiKey'),modelId:get('s-apiModelId'),availableModels:S.settings?.api?.availableModels||[]}};
+  const apiKeys=[...document.querySelectorAll('#api-keys-list input[name="apiKey"]')].map(e=>e.value.trim()).filter(Boolean);
+  return{dataDir:get('s-dataDir'),paths:{outputBaseDir:get('s-outputBaseDir')},style:S.settings?.style||{},voiceClone:S.settings?.voiceClone||{},commands:S.settings?.commands||{},edit:{frameRate:parseFloat(get('s-frameRate'))||1},api:{baseUrl:get('s-apiBaseUrl')||'https://apihub.agnes-ai.com/v1',apiKeys,apiKey:apiKeys[0]||'',modelId:get('s-apiModelId'),availableModels:S.settings?.api?.availableModels||[]}};
+}
+
+async function loadApiUsage() {
+  const box = document.getElementById('api-usage-box');
+  if (!box) return;
+  try {
+    const usage = await window.antbot.apiUsage();
+    if (!usage || !usage.length) { box.innerHTML = '<div class="api-usage-empty">输入 API Key 后显示额度</div>'; return; }
+    const frameRate = S.settings?.edit?.frameRate || 1;
+    const perMinute = Math.round(60 / frameRate); // 每分钟消耗的请求数（1帧/秒 = 60请求/分钟）
+    box.innerHTML = usage.map(u => {
+      const pct = u.limit > 0 ? Math.round((u.used / u.limit) * 100) : 0;
+      const estMinutes = u.remaining > 0 ? Math.round(u.remaining / perMinute) : 0;
+      const estTime = estMinutes >= 60 ? `~${Math.round(estMinutes / 60)}小时` : `~${estMinutes}分钟`;
+      return `<div class="api-usage-item">
+        <div class="api-usage-head"><span class="api-usage-key">${esc(u.keyMasked)}</span><span class="api-usage-remain">剩余 ${u.remaining} 次</span></div>
+        <div class="api-usage-bar"><div class="api-usage-bar-fill" style="width:${pct}%"></div></div>
+        <div class="api-usage-meta">已用 ${u.used}/${u.limit} · 失败 ${u.failed} · 限频 ${u.rateLimited} · 约可剪辑 ${estTime}</div>
+      </div>`;
+    }).join('');
+  } catch { box.innerHTML = ''; }
 }
 
 /* ── Render: VC/Data/Status ── */
 function renderVC(){const v=S.vc;if(el.vcStep)el.vcStep.textContent=v.step||'等待';if(el.vcPct)el.vcPct.textContent=`${v.pct||0}%`;if(el.vcBar)el.vcBar.style.width=`${v.pct||0}%`;if(el.vcLog)el.vcLog.textContent=v.logs.length?v.logs.join('\n'):'暂无日志';if(el.vcRun)el.vcRun.disabled=!!v.running}
 function renderData(){const d=S.dataInfo;if(!d)return;if(el.dataVer)el.dataVer.textContent=d.version||'-';if(el.dataPath)el.dataPath.textContent=d.dataDir||d.userData||'-';if(el.dataLog)el.dataLog.textContent=d.logDir||'-'}
-function renderStatus(){if(!el.status)return;const live=(S.progress?.tasks||[]).filter(t=>['queued','pending','running'].includes(t.status));const running=live.filter(t=>t.status==='running').length;const pending=live.filter(t=>t.status!=='running').length;if(live.length>0){const p=[];if(running>0)p.push(`${running}个正在执行`);if(pending>0)p.push(`${pending}个等待中`);el.status.textContent=p.join('，');el.status.className='tb-status active'}else{el.status.textContent='没有任务';el.status.className='tb-status'}}
+function renderStatus(){
+  if(!el.status)return;
+  if(S.currentFeat==='style-ref'){
+    const n=S.styleRefs.length;
+    el.status.textContent=n?`${n}个风格`:'暂无风格';
+    el.status.className='tb-status';
+    return;
+  }
+  if(S.currentFeat==='edit'){
+    const running=S.editVideos.filter(v=>v.status==='running').length;
+    const pending=S.editVideos.filter(v=>v.status==='pending').length;
+    const done=S.editVideos.filter(v=>v.status==='completed').length;
+    if(running){el.status.textContent=`${running}个处理中`;el.status.className='tb-status active'}
+    else if(pending){el.status.textContent=`${pending}个待处理`;el.status.className='tb-status'}
+    else if(done){el.status.textContent=`已完成 ${done}个`;el.status.className='tb-status'}
+    else{el.status.textContent='添加视频开始剪辑';el.status.className='tb-status'}
+    return;
+  }
+  if(S.currentFeat==='publish'){
+    el.status.textContent='配置发布参数后提交';el.status.className='tb-status';return;
+  }
+  if(S.currentFeat==='subtitle-voice'){
+    el.status.textContent='管理音色和字幕样式';el.status.className='tb-status';return;
+  }
+  const live=(S.progress?.tasks||[]).filter(t=>['queued','pending','running'].includes(t.status));
+  const running=live.filter(t=>t.status==='running').length;
+  const pending=live.filter(t=>t.status!=='running').length;
+  if(live.length>0){const p=[];if(running>0)p.push(`${running}个正在执行`);if(pending>0)p.push(`${pending}个等待中`);el.status.textContent=p.join('，');el.status.className='tb-status active'}
+  else{el.status.textContent='没有任务';el.status.className='tb-status'}
+}
 function renderBtns(){if(el.badge&&S.app)el.badge.textContent=`v${S.app.version}`;toggleSendBtn()}
 function toggleSendBtn(){if(!el.runBtn||!el.input)return;el.runBtn.classList.toggle('show',el.input.value.trim().length>0)}
 function renderAll(opts={}){renderStatus();renderChips();renderVC();renderData();fillForm();renderBtns();renderChat(opts);renderStats()}
@@ -315,7 +408,7 @@ async function loadUISettings(){
   try{
     const ui=await window.antbot.loadUISettings();
     if(ui.selectedStyle!==undefined) S.selectedStyle=ui.selectedStyle;
-    if(ui.editDefaults) S.editDefaults={...S.editDefaults,...ui.editDefaults};
+    if(ui.editDefaults?.subtitle!==undefined) S.editDefaults.subtitle=ui.editDefaults.subtitle;
     if(typeof ui.sidebarOpen==='boolean') S.sidebarOpen=ui.sidebarOpen;
     if(ui.statPeriod) S.statPeriod=ui.statPeriod;
   }catch{}
@@ -335,147 +428,251 @@ function qPatch(p,h){if(!p||!S.settings)return;if(p.style&&!S.settings.style)S.s
 async function runStartup(){const seq=++startupSeq;S.hint='';S.startup={type:'log',message:'检查中...'};renderStatus();try{const r=await window.antbot.checkStartup();if(seq!==startupSeq)return;S.startup={type:'result',result:r}}catch(e){if(seq!==startupSeq)return;S.startup={type:'log',message:`失败: ${compact(e?.message)}`}}renderStatus()}
 async function refreshAppState(opts={}){const s=await window.antbot.getInitialState();applySnap(s);renderAll(opts);return s}
 
-/* ── Edit videos ── */
+/* ── Edit videos (scheduler-based) ── */
 S.editVideos = [];
 S.editDefaults = { style: '', voice: '', subtitle: '开启' };
-let editIdSeq = 0;
+S.editHistory = [];
+S.editTab = 'queue';
 
-function addEditVideos(filePaths) {
-  for (const fp of filePaths) {
+async function addEditVideos(filePaths) {
+  const apiCfg = S.settings?.api || {};
+  const tasks = filePaths.map(fp => {
     const name = fp.split(/[/\\]/).pop() || fp;
-    S.editVideos.push({
-      id: `ev-${++editIdSeq}`,
-      path: fp,
-      name,
-      style: S.editDefaults.style,
-      voice: S.editDefaults.voice,
-      subtitle: S.editDefaults.subtitle,
-    });
-  }
-  renderEditCards();
+    const styleRef = S.styleRefs.find(s => s.name === S.editDefaults.style);
+    const voice = (S.voices || []).find(v => v.name === S.editDefaults.voice);
+    return {
+      id: `ev-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+      path: fp, name,
+      style: S.editDefaults.style, voice: S.editDefaults.voice, subtitle: S.editDefaults.subtitle,
+      voiceProfileId: voice?.id || '', voiceProfileName: voice?.name || '',
+      apiConfig: { baseUrl: apiCfg.baseUrl, apiKey: apiCfg.apiKey, apiKeys: apiCfg.apiKeys || [apiCfg.apiKey].filter(Boolean), modelId: apiCfg.modelId },
+    };
+  });
+  try {
+    const created = await window.antbot.editAddTasks(tasks);
+    for (const t of created) { if (!S.editVideos.find(v => v.id === t.id)) S.editVideos.push(t); }
+    renderEditCards(); renderEditStartBtn();
+  } catch (e) { toast(e.message, 'error'); }
 }
 
-function removeEditVideo(id) {
-  S.editVideos = S.editVideos.filter(v => v.id !== id);
-  renderEditCards();
+function renderEditStartBtn() {
+  const btn = document.getElementById('edit-start-btn');
+  if (!btn) return;
+  const hasRunning = S.editVideos.some(v => ['preparing', 'composing'].includes(v.status));
+  const pending = S.editVideos.filter(v => v.status === 'pending' || v.status === 'paused');
+  if (hasRunning) { btn.disabled = true; btn.textContent = '处理中...'; }
+  else if (pending.length > 0) { btn.disabled = false; btn.textContent = `开始 ${pending.length} 个`; }
+  else { btn.disabled = true; btn.textContent = '开始剪辑'; }
+  document.querySelectorAll('.edit-default-btn').forEach(b => { b.disabled = hasRunning; b.style.opacity = hasRunning ? '0.4' : ''; b.style.pointerEvents = hasRunning ? 'none' : ''; });
+  renderStatus();
+}
+
+function fmtDur(sec) {
+  if (!sec || sec < 1) return '';
+  const m = Math.floor(sec / 60), s = Math.round(sec % 60);
+  return m > 0 ? `${m}分${s}秒` : `${s}秒`;
 }
 
 function renderEditCards() {
   const container = document.getElementById('edit-cards');
   const empty = document.getElementById('edit-empty');
   if (!container) return;
-  if (!S.editVideos.length) {
-    container.innerHTML = '';
-    if (empty) empty.classList.remove('hidden');
-    return;
-  }
+  document.querySelectorAll('.edit-tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === S.editTab));
+  if (S.editTab === 'history') { renderEditHistory(container); if (empty) empty.classList.add('hidden'); return; }
+  if (!S.editVideos.length) { container.innerHTML = ''; if (empty) empty.classList.remove('hidden'); return; }
   if (empty) empty.classList.add('hidden');
-  container.innerHTML = S.editVideos.map(v => `
-    <div class="edit-card" data-video-id="${esc(v.id)}">
-      <div class="edit-card-preview" data-vid="${esc(v.id)}">
-        <video src="safe-file://${encodeURIComponent(v.path)}" preload="metadata" muted></video>
-        <div class="play-icon"><span class="icon" data-icon="play"></span></div>
-      </div>
+
+  container.innerHTML = S.editVideos.map(v => {
+    const st = v.status || 'pending';
+    const pct = Math.max(0, Math.min(100, v.progress || 0));
+    const icons = { pending: '⏳', preparing: '🔧', ready: '📋', composing: '🎬', paused: '⏸', completed: '✅', failed: '❌', cancelled: '🚫' };
+    const icon = icons[st] || '';
+    const txt = st === 'preparing' ? `${v.step || '准备中'} ${pct}%` : st === 'ready' ? `待合成 · ${v.videoName || ''}` : st === 'composing' ? `合成中 ${pct}%` : st === 'completed' ? `完成 ${fmtDur(v.duration)}` : st === 'failed' ? `失败: ${(v.error || '').slice(0, 50)}` : st === 'paused' ? '已暂停' : st === 'cancelled' ? '已取消' : '等待中';
+    let acts = '';
+    if (st === 'pending') acts = `<button class="edit-act-btn" data-act="start" data-vid="${esc(v.id)}">开始</button><button class="edit-act-btn danger" data-act="remove" data-vid="${esc(v.id)}">移除</button>`;
+    else if (st === 'preparing') acts = `<button class="edit-act-btn" data-act="pause" data-vid="${esc(v.id)}">暂停</button><button class="edit-act-btn danger" data-act="cancel" data-vid="${esc(v.id)}">取消</button>`;
+    else if (st === 'ready') acts = `<button class="edit-act-btn" data-act="compose" data-vid="${esc(v.id)}">合成</button><button class="edit-act-btn danger" data-act="cancel" data-vid="${esc(v.id)}">取消</button>`;
+    else if (st === 'composing') acts = `<button class="edit-act-btn danger" data-act="cancel" data-vid="${esc(v.id)}">取消</button>`;
+    else if (st === 'paused') acts = `<button class="edit-act-btn" data-act="resume" data-vid="${esc(v.id)}">继续</button><button class="edit-act-btn danger" data-act="cancel" data-vid="${esc(v.id)}">取消</button>`;
+    else if (st === 'completed') acts = `<button class="edit-act-btn" data-act="open" data-vid="${esc(v.id)}">打开</button><button class="edit-act-btn danger" data-act="remove" data-vid="${esc(v.id)}">移除</button>`;
+    else acts = `<button class="edit-act-btn" data-act="retry" data-vid="${esc(v.id)}">重试</button><button class="edit-act-btn danger" data-act="remove" data-vid="${esc(v.id)}">移除</button>`;
+
+    const showProgress = ['preparing', 'composing'].includes(st);
+    return `<div class="edit-card ${st}" data-video-id="${esc(v.id)}">
+      <div class="edit-card-icon" data-vid="${esc(v.id)}"><span class="icon" data-icon="film"></span></div>
       <div class="edit-card-info">
-        <div class="edit-card-name">${esc(v.name)}</div>
-        <div class="edit-card-meta">${esc(v.path)}</div>
+        <div class="edit-card-name">${esc(v.name)} <span class="edit-card-status">${icon} ${esc(txt)}</span></div>
         <div class="edit-card-opts">
-          <button class="edit-opt-btn" data-edit-card-opt="style" data-vid="${esc(v.id)}" type="button">风格: <span class="val">${esc(v.style)}</span></button>
-          <button class="edit-opt-btn" data-edit-card-opt="voice" data-vid="${esc(v.id)}" type="button">音色: <span class="val">${esc(v.voice)}</span></button>
-          <button class="edit-opt-btn" data-edit-card-opt="subtitle" data-vid="${esc(v.id)}" type="button">字幕: <span class="val">${esc(v.subtitle)}</span></button>
+          <button class="edit-opt-btn" data-edit-card-opt="style" data-vid="${esc(v.id)}" type="button">风格: <span class="val">${esc(v.style || '默认')}</span></button>
+          <button class="edit-opt-btn" data-edit-card-opt="voice" data-vid="${esc(v.id)}" type="button">音色: <span class="val">${esc(v.voice || '默认')}</span></button>
+          <button class="edit-opt-btn" data-edit-card-opt="subtitle" data-vid="${esc(v.id)}" type="button">字幕: <span class="val">${esc(v.subtitle || '开启')}</span></button>
         </div>
+        ${showProgress ? `<div class="edit-card-progress"><div class="edit-card-progress-bar" style="width:${pct}%"></div></div>` : ''}
+        ${v.message ? `<div class="edit-card-msg">${esc(v.message)}</div>` : ''}
       </div>
-    </div>
-  `).join('');
-  injectIcons();
-  // Card option click handlers
-  container.querySelectorAll('[data-edit-card-opt]').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const vid = btn.dataset.vid;
-      const opt = btn.dataset.editCardOpt;
-      showEditCardPopup(btn, vid, opt);
-    });
-  });
-  // Preview click to play/pause
-  container.querySelectorAll('.edit-card-preview').forEach(preview => {
-    preview.addEventListener('click', () => {
-      const video = preview.querySelector('video');
-      if (!video) return;
-      const icon = preview.querySelector('.play-icon');
-      if (video.paused) {
-        video.play();
-        if (icon) icon.style.display = 'none';
-        video.addEventListener('ended', () => { if (icon) icon.style.display = ''; }, { once: true });
-      } else {
-        video.pause();
-        if (icon) icon.style.display = '';
-      }
-    });
-  });
+      <div class="edit-card-actions">${acts}</div>
+    </div>`;
+  }).join('');
+  injectIcons(); bindEditCardEvents();
 }
 
-function showEditDefaultPopup(anchor, type) {
-  closeAllPopups();
-  const popup = document.createElement('div');
-  popup.className = 'chip-popup';
-  const current = S.editDefaults[type] || '';
-  let options;
-  if (type === 'style') {
-    options = S.styleRefs.filter(s => !s.learning && s.prompt).map(s => s.name);
-    if (!options.length) options = ['暂无风格'];
-  } else if (type === 'voice') {
-    const vcName = S.settings?.voiceClone?.profileName || S.settings?.voiceClone?.voiceId;
-    options = vcName ? [vcName] : ['暂无音色'];
+function bindEditCardEvents() {
+  const c = document.getElementById('edit-cards'); if (!c) return;
+  c.querySelectorAll('[data-edit-card-opt]').forEach(btn => btn.addEventListener('click', (e) => { e.stopPropagation(); showEditCardPopup(btn, btn.dataset.vid, btn.dataset.editCardOpt); }));
+  c.querySelectorAll('.edit-card-icon').forEach(icon => { icon.addEventListener('click', () => { const vid = icon.dataset.vid; const v = S.editVideos.find(x => x.id === vid); if (v?.path) window.antbot.revealInFolder(v.path); }); });
+  c.querySelectorAll('[data-act]').forEach(btn => btn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const vid = btn.dataset.vid, action = btn.dataset.act;
+    if (action === 'start' || action === 'retry' || action === 'compose') await window.antbot.editStartTask(vid);
+    else if (action === 'pause') await window.antbot.editPauseTask(vid);
+    else if (action === 'resume') await window.antbot.editStartTask(vid);
+    else if (action === 'cancel') await window.antbot.cancelEditTask(vid);
+    else if (action === 'remove') {
+      await window.antbot.editRemoveTask(vid);
+      S.editVideos = S.editVideos.filter(v => v.id !== vid);
+      renderEditCards(); renderEditStartBtn();
+    }
+    else if (action === 'open') { const v = S.editVideos.find(x => x.id === vid); if (v?.outputPath) window.antbot.revealInFolder(v.outputPath); }
+  }));
+}
+
+// 接收主进程任务状态更新
+function handleEditTaskUpdate(t) {
+  if (!t?.id) return;
+  const idx = S.editVideos.findIndex(v => v.id === t.id);
+  if (idx >= 0) {
+    // 保留用户设置的 style/voice/subtitle，只更新状态相关字段
+    const local = S.editVideos[idx];
+    S.editVideos[idx] = {
+      ...t,
+      style: local.style || t.style || '',
+      voice: local.voice || t.voice || '',
+      subtitle: local.subtitle || t.subtitle || '开启',
+    };
   } else {
-    options = ['开启', '关闭'];
+    S.editVideos.push(t);
   }
-  popup.innerHTML = `<ul class="style-list">${options.map(o =>
-    `<li class="style-item${o === current ? ' active' : ''}" data-val="${esc(o)}">${esc(o)}</li>`
-  ).join('')}</ul>`;
-  positionPopup(popup, anchor);
-  activePopup = popup;
-  popup.querySelectorAll('.style-item').forEach(item => {
-    item.addEventListener('click', () => {
-      S.editDefaults[type] = item.dataset.val;
-      const valEl = $(`#default-${type}-val`);
-      if (valEl) valEl.textContent = item.dataset.val;
-      toast(`${type === 'style' ? '风格' : type === 'voice' ? '音色' : '字幕'}: ${item.dataset.val}`, 'info');
-      saveUI();
-      closeAllPopups();
+  renderEditCards(); renderEditStartBtn();
+  if (t.status === 'completed' && t.outputPath) {
+    window.antbot.saveEditHistory({ id: `hist-${Date.now()}`, name: t.name, sourcePath: t.path, outputPath: t.outputPath, status: 'completed', style: t.style, voice: t.voice, error: '', duration: t.duration || 0, fileSize: 0, createdAt: new Date().toISOString() }).catch(() => {});
+    toast(`完成: ${t.name} (${fmtDur(t.duration)})`, 'success');
+  } else if (t.status === 'failed') {
+    window.antbot.saveEditHistory({ id: `hist-${Date.now()}`, name: t.name, sourcePath: t.path, outputPath: '', status: 'failed', style: t.style, voice: t.voice, error: (t.error || '').slice(0, 200), duration: t.duration || 0, fileSize: 0, createdAt: new Date().toISOString() }).catch(() => {});
+  }
+}
+
+// 初始化：从主进程加载已有任务
+async function loadEditTasks() { try { S.editVideos = await window.antbot.editGetTasks(); renderEditCards(); renderEditStartBtn(); } catch {} }
+
+/* ── Edit history ── */
+async function loadEditHistory() { showLoading('edit-cards'); try { S.editHistory = await window.antbot.getEditHistory(); } catch { S.editHistory = []; } renderEditCards(); }
+
+function renderEditHistory(container) {
+  if (!container) return;
+  if (!S.editHistory.length) { container.innerHTML = '<div class="edit-empty-hist">暂无历史记录</div>'; return; }
+
+  // 按日期分组
+  const today = new Date(); today.setHours(0,0,0,0);
+  const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
+  const groups = {};
+  for (const h of S.editHistory) {
+    const d = h.createdAt ? new Date(h.createdAt) : new Date();
+    const dayStart = new Date(d); dayStart.setHours(0,0,0,0);
+    let label;
+    if (dayStart.getTime() === today.getTime()) label = '今天';
+    else if (dayStart.getTime() === yesterday.getTime()) label = '昨天';
+    else label = `${d.getMonth()+1}月${d.getDate()}日`;
+    if (!groups[label]) groups[label] = [];
+    groups[label].push(h);
+  }
+
+  const groupKeys = Object.keys(groups);
+  container.innerHTML = groupKeys.map((label, gi) => {
+    const isToday = gi === 0;
+    const items = groups[label];
+    const rows = items.map(h => {
+      const ok = h.status === 'completed';
+      const dur = ok ? `剪耗时:${fmtDur(h.duration)}` : `失败：${(h.error || '').slice(0, 60)}`;
+      const style = h.style || '默认';
+      const voice = h.voice || '默认';
+      const detail = ok ? `${dur}，风格:${style}，音色:${voice}，有字幕` : dur;
+      const time = h.createdAt ? new Date(h.createdAt).toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'}) : '';
+      // 显示输出文件名（而非原始文件名）
+      const displayName = ok && h.outputPath ? h.outputPath.split(/[/\\]/).pop().replace(/\.[^.]+$/, '') : h.name;
+      return `<div class="edit-hist-item ${h.status}">
+        <div class="edit-hist-info">
+          <div class="edit-hist-name">${ok ? '✅' : '❌'} ${esc(displayName)}</div>
+          <div class="edit-hist-detail">${esc(detail)}</div>
+          <div class="edit-hist-time">${esc(time)}</div>
+        </div>
+        <div class="edit-hist-acts">
+          ${ok ? `<button class="edit-act-btn" data-hact="open" data-hid="${esc(h.id)}">打开</button>` : ''}
+          <button class="edit-act-btn danger" data-hact="delete" data-hid="${esc(h.id)}">删除</button>
+        </div>
+      </div>`;
+    }).join('');
+
+    if (groupKeys.length === 1 && isToday) return rows; // 只有一组且是今天，不加折叠
+    return `<div class="edit-hist-group${isToday ? ' expanded' : ''}" data-group="${esc(label)}">
+      <div class="edit-hist-group-head" data-toggle-group="${esc(label)}">
+        <span class="edit-hist-group-label">${esc(label)}</span>
+        <span class="edit-hist-group-count">${items.length} 个</span>
+        <span class="edit-hist-group-arrow">›</span>
+      </div>
+      <div class="edit-hist-group-body">${rows}</div>
+    </div>`;
+  }).join('');
+
+  injectIcons();
+  // 折叠/展开
+  container.querySelectorAll('[data-toggle-group]').forEach(head => {
+    head.addEventListener('click', () => {
+      const group = head.closest('.edit-hist-group');
+      if (group) group.classList.toggle('expanded');
     });
   });
+  // 操作按钮
+  container.querySelectorAll('[data-hact]').forEach(btn => btn.addEventListener('click', async () => {
+    const hid = btn.dataset.hid, act = btn.dataset.hact;
+    if (act === 'open') { const h = S.editHistory.find(x => x.id === hid); if (h?.outputPath) window.antbot.revealInFolder(h.outputPath); }
+    else if (act === 'delete') { const h = S.editHistory.find(x => x.id === hid); const del = h?.outputPath ? window.confirm('同时删除输出文件？') : false; const r = await window.antbot.deleteEditHistory({ id: hid, deleteFile: del }); if (r.ok) { S.editHistory = r.history; renderEditCards(); } }
+  }));
 }
 
 function showEditCardPopup(anchor, vid, type) {
   closeAllPopups();
   const video = S.editVideos.find(v => v.id === vid);
   if (!video) return;
-  const popup = document.createElement('div');
-  popup.className = 'chip-popup';
+  const popup = document.createElement('div'); popup.className = 'chip-popup';
   const current = video[type] || '';
   let options;
-  if (type === 'style') {
-    options = S.styleRefs.filter(s => !s.learning && s.prompt).map(s => s.name);
-    if (!options.length) options = ['暂无风格'];
-  } else if (type === 'voice') {
-    const vcName = S.settings?.voiceClone?.profileName || S.settings?.voiceClone?.voiceId;
-    options = vcName ? [vcName] : ['暂无音色'];
-  } else {
-    options = ['开启', '关闭'];
-  }
-  popup.innerHTML = `<ul class="style-list">${options.map(o =>
-    `<li class="style-item${o === current ? ' active' : ''}" data-val="${esc(o)}">${esc(o)}</li>`
-  ).join('')}</ul>`;
-  positionPopup(popup, anchor);
-  activePopup = popup;
-  popup.querySelectorAll('.style-item').forEach(item => {
-    item.addEventListener('click', () => {
-      video[type] = item.dataset.val;
-      renderEditCards();
-      closeAllPopups();
-    });
-  });
+  if (type === 'style') { options = S.styleRefs.filter(s => !s.learning && s.prompt).map(s => s.name); if (!options.length) options = ['暂无风格']; }
+  else if (type === 'voice') { const voices = S.voices || []; options = voices.length ? voices.map(v => v.name) : ['暂无音色']; }
+  else { options = ['开启', '关闭']; }
+  popup.innerHTML = `<ul class="style-list">${options.map(o => `<li class="style-item${o === current ? ' active' : ''}" data-val="${esc(o)}">${esc(o)}</li>`).join('')}</ul>`;
+  positionPopup(popup, anchor); activePopup = popup;
+  popup.querySelectorAll('.style-item').forEach(item => item.addEventListener('click', () => { video[type] = item.dataset.val; renderEditCards(); closeAllPopups(); }));
+}
+
+function showEditDefaultPopup(anchor, type) {
+  closeAllPopups();
+  const current = S.editDefaults[type] || '';
+  let options;
+  if (type === 'style') { options = S.styleRefs.filter(s => !s.learning && s.prompt).map(s => s.name); if (!options.length) options = ['暂无风格']; }
+  else if (type === 'voice') { const voices = S.voices || []; options = voices.length ? voices.map(v => v.name) : ['暂无音色']; }
+  else { options = ['开启', '关闭']; }
+  const popup = document.createElement('div'); popup.className = 'chip-popup';
+  popup.innerHTML = `<ul class="style-list">${options.map(o => `<li class="style-item${o === current ? ' active' : ''}" data-val="${esc(o)}">${esc(o)}</li>`).join('')}</ul>`;
+  positionPopup(popup, anchor); activePopup = popup;
+  popup.querySelectorAll('.style-item').forEach(item => item.addEventListener('click', () => {
+    const val = item.dataset.val;
+    S.editDefaults[type] = val;
+    S.editVideos.forEach(v => { if (v.status === 'pending' || v.status === 'failed' || v.status === 'cancelled') v[type] = val; });
+    const valEl = document.getElementById(`default-${type}-val`);
+    if (valEl) valEl.textContent = val || '默认';
+    renderEditCards(); closeAllPopups();
+    toast(`默认${type === 'style' ? '风格' : type === 'voice' ? '音色' : '字幕'}: ${val || '默认'}`, 'info');
+  }));
 }
 
 /* ── Context menu ── */
@@ -497,18 +694,18 @@ S.styleRefs = [];
 let styleIdSeq = 0;
 
 async function loadStyles() {
+  showLoading('style-cards');
   try {
     const styles = await window.antbot.loadStyles();
     if (Array.isArray(styles) && styles.length) {
       S.styleRefs = styles.filter(s => s && s.id && s.name);
-      // Update styleIdSeq to avoid ID conflicts
       for (const s of S.styleRefs) {
         const num = parseInt(String(s.id).replace('sty-', ''), 10);
         if (num > styleIdSeq) styleIdSeq = num;
       }
-      renderStyleCards();
     }
   } catch {}
+  renderStyleCards();
 }
 
 function addStyleRef({ name, prompt, type, videoPaths }) {
@@ -720,6 +917,7 @@ async function checkDeps() {
 }
 
 async function loadModels() {
+  showLoading('models-list');
   try {
     const result = await window.antbot.modelsList();
     S.models = result.models || {};
@@ -809,6 +1007,7 @@ S.voices = [];
 S.activeVoiceId = '';
 
 async function loadVoices() {
+  showLoading('voice-list');
   try {
     const result = await window.antbot.listVoices();
     S.voices = result.voices || [];
@@ -933,7 +1132,7 @@ function bindSubtitleVoiceEvents() {
     e.preventDefault(); dropzone.classList.remove('dragover');
     const f = e.dataTransfer?.files?.[0];
     if (f && /\.(mp3|wav|m4a|aac|flac|ogg|wma)$/i.test(f.name)) {
-      S._voiceFilePath = f.path || f.name;
+      try { S._voiceFilePath = window.antbot.getPathForFile(f); } catch { S._voiceFilePath = ''; }
       if (dropText) dropText.textContent = f.name;
       dropzone.classList.add('has-file');
     } else {
@@ -1004,20 +1203,47 @@ function bind(){
     document.querySelectorAll('.sb-tab').forEach(t=>t.classList.remove('active'));tab.classList.add('active');
     document.querySelectorAll('.sb-panel').forEach(p=>p.classList.add('hidden'));
     const panel=$(`#sbpanel-${tab.dataset.sbtab}`);if(panel)panel.classList.remove('hidden');
+    if(tab.dataset.sbtab==='history') loadSidebarApiUsage();
   })});
   // Edit page - drag and drop
-  const editList = document.getElementById('edit-list');
-  if (editList) {
-    editList.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); editList.style.borderColor = 'var(--brand)'; });
-    editList.addEventListener('dragleave', () => { editList.style.borderColor = ''; });
-    editList.addEventListener('drop', e => {
-      e.preventDefault(); e.stopPropagation(); editList.style.borderColor = '';
-      const files = Array.from(e.dataTransfer?.files || []).filter(f => /\.(mp4|mov|m4v|webm|mkv|avi|flv|wmv|ts)$/i.test(f.name));
-      if (files.length) addEditVideos(files.map(f => f.path));
+  const editView = document.getElementById('view-edit');
+  if (editView) {
+    editView.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); editView.classList.add('drag-over'); });
+    editView.addEventListener('dragleave', e => { if (!editView.contains(e.relatedTarget)) editView.classList.remove('drag-over'); });
+    editView.addEventListener('drop', e => {
+      e.preventDefault(); e.stopPropagation(); editView.classList.remove('drag-over');
+      const filePaths = [];
+      for (const f of e.dataTransfer?.files || []) {
+        try {
+          const p = window.antbot.getPathForFile(f);
+          if (p && /\.(mp4|mov|m4v|webm|mkv|avi|flv|wmv|ts)$/i.test(f.name)) filePaths.push(p);
+        } catch {}
+      }
+      if (filePaths.length) {
+        addEditVideos(filePaths);
+        switchFeature('edit');
+        toast(`已添加 ${filePaths.length} 个视频`, 'success');
+      } else {
+        toast('请拖入视频文件（mp4/mov/mkv 等）', 'info');
+      }
     });
   }
   el.editAddBtn?.addEventListener('click',async()=>{try{const files=await window.antbot.pickVideoFiles();if(files&&files.length)addEditVideos(files)}catch(e){toast(e.message,'error')}});
-  el.editStartBtn?.addEventListener('click',()=>{if(!S.editVideos.length){toast('请先添加视频','error');return}toast('剪辑功能开发中','info')});
+  el.editStartBtn?.addEventListener('click', async () => {
+    await window.antbot.editStartAll();
+  });
+
+  // Edit tab switching
+  document.querySelectorAll('.edit-tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      S.editTab = btn.dataset.tab || 'queue';
+      if (S.editTab === 'history') loadEditHistory();
+      renderEditCards();
+    });
+  });
+
+  // 接收主进程任务状态更新（实时）
+  window.antbot.onEditTaskUpdate?.((t) => { handleEditTaskUpdate(t); });
   // Edit default buttons
   document.querySelectorAll('[data-edit-default]').forEach(btn=>{
     btn.addEventListener('click',()=>showEditDefaultPopup(btn,btn.dataset.editDefault));
@@ -1039,14 +1265,14 @@ function bind(){
   el.openVideoBtn?.addEventListener('click',()=>void window.antbot.openExternal('https://channels.weixin.qq.com/platform').catch(e=>toast(e.message,'error')));
   el.openDouyinBtn?.addEventListener('click',()=>void window.antbot.openExternal('https://creator.douyin.com/creator-micro/home').catch(e=>toast(e.message,'error')));
   // Settings
-  el.openSettingsBtn?.addEventListener('click',()=>{fillForm();el.setDlg?.showModal();if(isMobile())closeSidebar();checkDeps();loadModels();checkVoicebox();});
+  el.openSettingsBtn?.addEventListener('click',()=>{fillForm();el.setDlg?.showModal();if(isMobile())closeSidebar();checkDeps();loadModels();checkVoicebox();loadApiUsage();});
   el.setClose?.addEventListener('click',()=>closeDlg(el.setDlg));
   // Auto-save on settings input change
   document.getElementById('settings-body')?.addEventListener('change',()=>{void saveSettings();});
   document.getElementById('settings-body')?.addEventListener('input',(e)=>{if(e.target.matches('input[type=password],input[type=text],input[type=number]')){clearTimeout(S._settingsSaveTimer);S._settingsSaveTimer=setTimeout(()=>void saveSettings(),800);}});
   // Fetch models button
   document.getElementById('fetch-models-btn')?.addEventListener('click',async()=>{
-    const apiKey=document.getElementById('s-apiKey')?.value?.trim();
+    const apiKey=[...document.querySelectorAll('#api-keys-list input[name="apiKey"]')].map(e=>e.value.trim()).filter(Boolean)[0]||'';
     const baseUrl=document.getElementById('s-apiBaseUrl')?.value?.trim()||'https://apihub.agnes-ai.com/v1';
     if(!apiKey){toast('请先输入 API Key','error');return;}
     toast('正在获取模型...','info');
@@ -1057,6 +1283,19 @@ function bind(){
       fillForm();
       toast(`发现 ${result.models.length} 个模型，请选择一个`,'info');
     }else{toast(result.message||'获取模型失败','error');}
+  });
+  // Add/remove API key buttons
+  document.getElementById('add-api-key-btn')?.addEventListener('click',()=>{
+    const list=document.getElementById('api-keys-list');if(!list)return;
+    const count=list.querySelectorAll('.s-input-row').length+1;
+    const row=document.createElement('div');row.className='s-input-row';
+    row.innerHTML=`<input name="apiKey" type="password" placeholder="Key ${count}" /><button type="button" class="btn btn-sm btn-ghost s-key-vis" title="显示/隐藏">👁</button><button type="button" class="btn btn-sm btn-ghost s-key-del" title="删除">✕</button>`;
+    list.appendChild(row);
+    row.querySelector('input').focus();
+  });
+  document.getElementById('api-keys-list')?.addEventListener('click',(e)=>{
+    const del=e.target.closest('.s-key-del');if(del){const row=del.closest('.s-input-row');if(row)row.remove();void saveSettings();return;}
+    const vis=e.target.closest('.s-key-vis');if(vis){const inp=vis.closest('.s-input-row')?.querySelector('input');if(inp)inp.type=inp.type==='password'?'text':'password';}
   });
   // Voice clone
   el.vcRun?.addEventListener('click',()=>void runVC());el.vcClose?.addEventListener('click',()=>closeDlg(el.vcDlg));
@@ -1113,9 +1352,15 @@ function bind(){
     try { const r = await window.antbot.openDataDir(); toast(`已打开: ${r.path}`, 'info'); } catch (e) { toast(e.message, 'error'); }
   });
   document.getElementById('open-output-dir-btn')?.addEventListener('click', async () => {
-    const dir = el.setForm?.outputBaseDir?.value?.trim();
-    if (dir) { try { await window.antbot.openExternal(dir); } catch { try { await window.antbot.openDataDir(); } catch (e) { toast(e.message, 'error'); } } }
-    else { toast('请先设置输出目录', 'info'); }
+    try {
+      const dir = await window.antbot.pickDirectory('选择视频输出目录');
+      if (dir) {
+        const input = document.getElementById('s-outputBaseDir');
+        if (input) input.value = dir;
+        void saveSettings();
+        toast(`输出目录已设置: ${dir}`, 'success');
+      }
+    } catch (e) { toast(e.message, 'error'); }
   });
   document.getElementById('models-list')?.addEventListener('click', async (e) => {
     const dlBtn = e.target.closest('[data-model-download]');
@@ -1197,7 +1442,18 @@ function bind(){
     renderVoiceboxDepsList();
     try {
       const r = await window.antbot.voiceboxInstall();
-      toast(r.ok ? '语音克隆依赖安装完成' : (r.message || '安装失败'), r.ok ? 'success' : 'error');
+      if (r.ok && r.needsRestart) {
+        toast(`安装完成，以下模块需重启生效：${r.restartPackages.join(', ')}`, 'warning');
+        if (window.confirm(`以下模块需要重启 App 才能生效：\n${r.restartPackages.join(', ')}\n\n是否现在重启？`)) {
+          location.reload();
+        }
+      } else if (r.ok) {
+        toast('语音克隆依赖安装完成', 'success');
+      } else if (r.failedPackages?.length) {
+        toast(`部分依赖失败：${r.failedPackages.join(', ')}，可点击重试`, 'error');
+      } else {
+        toast(r.message || '安装失败', 'error');
+      }
       await checkVoicebox();
     } catch (e) { toast(e.message, 'error'); }
     if (btn) { btn.disabled = false; btn.innerHTML = `<span class="icon" data-icon="download"></span>安装依赖`; injectIcons(); }
@@ -1224,10 +1480,9 @@ function bind(){
       btn.innerHTML = `<span class="icon" data-icon="download"></span>安装依赖`;
       injectIcons();
       checkVoicebox();
-      toast('语音克隆依赖安装完成', 'success');
     } else if (p.status === 'failed') {
       btn.disabled = false;
-      btn.innerHTML = `<span class="icon" data-icon="download"></span>安装依赖`;
+      btn.innerHTML = `<span class="icon" data-icon="refreshCw"></span>重试安装`;
       injectIcons();
       toast(p.message || '安装失败', 'error');
     }
@@ -1279,13 +1534,14 @@ async function init(){
   // Initialize app regardless of splash
   injectIcons();bind();initResize();initDialogClose();syncSidebar();
   await loadUISettings();
+  // 先加载风格和音色（本地文件读取很快），再渲染，避免空状态闪烁
+  await Promise.all([loadStyles(), loadVoices()]);
   const initState=await window.antbot.getInitialState();
   applySnap(initState);renderAll({stick:true});queuePreview();
   await runStartup();
   try{await window.antbot.migrateData()}catch{}
   await loadData();
   await loadModels();
-  await loadVoices();
-  await loadStyles();
+  loadEditTasks();
 }
 init();

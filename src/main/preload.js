@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 function on(channel, callback) {
   const wrapped = (_, payload) => callback(payload);
@@ -7,6 +7,7 @@ function on(channel, callback) {
 }
 
 contextBridge.exposeInMainWorld('antbot', {
+  getPathForFile: (file) => webUtils.getPathForFile(file),
   getInitialState: () => ipcRenderer.invoke('app:get-initial-state'),
   checkStartup: () => ipcRenderer.invoke('startup:check'),
   markLoginDone: (serviceKey) => ipcRenderer.invoke('startup:mark-login-done', serviceKey),
@@ -17,6 +18,7 @@ contextBridge.exposeInMainWorld('antbot', {
   pickAudioFile: () => ipcRenderer.invoke('dialog:pick-audio-file'),
   pickVideoFile: () => ipcRenderer.invoke('dialog:pick-video-file'),
   pickVideoFiles: () => ipcRenderer.invoke('dialog:pick-video-files'),
+  pickDirectory: (title) => ipcRenderer.invoke('dialog:pick-directory', title),
   runVoiceClone: (payload) => ipcRenderer.invoke('voice:clone', payload),
   parseTasks: (input) => ipcRenderer.invoke('task:parse', input),
   startTasks: (input) => ipcRenderer.invoke('task:start', input),
@@ -27,6 +29,7 @@ contextBridge.exposeInMainWorld('antbot', {
   getDependencyState: () => ipcRenderer.invoke('deps:get-state'),
   repairDependencies: () => ipcRenderer.invoke('deps:repair'),
   openExternal: (url) => ipcRenderer.invoke('app:open-external', url),
+  revealInFolder: (filePath) => ipcRenderer.invoke('app:reveal-in-folder', filePath),
   openDataDir: () => ipcRenderer.invoke('app:open-data-dir'),
   openDepDir: (toolKey) => ipcRenderer.invoke('deps:open-dir', toolKey),
   uninstallDep: (toolKey) => ipcRenderer.invoke('deps:uninstall', toolKey),
@@ -63,7 +66,7 @@ contextBridge.exposeInMainWorld('antbot', {
   modelsOpenDir: () => ipcRenderer.invoke('models:open-dir'),
   modelsChangePath: (newPath) => ipcRenderer.invoke('models:change-path', newPath),
   onProgress: (callback) => on('task:progress', callback),
-  onModelsProgress: (callback) => on('models:progress', callback),
+  apiUsage: () => ipcRenderer.invoke('api:usage'),
   onLog: (callback) => on('task:log', callback),
   onVoiceCloneProgress: (callback) => on('voice:clone-progress', callback),
   onStartupStatus: (callback) => on('startup:status', callback),
@@ -73,5 +76,18 @@ contextBridge.exposeInMainWorld('antbot', {
   onDepInstallProgress: (callback) => on('deps:install-progress', callback),
   onVoiceboxProgress: (callback) => on('voicebox:progress', callback),
   onVoiceboxDepsProgress: (callback) => on('voicebox:deps-progress', callback),
+  smartEdit: (params) => ipcRenderer.invoke('edit:smart-edit', params),
+  editAddTasks: (tasks) => ipcRenderer.invoke('edit:add-tasks', tasks),
+  editStartTask: (taskId) => ipcRenderer.invoke('edit:start-task', taskId),
+  editPauseTask: (taskId) => ipcRenderer.invoke('edit:pause-task', taskId),
+  cancelEditTask: (taskId) => ipcRenderer.invoke('edit:cancel-task', taskId),
+  editRemoveTask: (taskId) => ipcRenderer.invoke('edit:remove-task', taskId),
+  editStartAll: () => ipcRenderer.invoke('edit:start-all'),
+  editGetTasks: () => ipcRenderer.invoke('edit:get-tasks'),
+  getEditHistory: () => ipcRenderer.invoke('edit:get-history'),
+  saveEditHistory: (record) => ipcRenderer.invoke('edit:save-history', record),
+  deleteEditHistory: (opts) => ipcRenderer.invoke('edit:delete-history', opts),
+  onSmartEditProgress: (callback) => on('edit:smart-progress', callback),
+  onEditTaskUpdate: (callback) => on('edit:task-update', callback),
   onStyleProgress: (callback) => on('style:progress', callback),
 });

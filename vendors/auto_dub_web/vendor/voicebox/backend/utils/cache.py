@@ -19,13 +19,18 @@ def _get_cache_dir() -> Path:
 _memory_cache: dict[str, Union[torch.Tensor, Dict[str, Any]]] = {}
 
 
-def get_cache_key(audio_path: str, reference_text: str) -> str:
+def get_cache_key(
+    audio_path: str,
+    reference_text: str,
+    x_vector_only_mode: bool = False,
+) -> str:
     """
     Generate cache key from audio file and reference text.
 
     Args:
         audio_path: Path to audio file
         reference_text: Reference text
+        x_vector_only_mode: Whether the prompt excludes reference audio codes
 
     Returns:
         Cache key (MD5 hash)
@@ -36,6 +41,8 @@ def get_cache_key(audio_path: str, reference_text: str) -> str:
 
     # Combine audio bytes and text
     combined = audio_bytes + reference_text.encode("utf-8")
+    if x_vector_only_mode:
+        combined += b"\0x-vector-only"
 
     # Generate hash
     return hashlib.md5(combined).hexdigest()

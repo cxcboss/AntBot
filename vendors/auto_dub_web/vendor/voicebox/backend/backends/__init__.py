@@ -24,6 +24,7 @@ class TTSBackend(Protocol):
         audio_path: str,
         reference_text: str,
         use_cache: bool = True,
+        x_vector_only_mode: bool = False,
     ) -> Tuple[dict, bool]:
         """
         Create voice prompt from reference audio.
