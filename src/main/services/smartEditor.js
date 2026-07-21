@@ -214,6 +214,11 @@ async function generateSrt(recognizedContent, stylePrompt, videoDuration, langua
   return callApiWithKeyRotation(apiConfig.baseUrl, apiConfig.apiKeys || [apiConfig.apiKey], apiConfig.modelId, [{ role: 'user', content: `以下是视频内容（${videoDuration.toFixed(1)}秒）：\n${recognizedContent}\n\n风格：${stylePrompt || '自然流畅的视频旁白'}\n\n要求：输出标准SRT格式，每句不超20字，总时长<${Math.floor(videoDuration - 1)}秒，每句间隔≥0.3秒，中文每秒约4字。\n\n格式：\n1\n00:00:01,000 --> 00:00:04,000\n第一句话` }], 4000, abortSignal);
 }
 
+async function repairSrt(rawSrt, recognizedContent, stylePrompt, videoDuration, apiConfig, abortSignal) {
+  const prompt = `上一次生成的字幕无法解析。请重新整理为严格的标准 SRT。\n\n视频时长：${videoDuration.toFixed(1)}秒\n风格：${stylePrompt || '自然流畅的视频旁白'}\n\n视频识别内容：\n${recognizedContent.slice(0, 6000)}\n\n上一次输出：\n${String(rawSrt || '').slice(0, 8000)}\n\n严格要求：\n1. 只输出 SRT，不要 Markdown 代码块、标题或说明。\n2. 时间线必须使用 HH:MM:SS,mmm --> HH:MM:SS,mmm。\n3. 每条字幕之间保留一个空行。\n4. 字幕正文只能包含需要朗读的文案，不能包含序号或时间线。\n5. 每句不超过20字，总时长小于${Math.floor(videoDuration - 1)}秒，每句间隔至少0.3秒。`;
+  return callApiWithKeyRotation(apiConfig.baseUrl, apiConfig.apiKeys || [apiConfig.apiKey], apiConfig.modelId, [{ role: 'user', content: prompt }], 4000, abortSignal);
+}
+
 /* ── AI video naming ── */
 
 async function generateVideoName(recognizedContent, apiConfig, abortSignal) {
@@ -294,6 +299,23 @@ function parseSrt(srtText) {
   return entries;
 }
 
+async function parseSrtWithRepair(rawSrt, repair) {
+  try {
+    const entries = parseSrt(rawSrt);
+    if (entries.length) return { entries, srtText: rawSrt, repaired: false };
+  } catch {}
+
+  const repairedSrt = await repair(rawSrt);
+  let entries;
+  try {
+    entries = parseSrt(repairedSrt);
+  } catch (err) {
+    throw new Error(`AI 字幕格式修复失败：${err.message}`);
+  }
+  if (!entries.length) throw new Error('AI 多次未生成有效字幕');
+  return { entries, srtText: repairedSrt, repaired: true };
+}
+
 function fmtMs(ms) { const h = Math.floor(ms / 3600000), m = Math.floor((ms % 3600000) / 60000), s = Math.floor((ms % 60000) / 1000), l = ms % 1000; return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},${String(l).padStart(3, '0')}`; }
 
 function validateAndFixSrt(entries, videoDurationMs) {
@@ -364,7 +386,13 @@ async function prepareEditVideo({
 
     checkAbort();
     const rawSrt = await generateSrt(recognizedContent, stylePrompt, videoDuration, language, apiConfig, progress, abortSignal);
-    let entries = parseSrt(rawSrt);
+    const parsedSrt = await parseSrtWithRepair(rawSrt, async (invalidSrt) => {
+      checkAbort();
+      log(`AI 字幕格式无效（${String(invalidSrt || '').length} 字），正在自动修复...`);
+      progress({ step: '修复字幕', percent: 47, message: '字幕格式异常，正在自动修复...' });
+      return repairSrt(invalidSrt, recognizedContent, stylePrompt, videoDuration, apiConfig, abortSignal);
+    });
+    let entries = parsedSrt.entries;
     entries = validateAndFixSrt(entries, videoDurationMs);
     const srtContent = entriesToSrt(entries);
     await fs.writeFile(srtPath, srtContent, 'utf-8');
@@ -374,6 +402,7 @@ async function prepareEditVideo({
       srtPath,
       videoDuration,
     });
+    if (parsedSrt.repaired) log('字幕格式自动修复完成');
     log(`字幕: ${entries.length} 句`);
     progress({ step: '字幕完成', percent: 50 });
 
@@ -446,4 +475,4 @@ async function cleanupStaleCache(maxAgeMs = 3600000) {
   await artifactManager.cleanupLegacySmartEditCaches(maxAgeMs);
 }
 
-module.exports = { prepareEditVideo, composeEditVideo, cleanupStaleCache, createVisionFrameBatches, parseSrt };
+module.exports = { prepareEditVideo, composeEditVideo, cleanupStaleCache, createVisionFrameBatches, parseSrt, parseSrtWithRepair };

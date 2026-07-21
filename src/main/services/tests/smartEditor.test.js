@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { createVisionFrameBatches, parseSrt } = require('../smartEditor');
+const { createVisionFrameBatches, parseSrt, parseSrtWithRepair } = require('../smartEditor');
 
 test('splits recognition frames into API-safe groups without dropping frames', () => {
   assert.equal(typeof createVisionFrameBatches, 'function');
@@ -66,4 +66,27 @@ test('rejects an unreadable timeline instead of leaking it into subtitle text', 
 2
 00:00:04.500 K 90.00.07.500
 蓝色马克笔填充头部`), /字幕时间线格式异常/);
+});
+
+test('repairs a non-SRT AI response before accepting subtitles', async () => {
+  assert.equal(typeof parseSrtWithRepair, 'function');
+
+  let repairCalls = 0;
+  const result = await parseSrtWithRepair('手绘一只戴蓝色帽子的小狗。', async () => {
+    repairCalls += 1;
+    return `1
+00:00:01,000 --> 00:00:04,000
+手绘起笔勾勒可爱轮廓
+
+2
+00:00:04,500 --> 00:00:07,500
+蓝色马克笔填充头部`;
+  });
+
+  assert.equal(repairCalls, 1);
+  assert.equal(result.repaired, true);
+  assert.deepEqual(result.entries.map((entry) => entry.text), [
+    '手绘起笔勾勒可爱轮廓',
+    '蓝色马克笔填充头部',
+  ]);
 });

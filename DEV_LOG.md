@@ -59,6 +59,7 @@ AntBot（搬运蚁）是 Electron 桌面应用，核心做视频自动化流水�
 - 改为逐行识别字幕序号、时间线和正文，不再依赖空行分块。
 - 兼容 AI 常见的 `-->`、`->`、`→` 箭头，以及逗号或句点形式的 1-3 位毫秒。
 - 对带时间戳但无法可靠解析的行直接报错并停止任务，禁止继续烧录或配音污染文本。
+- 首次 AI 响应没有有效 SRT 时，自动携带原始响应和视频识别内容请求一次严格格式修复；第二次结果仍须通过安全解析。
 - macOS 构建改为只输出 `.app`，不再生成 DMG。
 
 ### 回归测试
@@ -66,13 +67,16 @@ AntBot（搬运蚁）是 Electron 桌面应用，核心做视频自动化流水�
 - 连续 5 条标准 SRT 没有空行时，必须解析成 5 条独立字幕。
 - 常见箭头和毫秒格式变体必须规范化为正确时间。
 - 无法识别的时间线必须抛出格式错误，不能进入字幕正文。
+- 首次返回纯文本时必须触发一次格式修复，并接受修复后的严格 SRT。
 
 ### 验证
 
-- `node --test src/main/services/tests/*.test.js vendors/auto_dub_web/tests/*.test.mjs`：10 项通过。
+- `node --test src/main/services/tests/*.test.js vendors/auto_dub_web/tests/*.test.mjs`：11 项通过。
 - `node --check src/main/services/smartEditor.js` 与 `git diff --check` 通过。
 - `npm run build:mac` 只执行 `electron-builder --mac dir`，成功生成 `.app`。
 - `release/` 中不再生成 DMG、blockmap 或 `latest-mac.yml`。
+- 使用 `23256.mp4`、风格“开车解说”、音色“猪妞”完成真实剪辑：生成 6 条独立字幕并成功输出成品。
+- Voicebox 日志中的 6 条 TTS 输入均为纯字幕文案，无序号和时间线；抽查成品 6 个时间点，均只显示对应单句字幕。
 - App 产物：`/Users/chenxincheng/Desktop/my/Develop/Claude/AntBot/搬运蚁.app`
 
 ## 2026-07-21 Vision 图片批次 400 修复
