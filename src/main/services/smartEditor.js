@@ -163,13 +163,23 @@ async function extractFrames(videoPath, outputDir, progress, abortSignal, frameR
 
 /* ── AI video recognition ── */
 
+const MAX_VISION_IMAGES_PER_REQUEST = 4;
+
+function createVisionFrameBatches(framePaths) {
+  const batches = [];
+  for (let i = 0; i < framePaths.length; i += MAX_VISION_IMAGES_PER_REQUEST) {
+    batches.push(framePaths.slice(i, i + MAX_VISION_IMAGES_PER_REQUEST));
+  }
+  return batches;
+}
+
 async function recognizeVideoContent(framePaths, apiConfig, progress, abortSignal) {
-  const BATCH = 5;
   const all = [];
-  const totalBatches = Math.ceil(framePaths.length / BATCH);
-  for (let i = 0; i < framePaths.length; i += BATCH) {
-    const batch = framePaths.slice(i, i + BATCH);
-    const batchIdx = Math.floor(i / BATCH);
+  const batches = createVisionFrameBatches(framePaths);
+  const totalBatches = batches.length;
+  for (let batchIdx = 0; batchIdx < totalBatches; batchIdx++) {
+    const batch = batches[batchIdx];
+    const i = batchIdx * MAX_VISION_IMAGES_PER_REQUEST;
     const pctBase = 15;
     const pctRange = 25;
     const pctStart = pctBase + Math.round((batchIdx / totalBatches) * pctRange);
@@ -381,4 +391,4 @@ async function cleanupStaleCache(maxAgeMs = 3600000) {
   await artifactManager.cleanupLegacySmartEditCaches(maxAgeMs);
 }
 
-module.exports = { prepareEditVideo, composeEditVideo, cleanupStaleCache };
+module.exports = { prepareEditVideo, composeEditVideo, cleanupStaleCache, createVisionFrameBatches };

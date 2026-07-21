@@ -47,6 +47,33 @@ AntBot（搬运蚁）是 Electron 桌面应用，核心做视频自动化流水�
 - App 产物：`/Users/chenxincheng/Desktop/my/Develop/Claude/AntBot/搬运蚁.app`
 - DMG 产物：`/Users/chenxincheng/Desktop/my/Develop/Claude/AntBot/release/搬运蚁-0.3.6-mac-arm64.dmg`
 
+## 2026-07-21 Vision 图片批次 400 修复
+
+### 故障
+
+剪辑任务 `23256.mp4` 在 AI 识别阶段失败，App 日志记录：
+
+```text
+Image count 5 exceeds limit 4 per request.
+```
+
+### 根因与修复
+
+- `smartEditor.js` 将抽帧图片按每批 5 张发送给 Vision API，超过上游接口每次最多 4 张图的限制。
+- 新增统一的 Vision 分批函数，将每个识别请求限制为最多 4 张图，同时保持全部帧的顺序和完整性。
+- 新增 25 帧回归测试，验证分组结果为 `4/4/4/4/4/4/1`，不会漏帧或乱序。
+
+### 验证
+
+- 回归测试先在旧实现上失败，再在修复后通过。
+- `node --test src/main/services/tests/*.test.js vendors/auto_dub_web/tests/*.test.mjs`：7 项通过。
+- Voicebox Python 回归测试：3 项通过。
+- `node --check src/main/services/smartEditor.js` 与 `git diff --check` 通过。
+- `npm run build:mac` 通过。
+- 根目录 App、构建目录 App 和 DMG 内 App 的 `app.asar` 哈希一致，包内 `MAX_VISION_IMAGES_PER_REQUEST=4`。
+- App 产物：`/Users/chenxincheng/Desktop/my/Develop/Claude/AntBot/搬运蚁.app`
+- DMG 产物：`/Users/chenxincheng/Desktop/my/Develop/Claude/AntBot/release/搬运蚁-0.3.6-mac-arm64.dmg`
+
 ## 当前架构
 
 ```

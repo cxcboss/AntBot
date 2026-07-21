@@ -22,8 +22,8 @@
 **返回：** `{ srtContent, srtPath, videoName, tmpDir, videoDuration }`
 
 **流程：**
-1. `extractFrames()` — ffmpeg 抽帧，384px 宽，JPEG quality 8
-2. `recognizeVideoContent()` — 每批 8 帧发 Vision API，带微进度
+1. `extractFrames()` — ffmpeg 抽帧，按源视频宽度压缩到 320-480px
+2. `recognizeVideoContent()` — 每批最多 4 帧发 Vision API，带微进度
 3. `generateSrt()` — AI 根据识别内容+风格生成 SRT
 4. `generateVideoName()` — AI 起 8 字以内中文名
 5. 清理帧文件，返回 SRT
@@ -41,7 +41,8 @@
 
 ## 关键细节
 
-- **图片压缩**：384px + quality 8，每批 8 帧约 200-400KB（避免 UND_ERR_SOCKET）
+- **图片压缩**：根据源视频宽度缩放到 320-480px，并调整 JPEG 质量以控制请求体大小
+- **图片批次**：每个 Vision 请求最多 4 张图，兼容当前 API 的图片数量上限
 - **微进度**：AI 识别每秒 +1%，避免进度条卡住
 - **SRT 校验**：每句最少 1.5 秒，句间间隔 ≥ 0.3 秒，总时长不超视频
 - **AbortSignal**：传递到 ffmpeg 和 fetch，取消立即生效
@@ -53,4 +54,4 @@
 - ~~直接调 voicebox TTS + ffmpeg 合成~~ → 改为委托 `editor.js`/`autoDubClient.js`，缓存归属由 `clipArtifacts.js` 管理
 - ~~os.tmpdir()/antbot-smart-edit-*~~ → 新任务使用 `~/AntBot/clip-cache/<task-id>`，旧目录仅作为启动清理目标
 - ~~图片 512px quality 5~~ → 请求体太大导致 UND_ERR_SOCKET
-- ~~批次大小 15 帧~~ → 同上，改到 8
+- ~~批次大小 15/8/5 帧~~ → 受上游接口限制，统一改为最多 4 帧
