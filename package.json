@@ -12,7 +12,8 @@
     "prepare:playwright:win": "node ./scripts/prepare-playwright-win.js",
     "prepare:voicebox": "node ./scripts/prepare-voicebox.js",
     "prepare:icon:mac": "bash ./scripts/generate-mac-icon.sh",
-    "build:mac": "npm run prepare:icon:mac && npm run prepare:voicebox && electron-builder --mac dir",
+    "build:mac": "npm run prepare:icon:mac && npm run prepare:voicebox && electron-builder --mac dmg && npm run extract:mac",
+    "extract:mac": "VOLUME=$(hdiutil attach release/搬运蚁-*-mac-arm64.dmg -nobrowse 2>&1 | grep '/Volumes' | awk -F'\\t' '{print $NF}') && rsync -a \"${VOLUME}/搬运蚁.app\" /Users/chenxincheng/Desktop/my/Develop/Claude/AntBot/ && hdiutil detach \"${VOLUME}\" 2>/dev/null || true",
     "build:win": "npm run prepare:playwright:win && npm run prepare:voicebox && electron-builder --win nsis --x64 --publish never",
     "build:win:portable": "npm run prepare:playwright:win && npm run prepare:voicebox && electron-builder --win portable --x64 --config.win.artifactName='搬运蚁-${version}-win-${arch}-portable.${ext}'",
     "build:win:arm64": "npm run prepare:voicebox && electron-builder --win nsis --arm64",
@@ -30,6 +31,8 @@
   "devDependencies": {
     "electron": "^35.0.3",
     "electron-builder": "^26.0.12",
+    "jest": "^30.4.2",
+    "jsdom": "^29.1.1",
     "resedit": "^1.7.1"
   },
   "build": {
@@ -71,7 +74,7 @@
     ],
     "mac": {
       "target": [
-        "dir"
+        "dmg"
       ],
       "artifactName": "搬运蚁-${version}-mac-${arch}.${ext}",
       "icon": "assets/icon.icns",

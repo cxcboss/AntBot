@@ -25,11 +25,38 @@ const SCRIPTS_DIR = path.join(__dirname, 'scripts');
 const PORT = 5001;
 const VIDEO_EXTENSIONS = new Set(['.mp4', '.mov', '.mkv', '.avi', '.webm', '.m4v']);
 const AUDIO_EXTENSIONS = new Set(['.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg']);
-const TARGET_WIDTH = 1080;
-const TARGET_HEIGHT = 1920;
 const SUBTITLE_HORIZONTAL_MARGIN = 64;
 const VOICEBOX_BASE_URL = process.env.VOICEBOX_BASE_URL ?? 'http://127.0.0.1:17493';
 const VOICEBOX_BOOTSTRAP_SCRIPT = path.join(SCRIPTS_DIR, 'start_voicebox_backend.sh');
+
+/* ── Dynamic subtitle font size calculation ── */
+
+function calculateSubtitleFontSize(videoHeight, videoWidth) {
+  const shortSide = videoWidth > 0 ? Math.min(videoHeight, videoWidth) : videoHeight;
+
+  // Higher percentage for small videos, lower for large videos
+  let percentage;
+  if (shortSide <= 360) {
+    percentage = 0.06;  // 360p: ~22px
+  } else if (shortSide <= 480) {
+    percentage = 0.05;  // 480p: ~24px
+  } else if (shortSide <= 720) {
+    percentage = 0.04;  // 720p: ~29px
+  } else {
+    percentage = 0.035; // 1080p+: ~38px
+  }
+
+  const baseFontSize = Math.round(shortSide * percentage);
+  const minFontSize = 18;
+  const maxFontSize = 48;
+  return Math.max(minFontSize, Math.min(maxFontSize, baseFontSize));
+}
+
+function calculateMaxUnitsPerLine(videoWidth, fontSize) {
+  const unitWidth = fontSize * 1.2;
+  const usableWidth = videoWidth * 0.8;
+  return Math.max(8, Math.min(30, Math.floor(usableWidth / unitWidth)));
+}
 
 const VOICE_FALLBACK = {
   Tingting: '系统语音 zh_CN',
@@ -814,11 +841,11 @@ function subtitleAlignment(position, percent = Number.NaN) {
   return 2;
 }
 
-function deriveSubtitleMargin(position, percent, fallbackMargin) {
+function deriveSubtitleMargin(position, percent, fallbackMargin, videoHeight = 1920) {
   if (!Number.isFinite(percent)) {
     return fallbackMargin;
   }
-  const usableHeight = TARGET_HEIGHT - 60;
+  const usableHeight = videoHeight - 60;
   if (percent >= 67) {
     return Math.round(((100 - percent) / 100) * usableHeight);
   }
@@ -1124,6 +1151,8 @@ async function buildDrawtextFilter(
   subtitleYPercent,
   subtitleTextColor,
   subtitleStrokeColor,
+  fontSize = 48,
+  maxUnits = 38,
 ) {
   const subtitleFont = await resolveSubtitleFont();
   const escapedFontPath = escapeSubtitlesFilterPath(subtitleFont.path);
@@ -1136,8 +1165,9 @@ async function buildDrawtextFilter(
   for (let i = 0; i < entries.length; i += 1) {
     const entry = entries[i];
     const textFilePath = path.join(subtitleTextDir, `sub_${String(i + 1).padStart(5, '0')}.txt`);
-    const wrappedText = wrapSubtitleText(entry.text, 38);
-    await fs.writeFile(textFilePath, wrappedText, 'utf8');
+    // 单行字幕：去除换行符，确保单行显示
+    const singleLineText = entry.text.replace(/\n/g, ' ').replace(/\r/g, '').trim();
+    await fs.writeFile(textFilePath, singleLineText, 'utf8');
 
     const escapedTextFilePath = escapeSubtitlesFilterPath(textFilePath);
     const startSec = (entry.startMs / 1000).toFixed(3);
@@ -1145,7 +1175,7 @@ async function buildDrawtextFilter(
 
     const yExpr = drawtextYExpression(subtitlePosition, subtitleMargin, subtitleYPercent);
     filters.push(
-      `drawtext=fontfile='${escapedFontPath}':textfile='${escapedTextFilePath}':fontcolor=${safeTextColor}:fontsize=48:borderw=2:bordercolor=${safeStrokeColor}:box=0:line_spacing=8:x=(w-text_w)/2:y=${yExpr}:enable='between(t,${startSec},${endSec})'`,
+      `drawtext=fontfile='${escapedFontPath}':textfile='${escapedTextFilePath}':fontcolor=${safeTextColor}:fontsize=${fontSize}:borderw=2:bordercolor=${safeStrokeColor}:box=0:line_spacing=8:x=(w-text_w)/2:y=${yExpr}:enable='between(t,${startSec},${endSec})'`,
     );
   }
 
@@ -1168,6 +1198,22 @@ async function getDuration(videoPath) {
     throw new Error('无法读取视频时长。');
   }
   return duration;
+}
+
+async function getVideoDimensions(videoPath) {
+  const { stdout } = await runFfprobeCommand([
+    '-v', 'error',
+    '-select_streams', 'v:0',
+    '-show_entries', 'stream=width,height',
+    '-of', 'csv=s=x:p=0',
+    videoPath,
+  ]);
+
+  const [width, height] = stdout.trim().split('x').map(Number);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    throw new Error('无法读取视频分辨率。');
+  }
+  return { width, height };
 }
 
 async function synthesizeSpeech(clips, voice, rate, ttsDir) {
@@ -1303,6 +1349,7 @@ async function composeVideo({
   keepOriginalAudio,
   originalAudioLevel,
   dubAudioLevel,
+  subtitleFontSize: subtitleFontSizeInput = 0,
 }) {
   const filterSupport = await getFfmpegFilterSupport();
   const hasOriginalAudio = keepOriginalAudio ? await videoHasAudio(videoPath) : false;
@@ -1310,13 +1357,24 @@ async function composeVideo({
   const dubRatio = (dubAudioLevel / 100).toFixed(3);
   const subtitleFont = await resolveSubtitleFont();
   console.log(`[subtitle] using font: ${subtitleFont.assName} (${subtitleFont.path})`);
+
+  // 获取视频实际分辨率
+  const { width: videoWidth, height: videoHeight } = await getVideoDimensions(videoPath);
+  console.log(`[subtitle] video dimensions: ${videoWidth}x${videoHeight}`);
+
+  // 计算动态字体大小
+  const fontSize = subtitleFontSizeInput > 0
+    ? subtitleFontSizeInput
+    : calculateSubtitleFontSize(videoHeight, videoWidth);
+  const maxUnits = videoWidth > 0 ? calculateMaxUnitsPerLine(videoWidth, fontSize) : 38;
+  console.log(`[subtitle] fontSize=${fontSize}, maxUnits=${maxUnits}`);
+
+  // 直接使用原视频，不缩放，不添加模糊背景
   const filterParts = [
-    `[0:v]scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=increase,crop=${TARGET_WIDTH}:${TARGET_HEIGHT},boxblur=20:10[bg]`,
-    `[0:v]scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=decrease[fg]`,
-    '[bg][fg]overlay=(W-w)/2:(H-h)/2[vbase]',
+    '[0:v]null[vbase]',
   ];
   const preciseSubtitlePosition = Number.isFinite(subtitleYPercent);
-  const effectiveSubtitleMargin = deriveSubtitleMargin(subtitlePosition, subtitleYPercent, subtitleMargin);
+  const effectiveSubtitleMargin = deriveSubtitleMargin(subtitlePosition, subtitleYPercent, subtitleMargin, videoHeight);
 
   let subtitleMode = 'burned';
   const subtitleOn = subtitleEnabled !== false;
@@ -1332,6 +1390,8 @@ async function composeVideo({
       subtitleYPercent,
       subtitleTextColor,
       subtitleStrokeColor,
+      fontSize,
+      maxUnits,
     );
     filterParts.push(`[vbase]${drawtextFilter}[vout]`);
   } else if (filterSupport.subtitles) {
@@ -1343,9 +1403,9 @@ async function composeVideo({
       'BorderStyle=1',
       'Outline=2',
       'Shadow=0',
-      'WrapStyle=0',
+      'WrapStyle=2',  // 禁止自动换行，只在显式 \n 时换行
       `FontName=${subtitleFont.assName}`,
-      'FontSize=22',
+      `FontSize=${fontSize}`,
       `Alignment=${subtitleAlignment(subtitlePosition, subtitleYPercent)}`,
       `MarginL=${SUBTITLE_HORIZONTAL_MARGIN}`,
       `MarginR=${SUBTITLE_HORIZONTAL_MARGIN}`,
@@ -1361,6 +1421,8 @@ async function composeVideo({
       subtitleYPercent,
       subtitleTextColor,
       subtitleStrokeColor,
+      fontSize,
+      maxUnits,
     );
     filterParts.push(`[vbase]${drawtextFilter}[vout]`);
   } else {
@@ -1435,6 +1497,7 @@ async function processJob(
   subtitleYPercentRaw,
   subtitleTextColorRaw,
   subtitleStrokeColorRaw,
+  subtitleFontSizeRaw,
   subtitleEnabled,
   voiceoverEnabled,
   keepOriginalAudio,
@@ -1501,6 +1564,7 @@ async function processJob(
   const subtitleYPercent = normalizeSubtitleYPercent(subtitleYPercentRaw);
   const subtitleTextColor = normalizeHexColor(subtitleTextColorRaw, '#FFA100');
   const subtitleStrokeColor = normalizeHexColor(subtitleStrokeColorRaw, '#000000');
+  const subtitleFontSize = Number(subtitleFontSizeRaw) || 0;
 
   const job = createJobPaths({ workspaceDir: WORKSPACE_DIR, outputDir: OUTPUT_DIR, originalName: videoName });
   const jobDir = job.jobDir;
@@ -1582,6 +1646,7 @@ async function processJob(
     subtitleYPercent,
     subtitleTextColor,
     subtitleStrokeColor,
+    subtitleFontSize,
     subtitleEnabled,
     keepOriginalAudio,
     originalAudioLevel: originalAudioLevelNumber,
@@ -1736,6 +1801,7 @@ const server = http.createServer(async (req, res) => {
       const subtitleYPercent = String(formData.get('subtitle_y_percent') ?? '12');
       const subtitleTextColor = String(formData.get('subtitle_text_color') ?? '#FFA100');
       const subtitleStrokeColor = String(formData.get('subtitle_stroke_color') ?? '#000000');
+      const subtitleFontSize = String(formData.get('subtitle_font_size') ?? '');
       const subtitleEnabled = normalizeToggle(formData.get('subtitle_enabled'), true);
       const voiceoverEnabled = normalizeToggle(formData.get('voiceover_enabled'), true);
       const keepOriginalAudio = formData.get('keep_original_audio') !== null;
@@ -1774,6 +1840,7 @@ const server = http.createServer(async (req, res) => {
         subtitleYPercent,
         subtitleTextColor,
         subtitleStrokeColor,
+        subtitleFontSize,
         subtitleEnabled,
         voiceoverEnabled,
         keepOriginalAudio,

@@ -64,7 +64,7 @@ function showLoading(containerId){const el=document.getElementById(containerId);
 function saveUI(){
   const ui={
     selectedStyle:S.selectedStyle,
-    editDefaults:{subtitle:S.editDefaults.subtitle},
+    editDefaults:{style:S.editDefaults.style, voice:S.editDefaults.voice, subtitle:S.editDefaults.subtitle},
     sidebarOpen:S.sidebarOpen,
     statPeriod:S.statPeriod,
   };
@@ -208,7 +208,7 @@ function renderChips(){
   if(!el.chips||!S.settings)return;
   const vs=Number(S.settings.style?.voiceSpeed??1.1);
   const vp=S.settings.voiceClone?.profileName||S.settings.voiceClone?.voiceId||'';
-  const st=S.selectedStyle||(S.styleRefs.length?'选择风格':'暂无风格');
+  const st=S.editDefaults.style||S.selectedStyle||(S.styleRefs.length?'选择风格':'暂无风格');
   const rt=Math.max(0,Number(S.settings.retry?.failedTaskRetries??0));
   el.chips.innerHTML=`<button class="chip" data-act="voiceClone"><span class="vl">${vp?esc(vp):'音色设置'}</span></button><button class="chip" data-act="style-ref"><span class="vl">${esc(st)}</span></button><button class="chip" data-act="more-settings"><span class="vl">更多</span></button><span class="chip-spacer"></span><button class="chip" data-act="speed-slider"><span class="vl">语速${vs.toFixed(1)}x</span></button><button class="chip" data-act="retry-slider"><span class="vl">重试${rt}次</span></button>`;
 }
@@ -231,7 +231,7 @@ function showSliderPopup(anchor,type){
   const popup=document.createElement('div');popup.className='chip-popup';
   if(type==='speed'){
     const cur=Number(S.settings?.style?.voiceSpeed??1.1);
-    popup.innerHTML=`<div class="slider-row"><span class="slider-label">1x</span><input type="range" min="1" max="1.5" step="0.1" value="${cur}"><span class="slider-label">1.5x</span></div><div class="slider-value">${cur.toFixed(1)}x</div>`;
+    popup.innerHTML=`<div class="slider-row"><span class="slider-label">0.5x</span><input type="range" min="0.5" max="2" step="0.1" value="${cur}"><span class="slider-label">2x</span></div><div class="slider-value">${cur.toFixed(1)}x</div>`;
   }else{
     const cur=Math.max(0,Number(S.settings?.retry?.failedTaskRetries??0));
     popup.innerHTML=`<div class="slider-row"><span class="slider-label">0</span><input type="range" min="0" max="4" step="1" value="${cur}"><span class="slider-label">4</span></div><div class="slider-value">${cur===0?'不重试':cur+'次'}</div>`;
@@ -272,13 +272,16 @@ function showStylePopup(anchor){
   const popup=document.createElement('div');popup.className='chip-popup';
   const learned=S.styleRefs.filter(s=>!s.learning&&s.prompt).map(s=>s.name);
   if(!learned.length){toast('请先在风格参考中学习风格','info');return;}
-  popup.innerHTML=`<ul class="style-list">${learned.map(s=>`<li class="style-item${s===S.selectedStyle?' active':''}" data-style="${esc(s)}">${esc(s)}</li>`).join('')}</ul>`;
+  const currentStyle=S.editDefaults.style||S.selectedStyle;
+  popup.innerHTML=`<ul class="style-list">${learned.map(s=>`<li class="style-item${s===currentStyle?' active':''}" data-style="${esc(s)}">${esc(s)}</li>`).join('')}</ul>`;
   positionPopup(popup,anchor);activePopup=popup;
   popup.querySelectorAll('.style-item').forEach(item=>{
     item.addEventListener('click',()=>{
-      S.selectedStyle=item.dataset.style;
+      const style=item.dataset.style;
+      S.selectedStyle=style;
+      S.editDefaults.style=style;
       renderChips();
-      toast(`风格: ${S.selectedStyle}`,'success');
+      toast(`风格: ${style}`,'success');
       saveUI();
       closeAllPopups();
     });
@@ -408,6 +411,9 @@ async function loadUISettings(){
   try{
     const ui=await window.antbot.loadUISettings();
     if(ui.selectedStyle!==undefined) S.selectedStyle=ui.selectedStyle;
+    if(ui.editDefaults?.style!==undefined) S.editDefaults.style=ui.editDefaults.style;
+    else if(ui.selectedStyle!==undefined) S.editDefaults.style=ui.selectedStyle;
+    if(ui.editDefaults?.voice!==undefined) S.editDefaults.voice=ui.editDefaults.voice;
     if(ui.editDefaults?.subtitle!==undefined) S.editDefaults.subtitle=ui.editDefaults.subtitle;
     if(typeof ui.sidebarOpen==='boolean') S.sidebarOpen=ui.sidebarOpen;
     if(ui.statPeriod) S.statPeriod=ui.statPeriod;
@@ -452,6 +458,20 @@ async function addEditVideos(filePaths) {
     const created = await window.antbot.editAddTasks(tasks);
     for (const t of created) { if (!S.editVideos.find(v => v.id === t.id)) S.editVideos.push(t); }
     renderEditCards(); renderEditStartBtn();
+    // Extract thumbnails for preview
+    for (const task of created) {
+      if (task.path) {
+        window.antbot.extractThumbnail(task.path).then(result => {
+          if (result.ok && result.dataUrl) {
+            const v = S.editVideos.find(x => x.id === task.id);
+            if (v) {
+              v.thumbnailUrl = result.dataUrl;
+              renderEditCards();
+            }
+          }
+        }).catch(() => {});
+      }
+    }
   } catch (e) { toast(e.message, 'error'); }
 }
 
@@ -460,11 +480,82 @@ function renderEditStartBtn() {
   if (!btn) return;
   const hasRunning = S.editVideos.some(v => ['preparing', 'composing'].includes(v.status));
   const pending = S.editVideos.filter(v => v.status === 'pending' || v.status === 'paused');
+  const selected = S.editVideos.filter(v => v.selected);
+
   if (hasRunning) { btn.disabled = true; btn.textContent = '处理中...'; }
+  else if (selected.length > 0) {
+    btn.disabled = false;
+    btn.textContent = `开始选中 ${selected.length} 个`;
+    btn.onclick = () => startSelectedTasks();
+  }
   else if (pending.length > 0) { btn.disabled = false; btn.textContent = `开始 ${pending.length} 个`; }
   else { btn.disabled = true; btn.textContent = '开始剪辑'; }
+
+  // 批量操作按钮
+  const batchBtn = document.getElementById('edit-batch-btn');
+  if (batchBtn) {
+    const hasSelected = selected.length > 0;
+    batchBtn.style.display = hasSelected ? 'inline-block' : 'none';
+    batchBtn.textContent = `批量操作 (${selected.length})`;
+  }
+
   document.querySelectorAll('.edit-default-btn').forEach(b => { b.disabled = hasRunning; b.style.opacity = hasRunning ? '0.4' : ''; b.style.pointerEvents = hasRunning ? 'none' : ''; });
   renderStatus();
+}
+
+async function startSelectedTasks() {
+  const selected = S.editVideos.filter(v => v.selected);
+  for (const v of selected) {
+    if (v.status === 'pending' || v.status === 'paused' || v.status === 'failed') {
+      await window.antbot.editStartTask(v.id).catch(() => {});
+    }
+  }
+  // 清除选择
+  S.editVideos.forEach(v => v.selected = false);
+  renderEditCards(); renderEditStartBtn();
+}
+
+function showBatchActions() {
+  const selected = S.editVideos.filter(v => v.selected);
+  if (!selected.length) return;
+
+  const popup = document.createElement('div');
+  popup.className = 'chip-popup';
+  popup.innerHTML = `<ul class="style-list">
+    <li class="style-item" data-batch="start">开始选中 (${selected.length})</li>
+    <li class="style-item" data-batch="cancel">取消选中</li>
+    <li class="style-item" data-batch="remove">移除选中</li>
+    <li class="style-item" data-batch="clear">清除选择</li>
+  </ul>`;
+
+  document.body.appendChild(popup);
+  popup.style.position = 'fixed';
+  popup.style.top = '50%';
+  popup.style.left = '50%';
+  popup.style.transform = 'translate(-50%, -50%)';
+  popup.style.zIndex = '10000';
+
+  popup.querySelectorAll('.style-item').forEach(item => {
+    item.addEventListener('click', async () => {
+      const action = item.dataset.batch;
+      if (action === 'start') {
+        await startSelectedTasks();
+      } else if (action === 'cancel') {
+        for (const v of selected) {
+          await window.antbot.cancelEditTask(v.id).catch(() => {});
+        }
+      } else if (action === 'remove') {
+        for (const v of selected) {
+          await window.antbot.editRemoveTask(v.id).catch(() => {});
+          S.editVideos = S.editVideos.filter(x => x.id !== v.id);
+        }
+      } else if (action === 'clear') {
+        S.editVideos.forEach(v => v.selected = false);
+      }
+      popup.remove();
+      renderEditCards(); renderEditStartBtn();
+    });
+  });
 }
 
 function fmtDur(sec) {
@@ -487,7 +578,8 @@ function renderEditCards() {
     const pct = Math.max(0, Math.min(100, v.progress || 0));
     const icons = { pending: '⏳', preparing: '🔧', ready: '📋', composing: '🎬', paused: '⏸', completed: '✅', failed: '❌', cancelled: '🚫' };
     const icon = icons[st] || '';
-    const txt = st === 'preparing' ? `${v.step || '准备中'} ${pct}%` : st === 'ready' ? `待合成 · ${v.videoName || ''}` : st === 'composing' ? `合成中 ${pct}%` : st === 'completed' ? `完成 ${fmtDur(v.duration)}` : st === 'failed' ? `失败: ${(v.error || '').slice(0, 50)}` : st === 'paused' ? '已暂停' : st === 'cancelled' ? '已取消' : '等待中';
+    const txt = st === 'preparing' ? `${v.step || '准备中'} ${pct}%` : st === 'ready' ? `待合成 · ${v.videoName || ''}` : st === 'composing' ? `合成中 ${pct}%` : st === 'completed' ? `完成 ${fmtDur(v.duration)}` : st === 'failed' ? `失败` : st === 'paused' ? '已暂停' : st === 'cancelled' ? '已取消' : '等待中';
+    const selectedClass = v.selected ? ' selected' : '';
     let acts = '';
     if (st === 'pending') acts = `<button class="edit-act-btn" data-act="start" data-vid="${esc(v.id)}">开始</button><button class="edit-act-btn danger" data-act="remove" data-vid="${esc(v.id)}">移除</button>`;
     else if (st === 'preparing') acts = `<button class="edit-act-btn" data-act="pause" data-vid="${esc(v.id)}">暂停</button><button class="edit-act-btn danger" data-act="cancel" data-vid="${esc(v.id)}">取消</button>`;
@@ -495,20 +587,26 @@ function renderEditCards() {
     else if (st === 'composing') acts = `<button class="edit-act-btn danger" data-act="cancel" data-vid="${esc(v.id)}">取消</button>`;
     else if (st === 'paused') acts = `<button class="edit-act-btn" data-act="resume" data-vid="${esc(v.id)}">继续</button><button class="edit-act-btn danger" data-act="cancel" data-vid="${esc(v.id)}">取消</button>`;
     else if (st === 'completed') acts = `<button class="edit-act-btn" data-act="open" data-vid="${esc(v.id)}">打开</button><button class="edit-act-btn danger" data-act="remove" data-vid="${esc(v.id)}">移除</button>`;
-    else acts = `<button class="edit-act-btn" data-act="retry" data-vid="${esc(v.id)}">重试</button><button class="edit-act-btn danger" data-act="remove" data-vid="${esc(v.id)}">移除</button>`;
+    else { const retryLabel = v.retryCount > 0 ? `重试 (${v.retryCount})` : '重试'; acts = `<button class="edit-act-btn" data-act="retry" data-vid="${esc(v.id)}">${retryLabel}</button><button class="edit-act-btn danger" data-act="remove" data-vid="${esc(v.id)}">移除</button>`; }
 
     const showProgress = ['preparing', 'composing'].includes(st);
-    return `<div class="edit-card ${st}" data-video-id="${esc(v.id)}">
-      <div class="edit-card-icon" data-vid="${esc(v.id)}"><span class="icon" data-icon="film"></span></div>
+    const etaText = v.eta ? ` · 预计${v.eta}` : '';
+    const errorDetail = st === 'failed' && v.error ? `<div class="edit-card-error" data-error-toggle="${esc(v.id)}"><span class="error-summary">${esc(v.error.slice(0, 50))}${v.error.length > 50 ? '...' : ''}</span><span class="error-expand">展开</span></div><div class="edit-card-error-full hidden" data-error-full="${esc(v.id)}">${esc(v.error)}</div>` : '';
+    const optDisabled = ['completed', 'composing'].includes(st) ? ' disabled' : '';
+    const thumbnailHtml = v.thumbnailUrl ? `<img src="${v.thumbnailUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:var(--r-sm)" />` : `<span class="icon" data-icon="film"></span>`;
+    return `<div class="edit-card ${st}${selectedClass}" data-video-id="${esc(v.id)}">
+      <div class="edit-card-select"><input type="checkbox" ${v.selected ? 'checked' : ''} data-select="${esc(v.id)}"></div>
+      <div class="edit-card-icon" data-vid="${esc(v.id)}">${thumbnailHtml}</div>
       <div class="edit-card-info">
-        <div class="edit-card-name">${esc(v.name)} <span class="edit-card-status">${icon} ${esc(txt)}</span></div>
+        <div class="edit-card-name">${esc(v.name)} <span class="edit-card-status">${icon} ${esc(txt)}${etaText}</span></div>
         <div class="edit-card-opts">
-          <button class="edit-opt-btn" data-edit-card-opt="style" data-vid="${esc(v.id)}" type="button">风格: <span class="val">${esc(v.style || '默认')}</span></button>
-          <button class="edit-opt-btn" data-edit-card-opt="voice" data-vid="${esc(v.id)}" type="button">音色: <span class="val">${esc(v.voice || '默认')}</span></button>
-          <button class="edit-opt-btn" data-edit-card-opt="subtitle" data-vid="${esc(v.id)}" type="button">字幕: <span class="val">${esc(v.subtitle || '开启')}</span></button>
+          <button class="edit-opt-btn" data-edit-card-opt="style" data-vid="${esc(v.id)}" type="button"${optDisabled}>风格: <span class="val">${esc(v.style || '默认')}</span></button>
+          <button class="edit-opt-btn" data-edit-card-opt="voice" data-vid="${esc(v.id)}" type="button"${optDisabled}>音色: <span class="val">${esc(v.voice || '默认')}</span></button>
+          <button class="edit-opt-btn" data-edit-card-opt="subtitle" data-vid="${esc(v.id)}" type="button"${optDisabled}>字幕: <span class="val">${esc(v.subtitle || '开启')}</span></button>
         </div>
         ${showProgress ? `<div class="edit-card-progress"><div class="edit-card-progress-bar" style="width:${pct}%"></div></div>` : ''}
         ${v.message ? `<div class="edit-card-msg">${esc(v.message)}</div>` : ''}
+        ${errorDetail}
       </div>
       <div class="edit-card-actions">${acts}</div>
     </div>`;
@@ -520,10 +618,39 @@ function bindEditCardEvents() {
   const c = document.getElementById('edit-cards'); if (!c) return;
   c.querySelectorAll('[data-edit-card-opt]').forEach(btn => btn.addEventListener('click', (e) => { e.stopPropagation(); showEditCardPopup(btn, btn.dataset.vid, btn.dataset.editCardOpt); }));
   c.querySelectorAll('.edit-card-icon').forEach(icon => { icon.addEventListener('click', () => { const vid = icon.dataset.vid; const v = S.editVideos.find(x => x.id === vid); if (v?.path) window.antbot.revealInFolder(v.path); }); });
+
+  // 复选框选择
+  c.querySelectorAll('[data-select]').forEach(cb => {
+    cb.addEventListener('change', (e) => {
+      e.stopPropagation();
+      const vid = cb.dataset.select;
+      const v = S.editVideos.find(x => x.id === vid);
+      if (v) {
+        v.selected = cb.checked;
+        renderEditStartBtn();
+      }
+    });
+  });
+
+  // 错误详情展开
+  c.querySelectorAll('[data-error-toggle]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const vid = el.dataset.errorToggle;
+      const fullEl = c.querySelector(`[data-error-full="${vid}"]`);
+      if (fullEl) {
+        fullEl.classList.toggle('hidden');
+        const expandEl = el.querySelector('.error-expand');
+        if (expandEl) expandEl.textContent = fullEl.classList.contains('hidden') ? '展开' : '收起';
+      }
+    });
+  });
+
   c.querySelectorAll('[data-act]').forEach(btn => btn.addEventListener('click', async (e) => {
     e.stopPropagation();
     const vid = btn.dataset.vid, action = btn.dataset.act;
-    if (action === 'start' || action === 'retry' || action === 'compose') await window.antbot.editStartTask(vid);
+    if (action === 'start' || action === 'compose') await window.antbot.editStartTask(vid);
+    else if (action === 'retry') await window.antbot.editRetryTask(vid);
     else if (action === 'pause') await window.antbot.editPauseTask(vid);
     else if (action === 'resume') await window.antbot.editStartTask(vid);
     else if (action === 'cancel') await window.antbot.cancelEditTask(vid);
@@ -540,24 +667,28 @@ function bindEditCardEvents() {
 function handleEditTaskUpdate(t) {
   if (!t?.id) return;
   const idx = S.editVideos.findIndex(v => v.id === t.id);
+  let merged;
   if (idx >= 0) {
     // 保留用户设置的 style/voice/subtitle，只更新状态相关字段
     const local = S.editVideos[idx];
-    S.editVideos[idx] = {
+    merged = {
       ...t,
       style: local.style || t.style || '',
       voice: local.voice || t.voice || '',
       subtitle: local.subtitle || t.subtitle || '开启',
     };
+    S.editVideos[idx] = merged;
   } else {
+    merged = t;
     S.editVideos.push(t);
   }
   renderEditCards(); renderEditStartBtn();
-  if (t.status === 'completed' && t.outputPath) {
-    window.antbot.saveEditHistory({ id: `hist-${Date.now()}`, name: t.name, sourcePath: t.path, outputPath: t.outputPath, status: 'completed', style: t.style, voice: t.voice, error: '', duration: t.duration || 0, fileSize: 0, createdAt: new Date().toISOString() }).catch(() => {});
-    toast(`完成: ${t.name} (${fmtDur(t.duration)})`, 'success');
-  } else if (t.status === 'failed') {
-    window.antbot.saveEditHistory({ id: `hist-${Date.now()}`, name: t.name, sourcePath: t.path, outputPath: '', status: 'failed', style: t.style, voice: t.voice, error: (t.error || '').slice(0, 200), duration: t.duration || 0, fileSize: 0, createdAt: new Date().toISOString() }).catch(() => {});
+  // 使用合并后的数据保存历史记录，确保用户修改的风格/音色被正确记录
+  if (merged.status === 'completed' && merged.outputPath) {
+    window.antbot.saveEditHistory({ id: `hist-${Date.now()}`, name: merged.name, sourcePath: merged.path, outputPath: merged.outputPath, status: 'completed', style: merged.style, voice: merged.voice, error: '', duration: merged.duration || 0, fileSize: 0, createdAt: new Date().toISOString() }).catch(() => {});
+    toast(`完成: ${merged.name} (${fmtDur(merged.duration)})`, 'success');
+  } else if (merged.status === 'failed') {
+    window.antbot.saveEditHistory({ id: `hist-${Date.now()}`, name: merged.name, sourcePath: merged.path, outputPath: '', status: 'failed', style: merged.style, voice: merged.voice, error: (merged.error || '').slice(0, 200), duration: merged.duration || 0, fileSize: 0, createdAt: new Date().toISOString() }).catch(() => {});
   }
 }
 
@@ -651,7 +782,24 @@ function showEditCardPopup(anchor, vid, type) {
   else { options = ['开启', '关闭']; }
   popup.innerHTML = `<ul class="style-list">${options.map(o => `<li class="style-item${o === current ? ' active' : ''}" data-val="${esc(o)}">${esc(o)}</li>`).join('')}</ul>`;
   positionPopup(popup, anchor); activePopup = popup;
-  popup.querySelectorAll('.style-item').forEach(item => item.addEventListener('click', () => { video[type] = item.dataset.val; renderEditCards(); closeAllPopups(); }));
+  popup.querySelectorAll('.style-item').forEach(item => item.addEventListener('click', async () => {
+    const val = item.dataset.val;
+    video[type] = val;
+    // 同步更新到调度器
+    if (type === 'style' || type === 'voice') {
+      const updateData = {};
+      updateData[type] = val;
+      if (type === 'voice') {
+        const voice = (S.voices || []).find(v => v.name === val);
+        if (voice) {
+          updateData.voiceProfileId = voice.id;
+          updateData.voiceProfileName = voice.name;
+        }
+      }
+      await window.antbot.editUpdateTask(vid, updateData).catch(() => {});
+    }
+    renderEditCards(); closeAllPopups();
+  }));
 }
 
 function showEditDefaultPopup(anchor, type) {
@@ -667,6 +815,10 @@ function showEditDefaultPopup(anchor, type) {
   popup.querySelectorAll('.style-item').forEach(item => item.addEventListener('click', () => {
     const val = item.dataset.val;
     S.editDefaults[type] = val;
+    if (type === 'style') {
+      S.selectedStyle = val;
+      renderChips();
+    }
     S.editVideos.forEach(v => { if (v.status === 'pending' || v.status === 'failed' || v.status === 'cancelled') v[type] = val; });
     const valEl = document.getElementById(`default-${type}-val`);
     if (valEl) valEl.textContent = val || '默认';
@@ -1248,17 +1400,8 @@ function bind(){
   document.querySelectorAll('[data-edit-default]').forEach(btn=>{
     btn.addEventListener('click',()=>showEditDefaultPopup(btn,btn.dataset.editDefault));
   });
-  // Context menu
+  // Context menu - 右键菜单已禁用
   document.addEventListener('click',()=>hideContextMenu());
-  document.addEventListener('contextmenu',e=>{
-    const card=e.target.closest('.edit-card');
-    if(card){e.preventDefault();showContextMenu(e.clientX,e.clientY,card.dataset.videoId)}
-  });
-  const ctxMenu=document.getElementById('ctx-menu');
-  ctxMenu?.querySelector('[data-ctx="delete"]')?.addEventListener('click',()=>{
-    const vid=ctxMenu.dataset.videoId;if(vid)removeEditVideo(vid);
-    hideContextMenu();toast('已删除','info');
-  });
   // Stat period
   document.querySelectorAll('.stat-sw').forEach(btn=>{btn.addEventListener('click',()=>{document.querySelectorAll('.stat-sw').forEach(b=>b.classList.remove('active'));btn.classList.add('active');S.statPeriod=btn.dataset.period;saveUI();renderStats()})});
   // Platform buttons

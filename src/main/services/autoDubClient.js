@@ -1780,6 +1780,7 @@ async function processWithAutoDub({
   subtitleTextColor,
   subtitleStrokeColor,
   subtitlePositionPercent,
+  subtitleFontSize = 0,
   log = () => {}
 }) {
   await ensureAutoDubServer(projectPath, log);
@@ -1828,6 +1829,7 @@ async function processWithAutoDub({
     subtitle_y_percent: String(
       Math.max(0, Math.min(100, Number.isFinite(Number(subtitlePositionPercent)) ? Number(subtitlePositionPercent) : 12))
     ),
+    subtitle_font_size: subtitleFontSize > 0 ? String(subtitleFontSize) : '',
     subtitle_enabled: subtitleOn ? 'on' : 'off',
     voiceover_enabled: voiceoverOn ? 'on' : 'off',
     keep_original_audio: 'on',

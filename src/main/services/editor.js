@@ -81,6 +81,7 @@ async function editVideo(taskContext) {
       subtitleTextColor: settings.style.subtitleTextColor,
       subtitleStrokeColor: settings.style.subtitleStrokeColor,
       subtitlePositionPercent: settings.style.subtitlePositionPercent,
+      subtitleFontSize: settings.style.subtitleFontSize || 0,
       log
     });
   }

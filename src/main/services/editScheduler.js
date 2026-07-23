@@ -8,6 +8,15 @@ const { createClipArtifactManager, reconcileEditTaskCaches } = require('./clipAr
 const MAX_PREPARING = 2;
 const DEFAULT_DATA_DIR = path.join(os.homedir(), 'AntBot');
 
+function formatDuration(ms) {
+  if (!ms || ms <= 0) return '';
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return `${seconds}秒`;
+  const minutes = Math.floor(seconds / 60);
+  const remainSeconds = seconds % 60;
+  return remainSeconds > 0 ? `${minutes}分${remainSeconds}秒` : `${minutes}分钟`;
+}
+
 class EditScheduler {
   constructor({ onTaskUpdate, onProgress, log, dataDir = DEFAULT_DATA_DIR }) {
     this.onTaskUpdate = onTaskUpdate || (() => {});
@@ -20,6 +29,11 @@ class EditScheduler {
     this.abortControllers = new Map(); // id -> AbortController
     this._running = false;
     this._composingId = null;
+    this._settingsGetter = null;
+  }
+
+  setSettingsGetter(fn) {
+    this._settingsGetter = fn;
   }
 
   /* ── State persistence ── */
@@ -54,9 +68,11 @@ class EditScheduler {
         startedAt: t.startedAt, completedAt: t.completedAt, duration: t.duration,
         srtContent: t.srtContent, srtPath: t.srtPath, videoName: t.videoName,
         tmpDir: t.tmpDir, videoDuration: t.videoDuration,
+        videoWidth: t.videoWidth, videoHeight: t.videoHeight,
         voiceProfileId: t.voiceProfileId, voiceProfileName: t.voiceProfileName,
         voiceSpeed: t.voiceSpeed, apiConfig: t.apiConfig,
         outputDir: t.outputDir, language: t.language, frameRate: t.frameRate,
+        retryCount: t.retryCount || 0,
       }));
       await fs.writeFile(this.stateFile, JSON.stringify(list, null, 2), 'utf-8');
     } catch {}
@@ -79,6 +95,7 @@ class EditScheduler {
       outputDir: taskData.outputDir || '',
       language: taskData.language || 'zh',
       frameRate: taskData.frameRate || 1,
+      retryCount: 0,
     };
     this.tasks.set(t.id, t);
     this.saveState();
@@ -104,6 +121,23 @@ class EditScheduler {
     this.onTaskUpdate(t);
     this.saveState();
     this._tick();
+  }
+
+  async updateTask(id, updates) {
+    const t = this.tasks.get(id);
+    if (!t) return;
+    // 只允许更新未完成的任务
+    if (t.status === 'completed') return;
+    // 更新允许的字段
+    const allowedFields = ['style', 'voice', 'subtitle', 'voiceProfileId', 'voiceProfileName', 'voiceSpeed'];
+    for (const key of allowedFields) {
+      if (updates[key] !== undefined) {
+        t[key] = updates[key];
+      }
+    }
+    this.log(`[调度] 更新任务: ${t.name}（${Object.keys(updates).join(', ')}）`);
+    this.onTaskUpdate(t);
+    await this.saveState();
   }
 
   pauseTask(id) {
@@ -137,6 +171,56 @@ class EditScheduler {
     this._maybeShutdownVoicebox();
   }
 
+  async retryTask(id) {
+    const t = this.tasks.get(id);
+    if (!t) return;
+
+    // 只允许重试失败或已取消的任务
+    if (t.status !== 'failed' && t.status !== 'cancelled') return;
+
+    const retryCount = (t.retryCount || 0) + 1;
+    this.log(`[调度] 重试: ${t.name}（第 ${retryCount} 次重试）`);
+
+    // 清理残留文件
+    await this.artifacts.cleanupTaskCache(t);
+
+    // 清理可能残留的输出文件
+    if (t.outputPath) {
+      await fs.rm(t.outputPath, { force: true }).catch(() => {});
+    }
+
+    // 清理 AbortController
+    const ctrl = this.abortControllers.get(id);
+    if (ctrl) ctrl.abort();
+    this.abortControllers.delete(id);
+
+    // 完全重置任务状态
+    t.status = 'pending';
+    t.progress = 0;
+    t.step = '';
+    t.message = '';
+    t.error = '';
+    t.outputPath = '';
+    t.completedAt = null;
+    t.duration = 0;
+    t.startedAt = null;
+    t.srtContent = '';
+    t.srtPath = '';
+    t.tmpDir = '';
+    t.videoName = '';
+    t.videoDuration = 0;
+    t.videoWidth = 0;
+    t.videoHeight = 0;
+    t.retryCount = retryCount;
+
+    // 保存状态并通知UI
+    this.onTaskUpdate(t);
+    await this.saveState();
+
+    // 触发调度
+    this._tick();
+  }
+
   async startAll() {
     for (const t of this.tasks.values()) {
       if (t.status === 'pending' || t.status === 'paused') { t.status = 'pending'; t.error = ''; }
@@ -152,9 +236,23 @@ class EditScheduler {
   }
 
   async _maybeShutdownVoicebox() {
-    if (this._hasActiveTasks()) return;
-    this.log('[调度] 无活跃任务，关闭 voicebox 后端释放内存');
-    await shutdownVoicebox(this.log).catch(() => {});
+    if (this._hasActiveTasks()) {
+      // 有活跃任务，取消待执行的关闭定时器
+      if (this._voiceboxShutdownTimer) {
+        clearTimeout(this._voiceboxShutdownTimer);
+        this._voiceboxShutdownTimer = null;
+      }
+      return;
+    }
+
+    // 无活跃任务，延迟60秒关闭（预热）
+    if (this._voiceboxShutdownTimer) return;
+    this._voiceboxShutdownTimer = setTimeout(async () => {
+      this._voiceboxShutdownTimer = null;
+      if (this._hasActiveTasks()) return;
+      this.log('[调度] 无活跃任务，关闭 voicebox 后端释放内存');
+      await shutdownVoicebox(this.log).catch(() => {});
+    }, 60000); // 60秒延迟
   }
 
   /* ── Pipeline scheduler ── */
@@ -206,6 +304,7 @@ class EditScheduler {
 
     t.status = 'preparing'; t.startedAt = t.startedAt || new Date().toISOString();
     t.progress = 0; t.step = '准备中'; t.message = ''; t.error = '';
+    t.startedPrepareAt = Date.now();
     this.log(`[调度] 开始准备: ${t.name} (${t.path})`);
     this.onTaskUpdate(t);
 
@@ -216,6 +315,16 @@ class EditScheduler {
       t.progress = p.percent ?? t.progress;
       t.step = p.step || t.step;
       t.message = p.message || t.message;
+
+      // 计算ETA
+      if (t.startedPrepareAt && t.progress > 0) {
+        const elapsed = Date.now() - t.startedPrepareAt;
+        const progressRatio = t.progress / 50; // 准备阶段0-50%
+        const estimatedTotal = elapsed / progressRatio;
+        const remaining = Math.max(0, estimatedTotal - elapsed);
+        t.eta = formatDuration(remaining);
+      }
+
       this.onProgress({ ...p, taskId: t.id });
       this.onTaskUpdate(t);
     };
@@ -223,13 +332,20 @@ class EditScheduler {
     try {
       // 查找风格的实际 prompt 文字
       let stylePrompt = t.style || '';
-      if (t.style && !t.style.includes(' ')) {
+      if (t.style) {
         try {
           const stylesPath = path.join(os.homedir(), 'AntBot', 'style-refs.json');
           const styles = JSON.parse(await fs.readFile(stylesPath, 'utf-8'));
           const found = styles.find(s => s.name === t.style);
-          if (found?.prompt) stylePrompt = found.prompt;
-        } catch {}
+          if (found?.prompt) {
+            stylePrompt = found.prompt;
+            this.log(`[调度] ${t.name} 使用风格: ${t.style}（已加载 prompt）`);
+          } else {
+            this.log(`[调度] ${t.name} 使用风格: ${t.style}（未找到 prompt，使用风格名作为参考）`);
+          }
+        } catch (err) {
+          this.log(`[调度] ${t.name} 加载风格失败: ${err.message}，使用风格名作为参考`);
+        }
       }
 
       const result = await prepareEditVideo({
@@ -251,6 +367,7 @@ class EditScheduler {
       t.srtContent = result.srtContent; t.srtPath = result.srtPath;
       t.videoName = result.videoName; t.tmpDir = result.tmpDir;
       t.videoDuration = result.videoDuration;
+      t.videoWidth = result.videoWidth; t.videoHeight = result.videoHeight;
       t.status = 'ready'; t.progress = 52; t.step = '待合成';
       t.message = `字幕就绪：${result.videoName}`;
       this.log(`[调度] ${t.name} 准备完成，等待合成`);
@@ -258,8 +375,9 @@ class EditScheduler {
       if (ctrl.signal.aborted || t.status === 'cancelled' || t.status === 'paused') {
         this.log(`[调度] ${t.name} 已取消/暂停`);
         if (t.status !== 'paused' && t.status !== 'cancelled') t.status = 'cancelled';
+        t.eta = '';
       } else {
-        t.status = 'failed'; t.error = err.message;
+        t.status = 'failed'; t.error = err.message; t.eta = '';
         this.log(`[调度] ${t.name} 失败: ${err.message}`);
       }
       await this.artifacts.cleanupTaskCache(t);
@@ -275,12 +393,23 @@ class EditScheduler {
 
   async _runCompose(t) {
     t.status = 'composing'; t.progress = 55; t.step = '合成中';
+    t.startedComposeAt = Date.now();
     this.onTaskUpdate(t);
 
     const sendProgress = (p) => {
       t.progress = p.percent ?? t.progress;
       t.step = p.step || t.step;
       t.message = p.message || t.message;
+
+      // 计算ETA
+      if (t.startedComposeAt && t.progress > 55) {
+        const elapsed = Date.now() - t.startedComposeAt;
+        const progressRatio = (t.progress - 55) / 45; // 55-100的进度范围
+        const estimatedTotal = elapsed / progressRatio;
+        const remaining = Math.max(0, estimatedTotal - elapsed);
+        t.eta = formatDuration(remaining);
+      }
+
       this.onProgress({ ...p, taskId: t.id });
       this.onTaskUpdate(t);
     };
@@ -294,12 +423,26 @@ class EditScheduler {
     const t0 = Date.now();
     const composeCtrl = new AbortController();
     this.abortControllers.set(t.id, composeCtrl);
+
+    // 从全局设置中读取字幕样式
+    let subtitleStyle = {};
+    try {
+      const settings = this._settingsGetter ? await this._settingsGetter() : null;
+      subtitleStyle = {
+        textColor: settings?.style?.subtitleTextColor || '#FFA100',
+        strokeColor: settings?.style?.subtitleStrokeColor || '#000000',
+        positionPercent: settings?.style?.subtitlePositionPercent ?? 12,
+      };
+    } catch {}
+
     try {
       const result = await composeEditVideo({
         videoPath: t.path, srtPath: t.srtPath, outputPath,
         voiceProfileId: t.voiceProfileId, voiceProfileName: t.voiceProfileName || '',
         language: t.language,
-        voiceSpeed: t.voiceSpeed, subtitleStyle: t.subtitleStyle || {},
+        voiceSpeed: t.voiceSpeed, subtitleStyle,
+        videoWidth: t.videoWidth || 0, videoHeight: t.videoHeight || 0,
+        abortSignal: composeCtrl.signal,
         log: (msg) => this.log(`[${t.name}] ${msg}`), progress: sendProgress
       });
       if (composeCtrl.signal.aborted || t.status === 'cancelled') {
@@ -311,7 +454,7 @@ class EditScheduler {
         t.message = '已取消';
         return;
       }
-      t.status = 'completed'; t.outputPath = result.outputPath; t.progress = 100;
+      t.status = 'completed'; t.outputPath = result.outputPath; t.progress = 100; t.eta = '';
       t.completedAt = new Date().toISOString(); t.duration = Math.round((Date.now() - t0) / 1000);
       t.message = '完成';
       await this.artifacts.cleanupTaskCache(t);
@@ -320,10 +463,10 @@ class EditScheduler {
       t.srtContent = '';
     } catch (err) {
       if (composeCtrl.signal.aborted || t.status === 'cancelled') {
-        t.status = 'cancelled';
+        t.status = 'cancelled'; t.eta = '';
         t.message = '已取消';
       } else {
-        t.status = 'failed';
+        t.status = 'failed'; t.eta = '';
         t.error = err.message;
       }
       t.completedAt = new Date().toISOString(); t.duration = Math.round((Date.now() - t0) / 1000);

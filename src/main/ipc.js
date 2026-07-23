@@ -582,6 +582,7 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
     },
     log: (msg) => appLog('info', `[smart-edit] ${msg}`)
   });
+  editScheduler.setSettingsGetter(() => store.getSettings());
   editScheduler.loadState().then(() => {
     // 恢复后如有 ready/composing 任务，自动继续调度
     const hasActive = [...editScheduler.tasks.values()].some(t => ['pending', 'ready', 'preparing', 'composing'].includes(t.status));
@@ -608,11 +609,62 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
   });
 
   ipcMain.handle('edit:start-task', async (_event, taskId) => { await editScheduler.startTask(taskId); return { ok: true }; });
+  ipcMain.handle('edit:retry-task', async (_event, taskId) => { await editScheduler.retryTask(taskId); return { ok: true }; });
+  ipcMain.handle('edit:update-task', async (_event, taskId, updates) => { await editScheduler.updateTask(taskId, updates); return { ok: true }; });
   ipcMain.handle('edit:pause-task', async (_event, taskId) => { editScheduler.pauseTask(taskId); return { ok: true }; });
   ipcMain.handle('edit:cancel-task', async (_event, taskId) => { await editScheduler.cancelTask(taskId); return { ok: true }; });
   ipcMain.handle('edit:remove-task', async (_event, taskId) => { await editScheduler.removeTask(taskId); return { ok: true }; });
   ipcMain.handle('edit:start-all', async () => { await editScheduler.startAll(); return { ok: true }; });
   ipcMain.handle('edit:get-tasks', async () => editScheduler.getAllTasks());
+
+  ipcMain.handle('edit:extract-thumbnail', async (_event, videoPath) => {
+    try {
+      const thumbnailDir = path.join(os.homedir(), 'AntBot', 'thumbnails');
+      await fs.mkdir(thumbnailDir, { recursive: true });
+
+      // Generate unique filename based on video path
+      const crypto = require('node:crypto');
+      const hash = crypto.createHash('md5').update(videoPath).digest('hex').slice(0, 10);
+      const thumbnailPath = path.join(thumbnailDir, `${hash}.jpg`);
+
+      // Check if thumbnail already exists, if not extract it
+      const exists = await fs.access(thumbnailPath).then(() => true).catch(() => false);
+      if (!exists) {
+        // Resolve ffmpeg binary
+        const resolveBin = (name) => {
+          const candidates = [path.join('/opt/homebrew/bin', name), path.join('/usr/local/bin', name), path.join('/usr/bin', name), name];
+          for (const c of candidates) { try { if (require('node:fs').existsSync(c)) return c; } catch {} }
+          return name;
+        };
+        const ffmpegBin = resolveBin('ffmpeg');
+
+        // Extract frame at 1 second using ffmpeg
+        const { spawn } = require('node:child_process');
+        await new Promise((resolve, reject) => {
+          const child = spawn(ffmpegBin, [
+            '-i', videoPath,
+            '-ss', '00:00:01',
+            '-vframes', '1',
+            '-vf', 'scale=120:-1',
+            '-q:v', '5',
+            '-y',
+            thumbnailPath
+          ]);
+          child.on('close', (code) => code === 0 ? resolve() : reject(new Error('ffmpeg failed')));
+          child.on('error', reject);
+        });
+      }
+
+      // Read file and convert to base64 data URL for reliable display
+      const imageBuffer = await fs.readFile(thumbnailPath);
+      const base64 = imageBuffer.toString('base64');
+      const dataUrl = `data:image/jpeg;base64,${base64}`;
+
+      return { ok: true, path: thumbnailPath, dataUrl };
+    } catch (error) {
+      return { ok: false, error: error.message };
+    }
+  });
 
   ipcMain.handle('edit:get-history', async () => {
     try {
