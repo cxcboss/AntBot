@@ -21,3 +21,6 @@ vendors/ms-playwright/*
 clients/antbot_flutter/build
 clients/antbot_flutter/.dart_tool
 clients/antbot_flutter/macos/Flutter/ephemeral
+
+# macOS app bundles
+*.app/
