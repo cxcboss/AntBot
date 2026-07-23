@@ -1343,7 +1343,31 @@ function bindSubtitleVoiceEvents() {
   });
 }
 
-/* ── Bind ── */
+function bindPublishPage(){
+  const pick = document.getElementById('publish-pick-videos-btn');
+  const start = document.getElementById('publish-start-btn');
+  const stop = document.getElementById('publish-stop-btn');
+  const platform = document.getElementById('publish-platform');
+  const scheduled = document.getElementById('publish-scheduled');
+  const scheduleTime = document.getElementById('publish-schedule-time');
+  S.publish = { videos: [], requestId: '', running: false };
+  const formatSize = bytes => { const n=Number(bytes||0); return n>1024*1024?`${(n/1024/1024).toFixed(1)} MB`:`${Math.round(n/1024)} KB`; };
+  const render = () => {
+    const list = document.getElementById('publish-video-list');
+    const count = document.getElementById('publish-video-count');
+    count.textContent = S.publish.videos.length ? `已选择 ${S.publish.videos.length} 个视频` : '尚未选择视频';
+    list.innerHTML = S.publish.videos.length ? S.publish.videos.map((v,i)=>`<div class="publish-video-item"><span class="publish-video-index">${i+1}</span><span class="publish-video-name" title="${esc(v.path)}">${esc(v.name)}</span><span class="publish-video-meta">${formatSize(v.size)}</span></div>`).join('') : '<div class="publish-empty">选择一个或多个本地视频开始。</div>';
+    start.disabled = !S.publish.videos.length || S.publish.running;
+  };
+  const setResult = (text, type='') => { const result=document.getElementById('publish-result'); result.textContent=text; result.className=`publish-result ${type}`; };
+  const refreshBridge = async () => { const status = document.getElementById('publish-bridge-status'); try { const r=await window.antbot.publishBridgeStatus(); status.className=`publish-bridge-status ${r.status==='ready'||r.status==='busy'?'ready':'offline'}`; status.querySelector('span:last-child').textContent=r.status==='ready'||r.status==='busy'?'插件已连接':'插件未连接'; } catch { status.className='publish-bridge-status offline'; status.querySelector('span:last-child').textContent='插件未连接'; } };
+  pick?.addEventListener('click', async () => { try { const paths=await window.antbot.pickVideoFiles(); S.publish.videos=paths.map(path=>({ path, name:path.split(/[\\/]/).pop(), size:0 })); render(); } catch(e){setResult(e.message,'error')} });
+  scheduled?.addEventListener('change',()=>{scheduleTime.disabled=!scheduled.checked});
+  start?.addEventListener('click', async () => { if(!S.publish.videos.length)return; S.publish.running=true; S.publish.requestId=`antbot-${Date.now()}`; render(); stop.hidden=false; setResult('正在等待浏览器插件执行...'); const topics=(document.getElementById('publish-topics').value||'').split(/[ ,，]+/).filter(Boolean); try { const result=await window.antbot.publishStart({ requestId:S.publish.requestId, videos:S.publish.videos, videoPath:'', platform:platform.value, settings:{ publishCopy:document.getElementById('publish-copy').value, publishTopics:topics, isOriginal:document.getElementById('publish-original').checked, scheduledPublish:scheduled.checked, scheduleTime:scheduled.checked? scheduleTime.value:'' } }); setResult(`发布完成：${result.platforms?.join(', ')||'已提交'}`,'success'); } catch(e){setResult(e.message,'error')} finally { S.publish.running=false; stop.hidden=true; render(); refreshBridge(); } });
+  stop?.addEventListener('click', async()=>{try{await window.antbot.publishStop(S.publish.requestId);setResult('已停止','success')}catch(e){setResult(e.message,'error')}finally{S.publish.running=false;stop.hidden=true;render()}});
+  refreshBridge(); setInterval(refreshBridge,3000); render();
+}
+
 function bind(){
   el.sidebarToggle?.addEventListener('click',()=>{S.sidebarOpen?closeSidebar():openSidebar()});
   el.overlay?.addEventListener('click',closeSidebar);
@@ -1451,6 +1475,7 @@ function bind(){
   document.getElementById('migrate-old-btn')?.addEventListener('click',()=>void migrate());
   // Video picker
   el.pickVideoBtn?.addEventListener('click',async()=>{try{const f=await window.antbot.pickVideoFile();if(f){const current=el.input.value.trim();el.input.value=current?current+'\n'+f:f;autoInput();queuePreview();renderBtns()}}catch(e){toast(e.message,'error')}});
+  bindPublishPage();
   // Task input
   el.input?.addEventListener('input',()=>{autoInput();queuePreview();renderBtns();toggleSendBtn()});
   el.input?.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){e.preventDefault();void startTasks()}});

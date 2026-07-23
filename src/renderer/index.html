@@ -126,8 +126,33 @@
           </div>
         </div>
 
-        <!-- 其他占位页面 -->
-        <div class="feat-view" id="view-publish"><div class="feat-placeholder"><div class="feat-icon"><span class="icon" data-icon="send"></span></div><h2>发布</h2><p>多平台发布管理</p></div></div>
+        <!-- 发布页 -->
+        <div class="feat-view" id="view-publish">
+          <div class="publish-layout">
+            <div class="publish-head">
+              <div><h2>浏览器发布</h2><p>选择视频后，交给默认浏览器中的搬运蚁发布助手完成发布。</p></div>
+              <div class="publish-bridge-status" id="publish-bridge-status"><span class="publish-status-dot"></span><span>检测中...</span></div>
+            </div>
+            <div class="publish-grid">
+              <section class="publish-card publish-videos-card">
+                <div class="publish-card-head"><div><h3>待发布视频</h3><p id="publish-video-count">尚未选择视频</p></div><button class="btn btn-ghost" id="publish-pick-videos-btn" type="button"><span class="icon" data-icon="plus"></span>选择视频</button></div>
+                <div class="publish-video-list" id="publish-video-list"><div class="publish-empty">选择一个或多个本地视频开始。</div></div>
+              </section>
+              <section class="publish-card">
+                <h3>发布设置</h3>
+                <div class="publish-form">
+                  <label>平台<select id="publish-platform"><option value="videoChannel">视频号</option><option value="douyin">抖音</option></select></label>
+                  <label>发布文案<textarea id="publish-copy" rows="4" placeholder="可选；留空时使用默认规则"></textarea></label>
+                  <label>话题标签<input id="publish-topics" type="text" placeholder="#动画 #游戏视频" /></label>
+                  <label class="publish-check"><input id="publish-original" type="checkbox" /> 声明原创</label>
+                  <label class="publish-check"><input id="publish-scheduled" type="checkbox" /> 定时发布</label>
+                  <input id="publish-schedule-time" type="datetime-local" disabled />
+                </div>
+              </section>
+            </div>
+            <div class="publish-actions"><span id="publish-result" class="publish-result"></span><button class="btn btn-primary" id="publish-start-btn" type="button" disabled>通过浏览器发布</button><button class="btn btn-danger" id="publish-stop-btn" type="button" hidden>停止发布</button></div>
+          </div>
+        </div>
         <div class="feat-view" id="view-style-ref">
           <div class="style-layout">
             <div class="style-list-area" id="style-list-area">

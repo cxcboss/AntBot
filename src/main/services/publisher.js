@@ -1,8 +1,10 @@
 const fs = require('node:fs/promises');
+const path = require('node:path');
 const dayjs = require('dayjs');
 const { runCommand } = require('./commandRunner');
 const { getProfileDir } = require('./startupCheck');
 const { launchPersistentChromiumContext } = require('./playwrightUtil');
+const { createBrowserPublishBridge } = require('./browserPublishBridge');
 
 const PLATFORM_CONFIG = {
   videoChannel: {
@@ -3451,6 +3453,46 @@ async function publishVideo(taskContext) {
   await ensureOutputVideoExists(outputPath);
   const scheduleAt = task.publishAt ? dayjs(task.publishAt).format('YYYY-MM-DD HH:mm') : '';
   const platforms = resolveTaskPlatforms(task, settings);
+
+  const extensionConfig = settings?.publish?.browserExtension;
+  if (extensionConfig?.enabled) {
+    const bridge = createBrowserPublishBridge({
+      baseUrl: extensionConfig.baseUrl,
+      timeoutMs: Number(extensionConfig.timeoutMs) || 30 * 60 * 1000
+    });
+    try {
+      const bridgeStatus = await bridge.getStatus();
+      if (bridgeStatus.status === 'ready' || bridgeStatus.status === 'busy') {
+        log('通过搬运蚁发布助手连接默认浏览器...');
+        const bridgeResult = await bridge.publish({
+          videos: [{
+            name: path.basename(outputPath),
+            path: outputPath,
+            size: (await fs.stat(outputPath)).size
+          }],
+          settings: {
+            scheduledPublish: Boolean(task.publishAt),
+            scheduleTime: task.publishAt ? new Date(task.publishAt).toISOString() : '',
+            autoGenerate: false,
+            autoRetry: false,
+            timeoutSeconds: 180
+          },
+          videoPath: path.dirname(outputPath),
+          platform: platforms[0] === 'videoChannel' ? 'weixin' : platforms[0],
+          onProgress: event => log(`[浏览器发布] ${event.step || event.detail || event.status || ''}`)
+        });
+        return {
+          mode: 'browser-extension',
+          scheduleAt,
+          platforms,
+          results: bridgeResult.results || bridgeResult.records || []
+        };
+      }
+    } catch (error) {
+      if (!extensionConfig.fallbackToPlaywright) throw error;
+      log(`浏览器插件发布不可用，回退 Playwright：${error.message}`);
+    }
+  }
 
   if (settings.commands.publish) {
     for (const platform of platforms) {

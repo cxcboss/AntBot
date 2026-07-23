@@ -254,7 +254,50 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
   ipcMain.handle('task:stop', async () => { await taskRunner.stop({}); return { stopped: true }; });
   ipcMain.handle('task:stop-one', async (_event, taskId) => taskRunner.stopTask(taskId, {}));
   ipcMain.handle('task:resume-one', async (_event, payload) => taskRunner.resumeTask(payload?.taskId, {}, payload?.task || null));
-  ipcMain.handle('history:get', async () => store.getHistory());
+  ipcMain.handle('publish:bridge-status', async () => {
+    const { createBrowserPublishBridge } = require('./services/browserPublishBridge');
+    const settings = await store.getSettings();
+    const config = settings.publish?.browserExtension || {};
+    try { return await createBrowserPublishBridge({ baseUrl: config.baseUrl }).getStatus(); }
+    catch (error) { return { ok: false, status: 'offline', message: error.message }; }
+  });
+
+  ipcMain.handle('publish:bridge-capabilities', async () => {
+    const { createBrowserPublishBridge } = require('./services/browserPublishBridge');
+    const settings = await store.getSettings();
+    const config = settings.publish?.browserExtension || {};
+    try { return await createBrowserPublishBridge({ baseUrl: config.baseUrl }).getCapabilities(); }
+    catch (error) { return { ok: false, capabilities: [], message: error.message }; }
+  });
+
+  ipcMain.handle('publish:start', async (_event, payload) => {
+    const { createBrowserPublishBridge } = require('./services/browserPublishBridge');
+    const settings = await store.getSettings();
+    const config = settings.publish?.browserExtension || {};
+    const videos = Array.isArray(payload?.videos) ? payload.videos : [];
+    if (!videos.length) throw new Error('请先选择视频');
+    const platform = String(payload.platform || settings.publish?.platform || 'videoChannel');
+    const result = await createBrowserPublishBridge({ baseUrl: config.baseUrl, timeoutMs: config.timeoutMs }).publish({
+      videos,
+      settings: payload.settings || {},
+      videoPath: payload.videoPath || path.dirname(videos[0].path || ''),
+      platform: platform === 'videoChannel' ? 'weixin' : platform,
+      requestId: payload.requestId,
+      onProgress: event => {
+        const win = mainWindowRef();
+        if (win && !win.isDestroyed()) win.webContents.send('publish:progress', event);
+      }
+    });
+    return result;
+  });
+
+  ipcMain.handle('publish:stop', async (_event, requestId) => {
+    const { createBrowserPublishBridge } = require('./services/browserPublishBridge');
+    const settings = await store.getSettings();
+    const config = settings.publish?.browserExtension || {};
+    return createBrowserPublishBridge({ baseUrl: config.baseUrl }).invoke('publish.stop', {}, { id: requestId });
+  });
+
 
   ipcMain.handle('app:log', async (_event, { level, message }) => {
     appLog(level || 'info', `[renderer] ${message}`);

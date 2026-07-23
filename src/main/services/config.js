@@ -87,7 +87,13 @@ const BASE_DEFAULT_SETTINGS = {
   },
   publish: {
     platform: '视频号',
-    enabled: true
+    enabled: true,
+    browserExtension: {
+      enabled: true,
+      baseUrl: 'http://127.0.0.1:3000',
+      fallbackToPlaywright: true,
+      timeoutMs: 30 * 60 * 1000
+    }
   },
   subtitle: {
     geminiUrl: ''

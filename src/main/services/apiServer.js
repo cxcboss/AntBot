@@ -2,9 +2,17 @@ const http = require('node:http');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
+const { createBridgeQueue } = require('./bridgeQueue');
 
 const API_PORT = 18930;
 let _server = null;
+const bridgeQueue = createBridgeQueue();
+const BRIDGE_CAPABILITIES = [
+  'publish.start', 'publish.stop', 'publish.getState',
+  'browser.getState', 'browser.getTabs', 'browser.navigate',
+  'browser.click', 'browser.type', 'browser.select', 'browser.scroll',
+  'browser.screenshot', 'browser.eval', 'media.list', 'media.info', 'history.list'
+];
 
 function startApiServer({ store, taskRunner, editScheduler, mainWindowRef, appLog }) {
   _server = http.createServer(async (req, res) => {
@@ -26,6 +34,54 @@ function startApiServer({ store, taskRunner, editScheduler, mainWindowRef, appLo
     });
 
     try {
+      // GET /api/bridge/status
+      if (method === 'GET' && pathname === '/api/bridge/status') {
+        const snapshot = bridgeQueue.snapshot();
+        return send(200, { ok: true, name: '搬运蚁发布助手', protocolVersion: 1, status: snapshot.pending.length || snapshot.queued.length ? 'busy' : 'ready', queued: snapshot.queued.length, pending: snapshot.pending.length });
+      }
+      if (method === 'GET' && pathname === '/api/bridge/capabilities') {
+        return send(200, { ok: true, protocolVersion: 1, capabilities: BRIDGE_CAPABILITIES });
+      }
+      if (method === 'POST' && pathname === '/api/bridge/commands') {
+        try {
+          const command = bridgeQueue.enqueue(await readBody());
+          bridgeQueue.addEvent(command.id, { type: 'accepted', action: command.action, status: 'queued' });
+          return send(202, { ok: true, command });
+        } catch (error) { return send(400, { ok: false, message: error.message }); }
+      }
+      if (method === 'GET' && pathname === '/api/bridge/commands/next') {
+        const command = bridgeQueue.claim();
+        if (!command) { res.writeHead(204); return res.end(); }
+        bridgeQueue.addEvent(command.id, { type: 'started', action: command.action, status: 'running' });
+        return send(200, { ok: true, command });
+      }
+      const bridgeMatch = pathname.match(/^\/api\/bridge\/commands\/([^/]+)(?:\/(events|result|cancel))?$/);
+      if (bridgeMatch) {
+        const id = decodeURIComponent(bridgeMatch[1]);
+        if (method === 'GET' && !bridgeMatch[2]) {
+          const command = bridgeQueue.get(id);
+          if (!command) return send(404, { ok: false, message: '命令不存在' });
+          return send(200, { ok: true, command, events: bridgeQueue.events.get(id) || [] });
+        }
+        if (method === 'POST' && bridgeMatch[2] === 'events') {
+          if (!bridgeQueue.get(id)) return send(404, { ok: false, message: '命令不存在' });
+          return send(200, { ok: true, event: bridgeQueue.addEvent(id, await readBody()) });
+        }
+        if (method === 'POST' && bridgeMatch[2] === 'result') {
+          const command = bridgeQueue.resolve(id, await readBody());
+          if (!command) return send(404, { ok: false, message: '命令不存在' });
+          bridgeQueue.addEvent(id, { type: 'result', status: command.status, success: command.result?.success !== false });
+          return send(200, { ok: true, command });
+        }
+        if (method === 'POST' && bridgeMatch[2] === 'cancel') {
+          const body = await readBody();
+          const command = bridgeQueue.cancel(id, body.reason || '已取消');
+          if (!command) return send(404, { ok: false, message: '命令不存在' });
+          bridgeQueue.addEvent(id, { type: 'cancelled', status: 'cancelled', reason: body.reason || '已取消' });
+          return send(200, { ok: true, command });
+        }
+      }
+
       // GET /api/health
       if (method === 'GET' && pathname === '/api/health') {
         return send(200, { ok: true, version: store ? '0.3.6' : 'unknown' });
