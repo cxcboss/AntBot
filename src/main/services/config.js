@@ -90,7 +90,7 @@ const BASE_DEFAULT_SETTINGS = {
     enabled: true,
     browserExtension: {
       enabled: true,
-      baseUrl: 'http://127.0.0.1:3000',
+      baseUrl: 'http://127.0.0.1:18321',
       fallbackToPlaywright: true,
       timeoutMs: 30 * 60 * 1000
     }

@@ -136,16 +136,30 @@ async function loadSidebarApiUsage() {
     const totalRemaining = usage.reduce((s, u) => s + u.remaining, 0);
     const totalUsed = usage.reduce((s, u) => s + u.used, 0);
     const totalLimit = usage.reduce((s, u) => s + u.limit, 0);
-    const frameRate = S.settings?.edit?.frameRate || 1;
-    const perMinute = Math.round(60 / frameRate);
-    const estMinutes = totalRemaining > 0 ? Math.round(totalRemaining / perMinute) : 0;
-    const estTime = estMinutes >= 60 ? `~${Math.round(estMinutes / 60)}小时` : estMinutes > 0 ? `~${estMinutes}分钟` : '已用尽';
+    // 帧率设置：value 表示多少秒一帧，帧率 = 1/value 帧/秒
+    const frameInterval = S.settings?.edit?.frameRate || 1; // 秒/帧
+    const fps = 1 / frameInterval; // 帧/秒
+    const requestsPerSecond = fps;
+    const requestsPerMinute = requestsPerSecond * 60;
+    const totalSeconds = totalRemaining > 0 ? Math.floor(totalRemaining / requestsPerSecond) : 0;
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    let durationText;
+    if (totalSeconds <= 0) {
+      durationText = '已用尽';
+    } else if (hours > 0) {
+      durationText = `${hours}小时${minutes}分`;
+    } else if (minutes > 0) {
+      durationText = `${minutes}分${seconds}秒`;
+    } else {
+      durationText = `${seconds}秒`;
+    }
 
     box.innerHTML = `
       <div class="sb-quota-total" id="sb-quota-toggle">
-        <span class="sb-quota-label">可用额度</span>
-        <span class="sb-quota-val">${totalRemaining} 次</span>
-        <span class="sb-quota-est">约可剪辑 ${estTime}</span>
+        <span class="sb-quota-label">可剪辑时长</span>
+        <span class="sb-quota-val">${durationText}</span>
       </div>
       <div class="sb-quota-details hidden" id="sb-quota-details">
         ${usage.map(u => {
@@ -153,6 +167,7 @@ async function loadSidebarApiUsage() {
       return `<div class="sb-quota-key"><span class="sb-quota-key-name">${esc(u.keyMasked)}</span><span class="sb-quota-key-val">${u.remaining}/${u.limit}</span></div><div class="sb-quota-bar"><div class="sb-quota-bar-fill" style="width:${pct}%"></div></div>`;
     }).join('')}
         <div class="sb-quota-summary">已用 ${totalUsed} · 失败 ${usage.reduce((s, u) => s + u.failed, 0)} · 限频 ${usage.reduce((s, u) => s + u.rateLimited, 0)}</div>
+        <div class="sb-quota-frame-info">当前帧率: 每${frameInterval}秒1帧</div>
       </div>`;
 
     document.getElementById('sb-quota-toggle')?.addEventListener('click', () => {
@@ -343,16 +358,30 @@ async function loadApiUsage() {
   try {
     const usage = await window.antbot.apiUsage();
     if (!usage || !usage.length) { box.innerHTML = '<div class="api-usage-empty">输入 API Key 后显示额度</div>'; return; }
-    const frameRate = S.settings?.edit?.frameRate || 1;
-    const perMinute = Math.round(60 / frameRate); // 每分钟消耗的请求数（1帧/秒 = 60请求/分钟）
+    // 帧率设置：value 表示多少秒一帧，帧率 = 1/value 帧/秒
+    const frameInterval = S.settings?.edit?.frameRate || 1; // 秒/帧
+    const fps = 1 / frameInterval; // 帧/秒
+    const requestsPerSecond = fps;
     box.innerHTML = usage.map(u => {
       const pct = u.limit > 0 ? Math.round((u.used / u.limit) * 100) : 0;
-      const estMinutes = u.remaining > 0 ? Math.round(u.remaining / perMinute) : 0;
-      const estTime = estMinutes >= 60 ? `~${Math.round(estMinutes / 60)}小时` : `~${estMinutes}分钟`;
+      const totalSeconds = u.remaining > 0 ? Math.floor(u.remaining / requestsPerSecond) : 0;
+      const hours = Math.floor(totalSeconds / 3600);
+      const minutes = Math.floor((totalSeconds % 3600) / 60);
+      const seconds = totalSeconds % 60;
+      let durationText;
+      if (totalSeconds <= 0) {
+        durationText = '已用尽';
+      } else if (hours > 0) {
+        durationText = `${hours}小时${minutes}分`;
+      } else if (minutes > 0) {
+        durationText = `${minutes}分${seconds}秒`;
+      } else {
+        durationText = `${seconds}秒`;
+      }
       return `<div class="api-usage-item">
-        <div class="api-usage-head"><span class="api-usage-key">${esc(u.keyMasked)}</span><span class="api-usage-remain">剩余 ${u.remaining} 次</span></div>
+        <div class="api-usage-head"><span class="api-usage-key">${esc(u.keyMasked)}</span><span class="api-usage-remain">可剪辑 ${durationText}</span></div>
         <div class="api-usage-bar"><div class="api-usage-bar-fill" style="width:${pct}%"></div></div>
-        <div class="api-usage-meta">已用 ${u.used}/${u.limit} · 失败 ${u.failed} · 限频 ${u.rateLimited} · 约可剪辑 ${estTime}</div>
+        <div class="api-usage-meta">已用 ${u.used}/${u.limit} · 失败 ${u.failed} · 限频 ${u.rateLimited}</div>
       </div>`;
     }).join('');
   } catch { box.innerHTML = ''; }
@@ -717,6 +746,9 @@ function renderEditHistory(container) {
     groups[label].push(h);
   }
 
+  // 获取已添加到发布队列的视频路径
+  const addedPaths = new Set(S.publish.videos.map(v => v.path));
+
   const groupKeys = Object.keys(groups);
   container.innerHTML = groupKeys.map((label, gi) => {
     const isToday = gi === 0;
@@ -730,6 +762,7 @@ function renderEditHistory(container) {
       const time = h.createdAt ? new Date(h.createdAt).toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'}) : '';
       // 显示输出文件名（而非原始文件名）
       const displayName = ok && h.outputPath ? h.outputPath.split(/[/\\]/).pop().replace(/\.[^.]+$/, '') : h.name;
+      const isAdded = ok && h.outputPath && addedPaths.has(h.outputPath);
       return `<div class="edit-hist-item ${h.status}">
         <div class="edit-hist-info">
           <div class="edit-hist-name">${ok ? '✅' : '❌'} ${esc(displayName)}</div>
@@ -737,8 +770,9 @@ function renderEditHistory(container) {
           <div class="edit-hist-time">${esc(time)}</div>
         </div>
         <div class="edit-hist-acts">
+          ${ok && h.outputPath ? `<button class="edit-act-btn" data-hact="publish" data-hid="${esc(h.id)}">${isAdded ? '已添加' : '添加发布'}</button>` : ''}
           ${ok ? `<button class="edit-act-btn" data-hact="open" data-hid="${esc(h.id)}">打开</button>` : ''}
-          <button class="edit-act-btn danger" data-hact="delete" data-hid="${esc(h.id)}">删除</button>
+          <button class="edit-act-btn" data-hact="clear" data-hid="${esc(h.id)}">清理</button>
         </div>
       </div>`;
     }).join('');
@@ -766,7 +800,34 @@ function renderEditHistory(container) {
   container.querySelectorAll('[data-hact]').forEach(btn => btn.addEventListener('click', async () => {
     const hid = btn.dataset.hid, act = btn.dataset.hact;
     if (act === 'open') { const h = S.editHistory.find(x => x.id === hid); if (h?.outputPath) window.antbot.revealInFolder(h.outputPath); }
-    else if (act === 'delete') { const h = S.editHistory.find(x => x.id === hid); const del = h?.outputPath ? window.confirm('同时删除输出文件？') : false; const r = await window.antbot.deleteEditHistory({ id: hid, deleteFile: del }); if (r.ok) { S.editHistory = r.history; renderEditCards(); } }
+    else if (act === 'clear') {
+      const h = S.editHistory.find(x => x.id === hid);
+      if (h) {
+        const r = await window.antbot.deleteEditHistory({ id: hid, deleteFile: false });
+        if (r.ok) { S.editHistory = r.history; renderEditCards(); }
+      }
+    }
+    else if (act === 'publish') {
+      const h = S.editHistory.find(x => x.id === hid);
+      if (h?.outputPath) {
+        const existingIndex = S.publish.videos.findIndex(v => v.path === h.outputPath);
+        if (existingIndex >= 0) {
+          // 撤销添加
+          S.publish.videos.splice(existingIndex, 1);
+          toast(`已从发布队列移除`, 'info');
+        } else {
+          // 添加到发布队列
+          const video = { path: h.outputPath, name: h.outputPath.split(/[/\\]/).pop(), size: 0, status: 'pending' };
+          try {
+            const info = await window.antbot.getVideoInfo(h.outputPath);
+            video.size = info.size || 0;
+          } catch {}
+          S.publish.videos.push(video);
+          toast(`已添加到发布队列`, 'success');
+        }
+        renderEditHistory(container);
+      }
+    }
   }));
 }
 
@@ -1345,27 +1406,409 @@ function bindSubtitleVoiceEvents() {
 
 function bindPublishPage(){
   const pick = document.getElementById('publish-pick-videos-btn');
-  const start = document.getElementById('publish-start-btn');
-  const stop = document.getElementById('publish-stop-btn');
   const platform = document.getElementById('publish-platform');
   const scheduled = document.getElementById('publish-scheduled');
+  const scheduleMonth = document.getElementById('publish-schedule-month');
+  const scheduleDay = document.getElementById('publish-schedule-day');
   const scheduleTime = document.getElementById('publish-schedule-time');
-  S.publish = { videos: [], requestId: '', running: false };
-  const formatSize = bytes => { const n=Number(bytes||0); return n>1024*1024?`${(n/1024/1024).toFixed(1)} MB`:`${Math.round(n/1024)} KB`; };
-  const render = () => {
-    const list = document.getElementById('publish-video-list');
-    const count = document.getElementById('publish-video-count');
-    count.textContent = S.publish.videos.length ? `已选择 ${S.publish.videos.length} 个视频` : '尚未选择视频';
-    list.innerHTML = S.publish.videos.length ? S.publish.videos.map((v,i)=>`<div class="publish-video-item"><span class="publish-video-index">${i+1}</span><span class="publish-video-name" title="${esc(v.path)}">${esc(v.name)}</span><span class="publish-video-meta">${formatSize(v.size)}</span></div>`).join('') : '<div class="publish-empty">选择一个或多个本地视频开始。</div>';
-    start.disabled = !S.publish.videos.length || S.publish.running;
+  const mainBtn = document.getElementById('publish-main-btn');
+  const publishView = document.getElementById('view-publish');
+  const videoList = document.getElementById('publish-video-list');
+  const historyList = document.getElementById('publish-history-list');
+  const tabPending = document.getElementById('publish-tab-pending');
+  const tabDone = document.getElementById('publish-tab-done');
+  const pendingCount = document.getElementById('publish-pending-count');
+  const doneCount = document.getElementById('publish-done-count');
+  const bridgeToggleBtn = document.getElementById('publish-bridge-toggle-btn');
+  let draggedItem = null;
+  let draggedIndex = -1;
+  let currentTab = 'pending';
+  let publishProgress = {};
+  let serviceRunning = false;
+
+  S.publish = { videos: [], requestId: '', running: false, history: [] };
+  const formatSize = bytes => { const n=Number(bytes||0); if(n===0) return ''; return n>1024*1024?`${(n/1024/1024).toFixed(1)}MB`:`${Math.round(n/1024)}KB`; };
+  const formatTime = (d) => { const date=new Date(d); return `${date.getMonth()+1}/${date.getDate()} ${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}`; };
+  const getFileName = (path) => path.split(/[\\/]/).pop();
+
+  // 加载已发布的记录
+  const loadPublishHistory = async () => {
+    try {
+      const records = await window.antbot.publishGetRecords();
+      S.publish.history = records || [];
+      render();
+    } catch (e) {
+      console.error('加载发布记录失败:', e);
+    }
   };
+
+  // 保存发布记录到本地
+  const savePublishRecord = async (record) => {
+    try {
+      await window.antbot.publishSaveRecord(record);
+    } catch (e) {
+      console.error('保存发布记录失败:', e);
+    }
+  };
+
+  const getDaysInMonth = (year, month) => new Date(year, month, 0).getDate();
+
+  const isFutureDateTime = (month, day, time) => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const [hours, minutes] = (time || '10:30').split(':').map(Number);
+    const selected = new Date(year, month - 1, day, hours, minutes);
+    return selected > now;
+  };
+
+  const updateDaysSelect = () => {
+    const month = parseInt(scheduleMonth.value);
+    const now = new Date();
+    const daysInMonth = getDaysInMonth(now.getFullYear(), month);
+    const currentDay = parseInt(scheduleDay.value) || now.getDate();
+    scheduleDay.innerHTML = '';
+    for(let i = 1; i <= daysInMonth; i++) {
+      const option = document.createElement('option');
+      option.value = i;
+      option.textContent = `${i}日`;
+      if(i === Math.min(currentDay, daysInMonth)) option.selected = true;
+      scheduleDay.appendChild(option);
+    }
+  };
+
+  const setDefaultSchedule = () => {
+    const now = new Date();
+    scheduleMonth.value = now.getMonth() + 1;
+    const nextHour = now.getHours() + 1;
+    scheduleTime.value = `${String(nextHour >= 24 ? 0 : nextHour).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    updateDaysSelect();
+    scheduleDay.value = now.getDate();
+  };
+
+  const validateSchedule = () => {
+    if (!scheduled.checked) return true;
+    const month = parseInt(scheduleMonth.value);
+    const day = parseInt(scheduleDay.value);
+    return isFutureDateTime(month, day, scheduleTime.value);
+  };
+
+  const addVideos = async (filePaths) => {
+    const newVideos = filePaths.map(path => ({
+      path, name: getFileName(path), size: 0, status: 'pending'
+    }));
+    S.publish.videos = [...S.publish.videos, ...newVideos];
+    render();
+    for(let i = S.publish.videos.length - newVideos.length; i < S.publish.videos.length; i++) {
+      try {
+        const info = await window.antbot.getVideoInfo(S.publish.videos[i].path);
+        S.publish.videos[i].size = info.size || 0;
+      } catch {}
+    }
+    render();
+  };
+
+  const render = () => {
+    pendingCount.textContent = S.publish.videos.filter(v => v.status === 'pending' || v.status === 'publishing').length;
+    doneCount.textContent = S.publish.history.length;
+
+    if (currentTab === 'pending') {
+      videoList.classList.remove('hidden');
+      historyList.classList.add('hidden');
+      renderPendingList();
+    } else {
+      videoList.classList.add('hidden');
+      historyList.classList.remove('hidden');
+      renderHistoryList();
+    }
+
+    if (S.publish.running) {
+      mainBtn.textContent = '停止发布';
+      mainBtn.className = 'btn btn-danger';
+      mainBtn.disabled = false;
+    } else if (S.publish.videos.some(v => v.status === 'pending')) {
+      mainBtn.textContent = '通过浏览器发布';
+      mainBtn.className = 'btn btn-primary';
+      mainBtn.disabled = !validateSchedule() || !serviceRunning;
+    } else {
+      mainBtn.textContent = '通过浏览器发布';
+      mainBtn.className = 'btn btn-primary';
+      mainBtn.disabled = true;
+    }
+  };
+
+  const renderPendingList = () => {
+    const allVideos = S.publish.videos;
+    const hasPublishing = allVideos.some(v => v.status === 'publishing');
+
+    if (!allVideos.length) {
+      videoList.innerHTML = '<div class="publish-empty">拖拽视频文件到此处，或点击"添加视频"</div>';
+      return;
+    }
+
+    videoList.innerHTML = allVideos.map((v,i) => {
+      const publishing = v.status === 'publishing';
+      const statusText = publishProgress[v.path] || (publishing ? '发布中...' : '');
+      return `<div class="publish-video-item ${publishing ? 'publishing' : ''}" draggable="${!publishing}" data-path="${esc(v.path)}">
+        ${publishing ? '' : '<span class="publish-video-drag-handle">⋮⋮</span>'}
+        <span class="publish-video-index">${publishing ? '⏳' : i+1}</span>
+        <span class="publish-video-name" title="${esc(v.path)}">${esc(v.name)}</span>
+        ${statusText ? `<span class="publish-video-status">${esc(statusText)}</span>` : ''}
+        <span class="publish-video-meta">${formatSize(v.size)}</span>
+        ${publishing ? '' : `<button class="publish-video-remove" data-path="${esc(v.path)}" title="移除">×</button>`}
+      </div>`;
+    }).join('');
+    setupDragAndDrop();
+  };
+
+  const renderHistoryList = () => {
+    if (!S.publish.history.length) {
+      historyList.innerHTML = '<div class="publish-empty">暂无发布记录</div>';
+      return;
+    }
+
+    // 按日期分组
+    const today = new Date(); today.setHours(0,0,0,0);
+    const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
+    const groups = {};
+    for (const h of S.publish.history) {
+      const d = h.time ? new Date(h.time) : new Date();
+      const dayStart = new Date(d); dayStart.setHours(0,0,0,0);
+      let label;
+      if (dayStart.getTime() === today.getTime()) label = '今天';
+      else if (dayStart.getTime() === yesterday.getTime()) label = '昨天';
+      else label = `${d.getMonth()+1}月${d.getDate()}日`;
+      if (!groups[label]) groups[label] = [];
+      groups[label].push(h);
+    }
+
+    const groupKeys = Object.keys(groups);
+    historyList.innerHTML = groupKeys.map((label, gi) => {
+      const isToday = gi === 0;
+      const items = groups[label];
+      const rows = items.map(h => `
+        <div class="publish-history-item">
+          <span class="publish-history-icon ${h.success ? 'success' : 'failed'}">${h.success ? '✓' : '✗'}</span>
+          <span class="publish-history-name" title="${esc(h.path)}">${esc(h.name)}</span>
+          <span class="publish-history-time">${formatTime(h.time)}</span>
+          <button class="publish-history-open" data-path="${esc(h.path)}" title="在文件管理器中显示">打开</button>
+        </div>`).join('');
+
+      if (groupKeys.length === 1 && isToday) return rows;
+      return `<div class="publish-history-group${isToday ? ' expanded' : ''}" data-group="${esc(label)}">
+        <div class="publish-history-group-head" data-toggle-publish-group="${esc(label)}">
+          <span class="publish-history-group-label">${esc(label)}</span>
+          <span class="publish-history-group-count">${items.length}</span>
+          <span class="publish-history-group-arrow">›</span>
+        </div>
+        <div class="publish-history-group-body">${rows}</div>
+      </div>`;
+    }).join('');
+
+    // 折叠/展开
+    historyList.querySelectorAll('[data-toggle-publish-group]').forEach(head => {
+      head.addEventListener('click', () => {
+        const group = head.closest('.publish-history-group');
+        if (group) group.classList.toggle('expanded');
+      });
+    });
+
+    historyList.querySelectorAll('.publish-history-open').forEach(btn => {
+      btn.addEventListener('click', () => window.antbot.revealInFolder(btn.dataset.path));
+    });
+  };
+
+  const setupDragAndDrop = () => {
+    const items = videoList.querySelectorAll('.publish-video-item[draggable="true"]');
+    items.forEach((item) => {
+      item.addEventListener('dragstart', (e) => {
+        draggedItem = item;
+        draggedIndex = S.publish.videos.findIndex(v => v.path === item.dataset.path);
+        item.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+      });
+
+      item.addEventListener('dragend', () => {
+        item.classList.remove('dragging');
+        draggedItem = null;
+        draggedIndex = -1;
+        videoList.querySelectorAll('.publish-video-item').forEach(i => i.classList.remove('drag-over'));
+      });
+
+      item.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        if (item !== draggedItem) item.classList.add('drag-over');
+      });
+
+      item.addEventListener('dragleave', () => item.classList.remove('drag-over'));
+
+      item.addEventListener('drop', (e) => {
+        e.preventDefault();
+        item.classList.remove('drag-over');
+        const targetIndex = S.publish.videos.findIndex(v => v.path === item.dataset.path);
+        if (draggedIndex !== -1 && draggedIndex !== targetIndex) {
+          const draggedVideo = S.publish.videos[draggedIndex];
+          S.publish.videos.splice(draggedIndex, 1);
+          S.publish.videos.splice(targetIndex, 0, draggedVideo);
+          render();
+        }
+      });
+    });
+
+    videoList.querySelectorAll('.publish-video-remove').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        S.publish.videos = S.publish.videos.filter(v => v.path !== btn.dataset.path);
+        render();
+      });
+    });
+  };
+
   const setResult = (text, type='') => { const result=document.getElementById('publish-result'); result.textContent=text; result.className=`publish-result ${type}`; };
-  const refreshBridge = async () => { const status = document.getElementById('publish-bridge-status'); try { const r=await window.antbot.publishBridgeStatus(); status.className=`publish-bridge-status ${r.status==='ready'||r.status==='busy'?'ready':'offline'}`; status.querySelector('span:last-child').textContent=r.status==='ready'||r.status==='busy'?'插件已连接':'插件未连接'; } catch { status.className='publish-bridge-status offline'; status.querySelector('span:last-child').textContent='插件未连接'; } };
-  pick?.addEventListener('click', async () => { try { const paths=await window.antbot.pickVideoFiles(); S.publish.videos=paths.map(path=>({ path, name:path.split(/[\\/]/).pop(), size:0 })); render(); } catch(e){setResult(e.message,'error')} });
-  scheduled?.addEventListener('change',()=>{scheduleTime.disabled=!scheduled.checked});
-  start?.addEventListener('click', async () => { if(!S.publish.videos.length)return; S.publish.running=true; S.publish.requestId=`antbot-${Date.now()}`; render(); stop.hidden=false; setResult('正在等待浏览器插件执行...'); const topics=(document.getElementById('publish-topics').value||'').split(/[ ,，]+/).filter(Boolean); try { const result=await window.antbot.publishStart({ requestId:S.publish.requestId, videos:S.publish.videos, videoPath:'', platform:platform.value, settings:{ publishCopy:document.getElementById('publish-copy').value, publishTopics:topics, isOriginal:document.getElementById('publish-original').checked, scheduledPublish:scheduled.checked, scheduleTime:scheduled.checked? scheduleTime.value:'' } }); setResult(`发布完成：${result.platforms?.join(', ')||'已提交'}`,'success'); } catch(e){setResult(e.message,'error')} finally { S.publish.running=false; stop.hidden=true; render(); refreshBridge(); } });
-  stop?.addEventListener('click', async()=>{try{await window.antbot.publishStop(S.publish.requestId);setResult('已停止','success')}catch(e){setResult(e.message,'error')}finally{S.publish.running=false;stop.hidden=true;render()}});
-  refreshBridge(); setInterval(refreshBridge,3000); render();
+
+  const refreshBridge = async () => {
+    const status = document.getElementById('publish-bridge-status');
+    try {
+      const r=await window.antbot.publishBridgeStatus();
+      serviceRunning = r.status==='ready'||r.status==='busy';
+      status.className=`publish-bridge-status ${serviceRunning?'ready':'offline'}`;
+      status.querySelector('span:last-child').textContent=serviceRunning?'已连接':'未连接';
+      bridgeToggleBtn.textContent = serviceRunning ? '停止服务' : '启动服务';
+      bridgeToggleBtn.className = serviceRunning ? 'btn btn-ghost' : 'btn btn-ghost';
+    } catch {
+      serviceRunning = false;
+      status.className='publish-bridge-status offline';
+      status.querySelector('span:last-child').textContent='未连接';
+      bridgeToggleBtn.textContent = '启动服务';
+    }
+    render();
+  };
+
+  bridgeToggleBtn?.addEventListener('click', async () => {
+    bridgeToggleBtn.disabled = true;
+    bridgeToggleBtn.textContent = '处理中...';
+    try {
+      if (serviceRunning) {
+        await window.antbot.publishBridgeStop();
+        setResult('服务已停止', 'success');
+      } else {
+        const result = await window.antbot.publishBridgeStart();
+        if (result.ok) setResult('服务已启动', 'success');
+        else setResult('启动失败', 'error');
+      }
+      await refreshBridge();
+    } catch(e) { setResult(e.message, 'error'); }
+    finally { bridgeToggleBtn.disabled = false; }
+  });
+
+  pick?.addEventListener('click', async () => {
+    try {
+      const paths = await window.antbot.pickVideoFiles();
+      if (paths && paths.length) await addVideos(paths);
+    } catch(e) { setResult(e.message, 'error'); }
+  });
+
+  tabPending?.addEventListener('click', () => { currentTab = 'pending'; tabPending.classList.add('active'); tabDone.classList.remove('active'); render(); });
+  tabDone?.addEventListener('click', () => { currentTab = 'done'; tabDone.classList.add('active'); tabPending.classList.remove('active'); render(); });
+
+  publishView?.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); publishView.classList.add('drag-over'); });
+  publishView?.addEventListener('dragleave', (e) => { if (!publishView.contains(e.relatedTarget)) publishView.classList.remove('drag-over'); });
+  publishView?.addEventListener('drop', async (e) => {
+    e.preventDefault(); e.stopPropagation(); publishView.classList.remove('drag-over');
+    const filePaths = [];
+    for (const f of e.dataTransfer?.files || []) {
+      try {
+        const p = window.antbot.getPathForFile(f);
+        if (p && /\.(mp4|mov|m4v|webm|mkv|avi|flv|wmv|ts)$/i.test(f.name)) filePaths.push(p);
+      } catch {}
+    }
+    if (filePaths.length) await addVideos(filePaths);
+  });
+
+  scheduleMonth?.addEventListener('change', () => { updateDaysSelect(); render(); });
+  scheduleDay?.addEventListener('change', render);
+  scheduleTime?.addEventListener('change', render);
+  scheduled?.addEventListener('change', () => {
+    scheduleMonth.disabled = !scheduled.checked;
+    scheduleDay.disabled = !scheduled.checked;
+    scheduleTime.disabled = !scheduled.checked;
+    if (scheduled.checked && !scheduleDay.value) setDefaultSchedule();
+    render();
+  });
+
+  mainBtn?.addEventListener('click', async () => {
+    if (S.publish.running) {
+      // 立即更新状态
+      S.publish.running = false;
+      publishProgress = {};
+      render();
+      setResult('正在停止...', 'success');
+      try {
+        await window.antbot.publishStop(S.publish.requestId);
+        setResult('已停止', 'success');
+      } catch(e) {
+        setResult(e.message, 'error');
+      }
+    } else {
+      const pendingVideos = S.publish.videos.filter(v => v.status === 'pending');
+      if (!pendingVideos.length) return;
+      S.publish.running = true;
+      S.publish.requestId = `antbot-${Date.now()}`;
+      pendingVideos.forEach(v => { v.status = 'publishing'; publishProgress[v.path] = '等待中...'; });
+      render();
+      setResult('正在发布...');
+      const topics = (document.getElementById('publish-topics').value || '').split(/[ ,，]+/).filter(Boolean);
+      let scheduleTimeValue = '';
+      if (scheduled.checked && scheduleDay.value) {
+        const year = new Date().getFullYear();
+        const month = String(scheduleMonth.value).padStart(2, '0');
+        const day = String(scheduleDay.value).padStart(2, '0');
+        scheduleTimeValue = `${year}-${month}-${day}T${scheduleTime.value || '10:30'}`;
+      }
+      try {
+        for (const video of pendingVideos) {
+          if (!S.publish.running) break;
+          publishProgress[video.path] = '发布中...';
+          render();
+          try {
+            await window.antbot.publishStart({
+              requestId: S.publish.requestId + '-' + Date.now(),
+              videos: [video],
+              videoPath: '',
+              platform: platform.value,
+              settings: {
+                publishCopy: document.getElementById('publish-copy').value,
+                publishTopics: topics,
+                isOriginal: document.getElementById('publish-original').checked,
+                scheduledPublish: scheduled.checked,
+                scheduleTime: scheduleTimeValue
+              }
+            });
+            const record = { path: video.path, name: video.name, success: true, time: new Date(), platform: platform.value };
+            S.publish.history.unshift(record);
+            await savePublishRecord(record);
+          } catch(e) {
+            const record = { path: video.path, name: video.name, success: false, time: new Date(), platform: platform.value, error: e.message };
+            S.publish.history.unshift(record);
+            await savePublishRecord(record);
+          }
+          delete publishProgress[video.path];
+        }
+        S.publish.videos = S.publish.videos.filter(v => v.status === 'pending');
+        setResult(S.publish.running ? '发布完成' : '已停止', 'success');
+      } catch(e) { setResult(e.message, 'error'); }
+      finally { S.publish.running = false; publishProgress = {}; render(); refreshBridge(); }
+    }
+  });
+
+  setDefaultSchedule();
+  refreshBridge();
+  setInterval(refreshBridge, 3000);
+  loadPublishHistory();
+  render();
+
+  // 暴露 refreshPublishPage 函数供剪辑页面调用
+  window.refreshPublishPage = render;
 }
 
 function bind(){

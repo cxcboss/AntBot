@@ -5,7 +5,7 @@ const fs = require('fs');
 const { createBridgeQueue } = require('./bridgeQueue');
 
 const app = express();
-const PORT = Number(process.env.PORT || 3000);
+const PORT = Number(process.env.PORT || 18321);
 const bridgeQueue = createBridgeQueue();
 const bridgeEventSequences = new Map();
 const BRIDGE_CAPABILITIES = [

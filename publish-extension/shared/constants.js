@@ -30,7 +30,7 @@ const DEFAULT_SETTINGS = {
 };
 
 const API_ENDPOINTS = {
-  LOCAL_SERVER: 'http://localhost:3000',
+  LOCAL_SERVER: 'http://localhost:18321',
   AI_API: 'https://ark.cn-beijing.volces.com/api/v3/responses'
 };
 

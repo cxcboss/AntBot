@@ -11,7 +11,7 @@ let _doneLock = false;
 let _finishCalled = false;
 const SKIP_KEY = '_vpe_skip_names';
 const ABORT_KEY = '_vpe_abort';
-const BRIDGE_BASE_URL = 'http://localhost:3000';
+const BRIDGE_BASE_URL = 'http://localhost:18321';
 let bridgePollTimer = null;
 let bridgeBusy = false;
 let debuggerTargets = new Map();
@@ -418,7 +418,6 @@ async function finishAllPublish() {
     });
     publishState.bridgeCommandId = null;
   }
-  chrome.tabs.create({ url: 'http://localhost:3000/' });
 }
 
 // ========== 标签页监听 ==========
@@ -580,7 +579,7 @@ function calculateScheduledTime(videoIndex, firstVideoScheduled = false) {
 }
 
 async function savePublishRecord(record) {
-  try { await fetch('http://localhost:3000/api/publish-record', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(record) }); } catch (_) {}
+  try { await fetch('http://localhost:18321/api/publish-record', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(record) }); } catch (_) {}
 }
 
 console.log('[BG] Service Worker started');

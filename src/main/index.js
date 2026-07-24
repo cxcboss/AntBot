@@ -94,6 +94,7 @@ const { registerIpcHandlers } = require('./ipc');
 const { ensureManagedBinDir, injectManagedBinIntoProcessEnv } = require('./services/dependencyManager');
 const { getAppInfo } = require('./services/appInfo');
 const { SystemControlService } = require('./services/systemControl');
+const { bridgeServiceManager } = require('./services/bridgeServiceManager');
 
 function parseBooleanEnv(rawValue, fallback = false) {
   const normalized = String(rawValue || '').trim().toLowerCase();
@@ -263,4 +264,5 @@ app.on('window-all-closed', () => {
 app.on('before-quit', async () => {
   if (ipcCleanup) await ipcCleanup().catch(() => {});
   systemControl?.dispose();
+  bridgeServiceManager.stop();
 });

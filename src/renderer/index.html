@@ -127,30 +127,60 @@
         </div>
 
         <!-- 发布页 -->
-        <div class="feat-view" id="view-publish">
+        <div class="feat-view publish-view" id="view-publish">
           <div class="publish-layout">
-            <div class="publish-head">
-              <div><h2>浏览器发布</h2><p>选择视频后，交给默认浏览器中的搬运蚁发布助手完成发布。</p></div>
-              <div class="publish-bridge-status" id="publish-bridge-status"><span class="publish-status-dot"></span><span>检测中...</span></div>
+            <!-- 标题栏 + 连接状态 -->
+            <div class="publish-header">
+              <div class="publish-tabs">
+                <button class="publish-tab active" id="publish-tab-pending" type="button">待发布 <span class="publish-tab-count" id="publish-pending-count">0</span></button>
+                <button class="publish-tab" id="publish-tab-done" type="button">已发布 <span class="publish-tab-count" id="publish-done-count">0</span></button>
+              </div>
+              <div class="publish-bridge-status" id="publish-bridge-status"><span class="publish-status-dot"></span><span>未连接</span></div>
             </div>
-            <div class="publish-grid">
-              <section class="publish-card publish-videos-card">
-                <div class="publish-card-head"><div><h3>待发布视频</h3><p id="publish-video-count">尚未选择视频</p></div><button class="btn btn-ghost" id="publish-pick-videos-btn" type="button"><span class="icon" data-icon="plus"></span>选择视频</button></div>
-                <div class="publish-video-list" id="publish-video-list"><div class="publish-empty">选择一个或多个本地视频开始。</div></div>
-              </section>
-              <section class="publish-card">
-                <h3>发布设置</h3>
-                <div class="publish-form">
+            <!-- 视频列表区 -->
+            <div class="publish-list" id="publish-list">
+              <div class="publish-video-list" id="publish-video-list"><div class="publish-empty">拖拽视频文件到此处，或点击下方"添加"按钮</div></div>
+              <div class="publish-history-list hidden" id="publish-history-list"></div>
+            </div>
+            <!-- 发布设置 -->
+            <section class="publish-settings-card">
+              <div class="publish-form">
+                <div class="publish-form-row">
                   <label>平台<select id="publish-platform"><option value="videoChannel">视频号</option><option value="douyin">抖音</option></select></label>
-                  <label>发布文案<textarea id="publish-copy" rows="4" placeholder="可选；留空时使用默认规则"></textarea></label>
-                  <label>话题标签<input id="publish-topics" type="text" placeholder="#动画 #游戏视频" /></label>
                   <label class="publish-check"><input id="publish-original" type="checkbox" /> 声明原创</label>
                   <label class="publish-check"><input id="publish-scheduled" type="checkbox" /> 定时发布</label>
-                  <input id="publish-schedule-time" type="datetime-local" disabled />
                 </div>
-              </section>
+                <div class="publish-form-row">
+                  <label>发布文案<textarea id="publish-copy" rows="2" placeholder="可选；留空时使用默认规则"></textarea></label>
+                  <label>话题标签<input id="publish-topics" type="text" placeholder="#动画 #游戏视频" /></label>
+                </div>
+                <div class="publish-schedule-wrapper" id="publish-schedule-wrapper">
+                  <input id="publish-schedule-time" type="time" value="10:30" disabled />
+                  <div class="publish-schedule-date-row">
+                    <select id="publish-schedule-month" disabled>
+                      <option value="1">1月</option><option value="2">2月</option><option value="3">3月</option>
+                      <option value="4">4月</option><option value="5">5月</option><option value="6">6月</option>
+                      <option value="7">7月</option><option value="8">8月</option><option value="9">9月</option>
+                      <option value="10">10月</option><option value="11">11月</option><option value="12">12月</option>
+                    </select>
+                    <select id="publish-schedule-day" disabled></select>
+                  </div>
+                </div>
+              </div>
+            </section>
+            <!-- 底部控制栏 -->
+            <div class="publish-bar">
+              <div class="publish-bar-left">
+                <button class="btn btn-ghost" id="publish-pick-videos-btn" type="button"><span class="icon" data-icon="plus"></span>添加</button>
+                <button class="btn btn-ghost" id="publish-bridge-toggle-btn" type="button">启动服务</button>
+              </div>
+              <div class="publish-bar-center">
+                <span id="publish-result" class="publish-result"></span>
+              </div>
+              <div class="publish-bar-right">
+                <button class="btn btn-primary" id="publish-main-btn" type="button" disabled>通过浏览器发布</button>
+              </div>
             </div>
-            <div class="publish-actions"><span id="publish-result" class="publish-result"></span><button class="btn btn-primary" id="publish-start-btn" type="button" disabled>通过浏览器发布</button><button class="btn btn-danger" id="publish-stop-btn" type="button" hidden>停止发布</button></div>
           </div>
         </div>
         <div class="feat-view" id="view-style-ref">

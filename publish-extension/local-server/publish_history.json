@@ -1,5 +1,31 @@
 [
   {
+    "id": 1784837622769,
+    "videoName": "蓝色小怪物手工_2607240303.mp4",
+    "videoPath": "/Users/chenxincheng/Desktop/视频/完成剪辑/260724",
+    "platform": "weixin",
+    "status": "success",
+    "error": "",
+    "scheduled": true,
+    "scheduledTime": "2026-07-23T16:00:00.000Z",
+    "topics": [],
+    "description": "",
+    "publishTime": "2026-07-23T20:13:39.765Z"
+  },
+  {
+    "id": 1784836069652,
+    "videoName": "蓝色小怪物手工_2607240303.mp4",
+    "videoPath": "/Users/chenxincheng/Desktop/视频/完成剪辑/260724",
+    "platform": "weixin",
+    "status": "success",
+    "error": "",
+    "scheduled": false,
+    "scheduledTime": null,
+    "topics": [],
+    "description": "",
+    "publishTime": "2026-07-23T19:47:46.638Z"
+  },
+  {
     "id": 1783012126755,
     "videoName": "小游戏-子弹冲冲冲3D.mp4",
     "videoPath": "/Users/chenxincheng/Downloads",

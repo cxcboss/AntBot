@@ -32,7 +32,7 @@ function requestJson(baseUrl, method, pathname, body, timeoutMs = 15000) {
   });
 }
 
-function createBrowserPublishBridge({ baseUrl = 'http://127.0.0.1:3000', pollIntervalMs = 700, timeoutMs = 30 * 60 * 1000 } = {}) {
+function createBrowserPublishBridge({ baseUrl = 'http://127.0.0.1:18321', pollIntervalMs = 700, timeoutMs = 30 * 60 * 1000 } = {}) {
   const normalizedBaseUrl = String(baseUrl).replace(/\/$/, '');
 
   const call = (method, pathname, body, requestTimeout = 15000) => requestJson(normalizedBaseUrl, method, pathname, body, requestTimeout);

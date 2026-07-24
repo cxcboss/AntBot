@@ -1,4 +1,4 @@
-const LOCAL_SERVER_BASE = 'http://localhost:3000';
+const LOCAL_SERVER_BASE = 'http://localhost:18321';
 /**
  * 【搬运蚁发布助手】
  * 此类用于自动化视频号发布流程

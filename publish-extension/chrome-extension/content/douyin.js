@@ -1,4 +1,4 @@
-const LOCAL_SERVER_BASE = 'http://localhost:3000';
+const LOCAL_SERVER_BASE = 'http://localhost:18321';
 /**
  * 抖音发布助手 - Content Script
  * 负责在抖音创作者平台 (creator.douyin.com) 自动发布视频：

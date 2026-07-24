@@ -78,6 +78,11 @@ async function openPlaywrightLoginContext(serviceKey, serviceConfig, userId) {
 function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl = null }) {
   _storeRef = store;
   initAppLog();
+
+  // 初始化桥接服务日志
+  const { setLogger: setBridgeLogger } = require('./services/bridgeServiceManager');
+  setBridgeLogger(appLog);
+
   const authContexts = new Map();
 
   const sendWindowState = async (options = {}) => {
@@ -254,12 +259,42 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
   ipcMain.handle('task:stop', async () => { await taskRunner.stop({}); return { stopped: true }; });
   ipcMain.handle('task:stop-one', async (_event, taskId) => taskRunner.stopTask(taskId, {}));
   ipcMain.handle('task:resume-one', async (_event, payload) => taskRunner.resumeTask(payload?.taskId, {}, payload?.task || null));
+
   ipcMain.handle('publish:bridge-status', async () => {
     const { createBrowserPublishBridge } = require('./services/browserPublishBridge');
     const settings = await store.getSettings();
     const config = settings.publish?.browserExtension || {};
-    try { return await createBrowserPublishBridge({ baseUrl: config.baseUrl }).getStatus(); }
-    catch (error) { return { ok: false, status: 'offline', message: error.message }; }
+    const baseUrl = config.baseUrl || 'http://127.0.0.1:18321';
+    appLog('info', `[publish] 检测桥接服务状态, baseUrl: ${baseUrl}`);
+    try {
+      const result = await createBrowserPublishBridge({ baseUrl }).getStatus();
+      appLog('info', `[publish] 桥接服务状态: ${result.status}`);
+      return result;
+    }
+    catch (error) {
+      appLog('error', `[publish] 状态检测失败: ${error.message}`);
+      return { ok: false, status: 'offline', message: error.message };
+    }
+  });
+
+  ipcMain.handle('publish:bridge-start', async () => {
+    appLog('info', '[publish] 启动桥接服务');
+    const { bridgeServiceManager } = require('./services/bridgeServiceManager');
+    const started = await bridgeServiceManager.start();
+    appLog('info', `[publish] 桥接服务启动结果: ${started}`);
+    return { ok: started, status: bridgeServiceManager.getStatus() };
+  });
+
+  ipcMain.handle('publish:bridge-stop', async () => {
+    appLog('info', '[publish] 停止桥接服务');
+    const { bridgeServiceManager } = require('./services/bridgeServiceManager');
+    bridgeServiceManager.stop();
+    return { ok: true, status: bridgeServiceManager.getStatus() };
+  });
+
+  ipcMain.handle('publish:bridge-service-status', async () => {
+    const { bridgeServiceManager } = require('./services/bridgeServiceManager');
+    return bridgeServiceManager.getStatus();
   });
 
   ipcMain.handle('publish:bridge-capabilities', async () => {
@@ -271,31 +306,97 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
   });
 
   ipcMain.handle('publish:start', async (_event, payload) => {
+    appLog('info', '[publish] 开始发布视频');
     const { createBrowserPublishBridge } = require('./services/browserPublishBridge');
     const settings = await store.getSettings();
     const config = settings.publish?.browserExtension || {};
     const videos = Array.isArray(payload?.videos) ? payload.videos : [];
-    if (!videos.length) throw new Error('请先选择视频');
+    if (!videos.length) {
+      appLog('error', '[publish] 错误: 请先选择视频');
+      throw new Error('请先选择视频');
+    }
     const platform = String(payload.platform || settings.publish?.platform || 'videoChannel');
-    const result = await createBrowserPublishBridge({ baseUrl: config.baseUrl, timeoutMs: config.timeoutMs }).publish({
-      videos,
-      settings: payload.settings || {},
-      videoPath: payload.videoPath || path.dirname(videos[0].path || ''),
-      platform: platform === 'videoChannel' ? 'weixin' : platform,
-      requestId: payload.requestId,
-      onProgress: event => {
-        const win = mainWindowRef();
-        if (win && !win.isDestroyed()) win.webContents.send('publish:progress', event);
-      }
-    });
-    return result;
+    appLog('info', `[publish] 视频数量: ${videos.length}, 平台: ${platform}, baseUrl: ${config.baseUrl}`);
+    try {
+      const result = await createBrowserPublishBridge({ baseUrl: config.baseUrl, timeoutMs: config.timeoutMs }).publish({
+        videos,
+        settings: payload.settings || {},
+        videoPath: payload.videoPath || path.dirname(videos[0].path || ''),
+        platform: platform === 'videoChannel' ? 'weixin' : platform,
+        requestId: payload.requestId,
+        onProgress: event => {
+          appLog('info', `[publish] 进度: ${event.type || 'unknown'} - ${event.message || ''}`);
+          const win = mainWindowRef();
+          if (win && !win.isDestroyed()) win.webContents.send('publish:progress', event);
+        }
+      });
+      appLog('info', '[publish] 发布完成');
+      return result;
+    } catch (error) {
+      appLog('error', `[publish] 发布失败: ${error.message}`);
+      throw error;
+    }
   });
 
   ipcMain.handle('publish:stop', async (_event, requestId) => {
+    appLog('info', `[publish] 停止发布: ${requestId}`);
     const { createBrowserPublishBridge } = require('./services/browserPublishBridge');
     const settings = await store.getSettings();
     const config = settings.publish?.browserExtension || {};
     return createBrowserPublishBridge({ baseUrl: config.baseUrl }).invoke('publish.stop', {}, { id: requestId });
+  });
+
+  // 发布记录持久化
+  const PUBLISH_RECORDS_FILE = path.join(os.homedir(), 'AntBot', 'publish-records.json');
+
+  const loadPublishRecords = async () => {
+    try {
+      if (fsSync.existsSync(PUBLISH_RECORDS_FILE)) {
+        const data = await fs.readFile(PUBLISH_RECORDS_FILE, 'utf8');
+        return JSON.parse(data);
+      }
+    } catch (e) {
+      appLog('error', `[publish] 加载发布记录失败: ${e.message}`);
+    }
+    return [];
+  };
+
+  const savePublishRecordsToFile = async (records) => {
+    try {
+      await fs.writeFile(PUBLISH_RECORDS_FILE, JSON.stringify(records, null, 2), 'utf8');
+    } catch (e) {
+      appLog('error', `[publish] 保存发布记录失败: ${e.message}`);
+    }
+  };
+
+  ipcMain.handle('publish:save-record', async (_event, record) => {
+    appLog('info', `[publish] 保存发布记录: ${record.name}`);
+    const records = await loadPublishRecords();
+    records.unshift({ ...record, id: record.id || Date.now(), publishTime: record.publishTime || new Date().toISOString() });
+    await savePublishRecordsToFile(records);
+    return { ok: true };
+  });
+
+  ipcMain.handle('publish:get-records', async () => {
+    return await loadPublishRecords();
+  });
+
+  ipcMain.handle('publish:delete-record', async (_event, recordId) => {
+    appLog('info', `[publish] 删除发布记录: ${recordId}`);
+    let records = await loadPublishRecords();
+    records = records.filter(r => r.id !== recordId);
+    await savePublishRecordsToFile(records);
+    return { ok: true };
+  });
+
+  ipcMain.handle('app:get-video-info', async (_event, videoPath) => {
+    const fsSync = require('node:fs');
+    try {
+      const stat = fsSync.statSync(videoPath);
+      return { size: stat.size, exists: true };
+    } catch {
+      return { size: 0, exists: false };
+    }
   });
 
 
