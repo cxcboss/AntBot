@@ -89,7 +89,15 @@ function switchFeature(feat){
   const titles={main:'主控',edit:'剪辑',publish:'发布','style-ref':'风格参考','subtitle-voice':'字幕与音色'};
   if(el.pageTitle)el.pageTitle.textContent=titles[feat]||feat;
   renderStatus();
+  if(feat==='subtitle-voice') loadPresetVoices();
   if(isMobile())closeSidebar();
+}
+
+/* ── Theme: auto-follow system ── */
+function initTheme(){
+  const mq=window.matchMedia('(prefers-color-scheme:dark)');
+  document.documentElement.classList.toggle('dark',mq.matches);
+  mq.addEventListener('change',e=>{document.documentElement.classList.toggle('dark',e.matches)});
 }
 
 /* ── Resize handle ── */
@@ -164,7 +172,12 @@ async function loadSidebarApiUsage() {
       <div class="sb-quota-details hidden" id="sb-quota-details">
         ${usage.map(u => {
       const pct = u.limit > 0 ? Math.round((u.used / u.limit) * 100) : 0;
-      return `<div class="sb-quota-key"><span class="sb-quota-key-name">${esc(u.keyMasked)}</span><span class="sb-quota-key-val">${u.remaining}/${u.limit}</span></div><div class="sb-quota-bar"><div class="sb-quota-bar-fill" style="width:${pct}%"></div></div>`;
+      const keySeconds = u.remaining > 0 ? Math.floor(u.remaining / requestsPerSecond) : 0;
+      const kh = Math.floor(keySeconds / 3600);
+      const km = Math.floor((keySeconds % 3600) / 60);
+      const ks = keySeconds % 60;
+      const keyDuration = keySeconds <= 0 ? '已用尽' : kh > 0 ? `${kh}时${km}分` : km > 0 ? `${km}分${ks}秒` : `${ks}秒`;
+      return `<div class="sb-quota-key"><span class="sb-quota-key-name">${esc(u.keyMasked)}</span><span class="sb-quota-key-val">${keyDuration}</span></div><div class="sb-quota-bar"><div class="sb-quota-bar-fill" style="width:${pct}%"></div></div>`;
     }).join('')}
         <div class="sb-quota-summary">已用 ${totalUsed} · 失败 ${usage.reduce((s, u) => s + u.failed, 0)} · 限频 ${usage.reduce((s, u) => s + u.rateLimited, 0)}</div>
         <div class="sb-quota-frame-info">当前帧率: 每${frameInterval}秒1帧</div>
@@ -1287,7 +1300,78 @@ function renderVoiceList() {
         S.voices = S.voices.filter(v => v.id !== id);
         window.antbot.saveVoices(S.voices).catch(() => {});
         renderVoiceList();
+        renderPresetVoices();
         toast('已删除', 'info');
+      }
+    });
+  });
+}
+
+/* ── Preset Voices ── */
+const PRESET_MANIFEST_URL = 'https://github.com/cxcboss/antbot-voice-models/releases/download/v1.0/manifest.json';
+const PRESET_BASE_URL = 'https://github.com/cxcboss/antbot-voice-models/releases/download/v1.0/';
+
+async function loadPresetVoices() {
+  const box = document.getElementById('preset-voice-list');
+  if (!box) return;
+  box.innerHTML = '<div class="sv-note">加载中...</div>';
+  try {
+    const res = await fetch(PRESET_MANIFEST_URL);
+    if (!res.ok) throw new Error('fetch failed');
+    const manifest = await res.json();
+    S.presetVoices = manifest;
+    renderPresetVoices();
+  } catch {
+    box.innerHTML = '<div class="sv-note" style="color:var(--destructive)">无法加载预置音色列表</div>';
+  }
+}
+
+function renderPresetVoices() {
+  const box = document.getElementById('preset-voice-list');
+  if (!box || !S.presetVoices?.length) return;
+  const installedIds = new Set((S.voices || []).map(v => v.id));
+  box.innerHTML = S.presetVoices.map(v => {
+    const installed = installedIds.has(v.id);
+    const sizeKB = Math.round(v.size / 1024);
+    return `<div class="voice-item" data-preset-id="${esc(v.id)}">
+      <div class="voice-item-info">
+        <div class="voice-item-name">${esc(v.name)}</div>
+        <div class="voice-item-id">${sizeKB}KB</div>
+      </div>
+      <div class="voice-item-actions">
+        ${installed
+          ? '<span style="color:var(--success);font-size:12px;font-weight:500">✓ 已安装</span>'
+          : `<button class="btn btn-sm btn-primary" data-preset-download="${esc(v.id)}" type="button">下载</button>`}
+      </div>
+    </div>`;
+  }).join('');
+
+  box.querySelectorAll('[data-preset-download]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.presetDownload;
+      const preset = S.presetVoices.find(p => p.id === id);
+      if (!preset) return;
+      btn.disabled = true;
+      btn.textContent = '下载中...';
+      try {
+        const result = await window.antbot.downloadPresetVoice({
+          voiceId: preset.id,
+          voiceName: preset.name,
+          downloadUrl: PRESET_BASE_URL + preset.file
+        });
+        if (result.ok) {
+          toast(`${preset.name} 下载成功`, 'success');
+          await loadVoices();
+          renderPresetVoices();
+        } else {
+          toast(`下载失败: ${result.error}`, 'error');
+          btn.disabled = false;
+          btn.textContent = '下载';
+        }
+      } catch (e) {
+        toast(`下载失败: ${e.message}`, 'error');
+        btn.disabled = false;
+        btn.textContent = '下载';
       }
     });
   });
@@ -1406,8 +1490,10 @@ function bindSubtitleVoiceEvents() {
 
 function bindPublishPage(){
   const pick = document.getElementById('publish-pick-videos-btn');
-  const platform = document.getElementById('publish-platform');
-  const scheduled = document.getElementById('publish-scheduled');
+  const platformBtns = document.querySelectorAll('.ps-platform-btn');
+  const originalToggle = document.getElementById('publish-original-toggle');
+  const scheduledToggle = document.getElementById('publish-scheduled-toggle');
+  const scheduleWrapper = document.getElementById('publish-schedule-wrapper');
   const scheduleMonth = document.getElementById('publish-schedule-month');
   const scheduleDay = document.getElementById('publish-schedule-day');
   const scheduleTime = document.getElementById('publish-schedule-time');
@@ -1486,7 +1572,7 @@ function bindPublishPage(){
   };
 
   const validateSchedule = () => {
-    if (!scheduled.checked) return true;
+    if (!scheduledToggle.classList.contains('on')) return true;
     const month = parseInt(scheduleMonth.value);
     const day = parseInt(scheduleDay.value);
     return isFutureDateTime(month, day, scheduleTime.value);
@@ -1725,16 +1811,37 @@ function bindPublishPage(){
     if (filePaths.length) await addVideos(filePaths);
   });
 
+  // 填充月份下拉
+  scheduleMonth.innerHTML = '';
+  for(let m=1;m<=12;m++){const o=document.createElement('option');o.value=m;o.textContent=m+'月';scheduleMonth.appendChild(o)}
+
+  // 平台按钮
+  let selectedPlatform = 'videoChannel';
+  platformBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      platformBtns.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      selectedPlatform = btn.dataset.platform;
+    });
+  });
+
+  // 开关切换
+  function bindToggle(el, onChange){
+    el.addEventListener('click', () => { el.classList.toggle('on'); onChange(el.classList.contains('on')); });
+  }
+  bindToggle(originalToggle, () => {});
+  bindToggle(scheduledToggle, (on) => {
+    scheduleWrapper.classList.toggle('hidden', !on);
+    scheduleMonth.disabled = !on;
+    scheduleDay.disabled = !on;
+    scheduleTime.disabled = !on;
+    if(on && !scheduleDay.value) setDefaultSchedule();
+    render();
+  });
+
   scheduleMonth?.addEventListener('change', () => { updateDaysSelect(); render(); });
   scheduleDay?.addEventListener('change', render);
   scheduleTime?.addEventListener('change', render);
-  scheduled?.addEventListener('change', () => {
-    scheduleMonth.disabled = !scheduled.checked;
-    scheduleDay.disabled = !scheduled.checked;
-    scheduleTime.disabled = !scheduled.checked;
-    if (scheduled.checked && !scheduleDay.value) setDefaultSchedule();
-    render();
-  });
 
   mainBtn?.addEventListener('click', async () => {
     if (S.publish.running) {
@@ -1759,7 +1866,7 @@ function bindPublishPage(){
       setResult('正在发布...');
       const topics = (document.getElementById('publish-topics').value || '').split(/[ ,，]+/).filter(Boolean);
       let scheduleTimeValue = '';
-      if (scheduled.checked && scheduleDay.value) {
+      if (scheduledToggle.classList.contains('on') && scheduleDay.value) {
         const year = new Date().getFullYear();
         const month = String(scheduleMonth.value).padStart(2, '0');
         const day = String(scheduleDay.value).padStart(2, '0');
@@ -1775,20 +1882,20 @@ function bindPublishPage(){
               requestId: S.publish.requestId + '-' + Date.now(),
               videos: [video],
               videoPath: '',
-              platform: platform.value,
+              platform: selectedPlatform,
               settings: {
                 publishCopy: document.getElementById('publish-copy').value,
                 publishTopics: topics,
-                isOriginal: document.getElementById('publish-original').checked,
-                scheduledPublish: scheduled.checked,
+                isOriginal: originalToggle.classList.contains('on'),
+                scheduledPublish: scheduledToggle.classList.contains('on'),
                 scheduleTime: scheduleTimeValue
               }
             });
-            const record = { path: video.path, name: video.name, success: true, time: new Date(), platform: platform.value };
+            const record = { path: video.path, name: video.name, success: true, time: new Date(), platform: selectedPlatform };
             S.publish.history.unshift(record);
             await savePublishRecord(record);
           } catch(e) {
-            const record = { path: video.path, name: video.name, success: false, time: new Date(), platform: platform.value, error: e.message };
+            const record = { path: video.path, name: video.name, success: false, time: new Date(), platform: selectedPlatform, error: e.message };
             S.publish.history.unshift(record);
             await savePublishRecord(record);
           }
@@ -1880,6 +1987,23 @@ function bind(){
   // Auto-save on settings input change
   document.getElementById('settings-body')?.addEventListener('change',()=>{void saveSettings();});
   document.getElementById('settings-body')?.addEventListener('input',(e)=>{if(e.target.matches('input[type=password],input[type=text],input[type=number]')){clearTimeout(S._settingsSaveTimer);S._settingsSaveTimer=setTimeout(()=>void saveSettings(),800);}});
+  // Reload default styles
+  document.getElementById('reload-default-styles-btn')?.addEventListener('click',async()=>{
+    const btn=document.getElementById('reload-default-styles-btn');
+    if(btn){btn.disabled=true;btn.textContent='加载中...';}
+    try{
+      const result=await window.antbot.reloadDefaultStyles();
+      if(result.ok){
+        toast(`已加载 ${result.count} 个内置风格`,'success');
+        await loadStyles();
+      }else{
+        toast('加载失败: '+result.error,'error');
+      }
+    }catch(e){
+      toast('加载失败: '+e.message,'error');
+    }
+    if(btn){btn.disabled=false;btn.innerHTML='<span class="icon" data-icon="refresh"></span>重新加载内置风格';injectIcons();}
+  });
   // Fetch models button
   document.getElementById('fetch-models-btn')?.addEventListener('click',async()=>{
     const apiKey=[...document.querySelectorAll('#api-keys-list input[name="apiKey"]')].map(e=>e.value.trim()).filter(Boolean)[0]||'';
@@ -2121,6 +2245,35 @@ function bind(){
   bindSubtitleVoiceEvents();
 }
 
+/* ── Batch Clone Voices ── */
+window.batchCloneVoices = async function() {
+  const dir = '/Users/chenxincheng/导出目录/音色';
+  const refText = '生活总在催促我们奔赴前路，我们步履匆匆，追赶时间、奔赴目标，常常在喧嚣里弄丢了平和的自己。其实，人生最珍贵的美好，从不在疾驰的前路，而在细碎温柔的日常里。晨起推开窗，清风裹挟着草木的清香扑面而来，枝头鸟鸣清脆，晨光温柔洒落，驱散一夜的疲惫。午后静坐窗边，泡一杯温热的茶，翻几页闲书，任由时光缓缓流淌。没有琐事的叨扰，没有浮躁的焦虑，这一刻的松弛，便是生活最好的馈赠。';
+  const files = ['TVB女生（内置）.mp3','乌萨奇（内置）.mp3','奶龙（内置）.mp3','小姐姐（内置）.mp3','懒羊羊（内置）.mp3','曼波（内置）.mp3','熊二（内置）.mp3','猪妞（内置）.mp3','蜡笔小新（内置）.mp3','解说小帅（内置）.mp3'];
+  const voices = files.map(f => ({ name: f.replace('.mp3','').replace('（内置）',''), path: dir + '/' + f }));
+
+  const stopListener = window.antbot.onVoiceBatchProgress((p) => {
+    if (p.status === 'done') {
+      console.log('========== 批量克隆完成 ==========');
+      (p.results||[]).forEach(r => console.log(r.ok ? `✅ ${r.name}` : `❌ ${r.name}: ${r.error}`));
+      toast('批量克隆完成', 'success');
+    } else {
+      console.log(`[${p.done+1}/${p.total}] ${p.name} - ${p.step || '处理中'}...`);
+    }
+  });
+
+  toast('开始批量克隆 10 个音色...', 'info');
+  try {
+    const results = await window.antbot.batchCloneVoices({ voices, refText });
+    return results;
+  } catch(e) {
+    toast('批量克隆失败: ' + e.message, 'error');
+  } finally {
+    stopListener?.();
+  }
+};
+console.log('💡 输入 batchCloneVoices() 开始批量克隆 10 个音色');
+
 /* ── Init ── */
 async function init(){
   // Remove splash immediately if anime not loaded, otherwise animate
@@ -2143,7 +2296,7 @@ async function init(){
   }
 
   // Initialize app regardless of splash
-  injectIcons();bind();initResize();initDialogClose();syncSidebar();
+  initTheme();injectIcons();bind();initResize();initDialogClose();syncSidebar();
   await loadUISettings();
   // 先加载风格和音色（本地文件读取很快），再渲染，避免空状态闪烁
   await Promise.all([loadStyles(), loadVoices()]);

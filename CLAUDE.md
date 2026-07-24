@@ -54,7 +54,8 @@ composeEditVideo (smartEditor.js)     →  { outputPath }
 ## Critical Rules
 
 - **Module docs:** Read `docs/modules/*.md` before modifying any service module. Update the doc after changing module behavior.
-- **No gradients:** CSS uses solid colors only. Theme color `var(--brand)` only on key interactive elements.
+- **No gradients:** CSS uses solid colors only. Theme color `var(--primary)` only on key interactive elements.
+- **Design system:** All UI changes MUST follow the design system defined below. Read the "Design System" section before modifying any CSS or adding new components.
 - **No `File.path`:** Electron 35 deprecated it. Use `window.antbot.getPathForFile(file)` (exposes `webUtils.getPathForFile`).
 - **ffmpeg/ffprobe path resolution:** App runs from Electron where `/opt/homebrew/bin` may not be in PATH. Always use `resolveFfmpegBin()` pattern (check `/opt/homebrew/bin`, `/usr/local/bin`, then bare name).
 - **Spawn args:** Never concatenate flags with values in a single string (e.g., `'-q:v 3'` → split to `'-q:v', '3'`). ffmpeg receives it as one arg and fails with exit 234.
@@ -72,6 +73,145 @@ composeEditVideo (smartEditor.js)     →  { outputPath }
 | `dependencyInstaller.js` | `installDependencies` | Parses pip stderr for progress; `PYTHONUNBUFFERED=1` required |
 | `voiceClone.js` | `runVoiceClone` | Thin wrapper; delegates to `autoDubClient` |
 | `store.js` | `getSettings`, `updateSettings` | Deep-merge settings; persisted per-user |
+
+## Design System
+
+**基于 shadcn/ui 设计理念。所有新增 UI 或样式改动必须遵守以下规范。**
+
+设计 token 定义在 `src/renderer/design-tokens.css`，通过 CSS 变量全局生效。图标使用 [Lucide Icons](https://lucide.dev)（`lucide-static` 包），定义在 `src/renderer/icons.js`。
+
+### 主题色
+
+| Token | 亮色 | 暗色 | 用途 |
+|-------|------|------|------|
+| `--primary` | `#0D9488` (Teal-600) | `#5EEAD4` (Teal-300) | 按钮、强调、链接 |
+| `--primary-hover` | `#0F766E` | `#99F6E4` | hover 态 |
+| `--accent` | `#F0FDFA` | `#134E4A` | 选中背景、激活态 |
+| `--accent-foreground` | `#0D9488` | `#5EEAD4` | 选中文字 |
+
+### 语义色
+
+| Token | 色值 | 用途 |
+|-------|------|------|
+| `--success` | `#16A34A` / `#22C55E` | 成功状态、完成 |
+| `--destructive` | `#DC2626` / `#EF4444` | 错误、删除、危险操作 |
+| `--warning` | `#D97706` / `#F59E0B` | 警告、进行中 |
+| `--info` | `#2563EB` / `#3B82F6` | 信息提示 |
+
+每个语义色都有对应的 `-bg` 背景色和 `-foreground` 前景色。
+
+### 基础色
+
+| Token | 亮色 | 暗色 | 用途 |
+|-------|------|------|------|
+| `--background` | `#FAFAFA` | `#09090B` | 页面底色 |
+| `--card` | `#FFFFFF` | `#111113` | 卡片、面板、侧边栏 |
+| `--foreground` | `#0A0A0A` | `#FAFAFA` | 主文字 |
+| `--muted-foreground` | `#78716C` | `#A1A1AA` | 次要文字、标签 |
+| `--border` | `#E7E5E2` | `#27272A` | 边框、分割线 |
+| `--muted` | `#F0EDE8` | `#1C1C1F` | 静默背景、hover |
+| `--secondary` | `#F5F3F0` | `#1C1C1F` | 次级背景 |
+| `--input` | `#E7E5E2` | `#27272A` | 输入框边框 |
+| `--ring` | `#0D9488` | `#5EEAD4` | focus ring |
+
+### 圆角
+
+```css
+--radius-xs:   4px    /* badge、tag */
+--radius-sm:   6px    /* 小按钮 */
+--radius:      8px    /* 默认：输入框、按钮 */
+--radius-lg:   12px   /* 卡片、弹窗内容区 */
+--radius-xl:   16px   /* 对话框、大卡片 */
+--radius-full: 9999px /* 药丸形：进度条、badge */
+```
+
+**规则：** 不要使用 `--r-sm` / `--r-md` / `--r-lg`（已废弃别名），直接用新 token。
+
+### 阴影
+
+```css
+--shadow-xs:  0 1px 2px rgba(0,0,0,0.04)                        /* 卡片静止 */
+--shadow-sm:  0 1px 3px rgba(0,0,0,0.06), 0 1px 2px ...         /* 按钮、小浮层 */
+--shadow:     0 4px 6px -1px rgba(0,0,0,0.07), 0 2px 4px ...    /* 下拉菜单 */
+--shadow-md:  0 10px 15px -3px rgba(0,0,0,0.08), 0 4px 6px ...  /* 弹出层 */
+--shadow-lg:  0 20px 25px -5px rgba(0,0,0,0.1), 0 8px 10px ...  /* 对话框、Toast */
+```
+
+**规则：** 不要硬编码 `box-shadow` 值，统一使用 shadow token。
+
+### 过渡动画
+
+```css
+--transition-fast:   120ms cubic-bezier(0.4, 0, 0.2, 1)  /* hover、focus */
+--transition-normal: 200ms cubic-bezier(0.4, 0, 0.2, 1)  /* 展开/折叠 */
+--transition-slow:   300ms cubic-bezier(0.4, 0, 0.2, 1)  /* 进度条、页面过渡 */
+```
+
+**规则：** 不要硬编码 `transition` 时间和缓动函数，统一使用 transition token。
+
+### 间距
+
+基于 4px 网格。可用 token：`--space-1`(4) / `--space-2`(8) / `--space-3`(12) / `--space-4`(16) / `--space-5`(20) / `--space-6`(24) / `--space-8`(32) / `--space-10`(40) / `--space-12`(48)。
+
+**规则：** 不要使用 5px、7px、9px、10px、11px、14px 等非 4px 倍数值。最接近的 4px 倍数即可。
+
+### 排版
+
+```css
+--font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Inter", sans-serif
+--font-mono: "SF Mono", "Fira Code", "JetBrains Mono", monospace
+```
+
+| 用途 | 字号 | 字重 |
+|------|------|------|
+| 页面标题 (h1) | 18px | 700 |
+| 区块标题 (h2) | 16px | 600 |
+| 卡片标题 (h3) | 15px | 600 |
+| 正文 | 13px | 400 |
+| 辅助文字 | 12px | 400 |
+| 标签/徽章 | 11px | 500 |
+| 极小文字 | 10px | 400 |
+
+### 组件规范
+
+**按钮** — 3 种尺寸 + 4 种变体：
+- `sm`: h-28px, px-10px, text-12px, `--radius-sm`
+- 默认: h-32px, px-14px, text-13px, `--radius`
+- `lg`: h-36px, px-18px, text-14px, `--radius`
+- 变体: `.btn-primary` / `.btn-ghost` / `.btn-danger` / `.btn-sm`
+- 所有按钮必须有 `focus-visible` 样式：`outline: 2px solid var(--ring); outline-offset: 2px`
+
+**输入框** — 统一 h-32px, `--radius`, `--input` 边框, focus 时 `--ring` 边框 + `box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 15%, transparent)`
+
+**卡片** — `--card` 背景, `--border` 边框, `--radius-lg` 圆角, `--shadow-xs` 静止阴影, hover 时边框变深
+
+**对话框** — `--radius-xl` 圆角, `backdrop-filter: blur(4px)`, `--shadow-lg` 阴影, `--popover` 背景
+
+**Toast** — `--radius-lg` 圆角, `--shadow-lg` 阴影, 宽度 320px, 各状态用对应语义色
+
+### 暗色模式
+
+自动跟随系统 `prefers-color-scheme`，通过 `matchMedia` 监听实时切换。`document.documentElement.classList.toggle('dark', isDark)`。
+
+**规则：** 不要添加手动切换按钮。不要使用 `@media(prefers-color-scheme:dark)` 做暗色适配——所有暗色变量在 `.dark` 选择器中定义。
+
+### 图标
+
+使用 `lucide-static` 包。在 `src/renderer/icons.js` 中注册，HTML 中通过 `data-icon="name"` 使用，JS 中通过 `injectIcons()` 渲染。
+
+**新增图标的步骤：**
+1. 在 `icons.js` 顶部 import 中添加 Lucide 图标名
+2. 在 `ICONS` 对象中添加映射（使用 `clean()` 或 `sm()` 包装）
+3. HTML 中使用 `<span class="icon" data-icon="xxx"></span>`
+
+### 禁止事项
+
+- ❌ 不使用渐变（gradient）
+- ❌ 不硬编码颜色值（必须用 CSS 变量）
+- ❌ 不硬编码阴影/圆角/过渡值（必须用 token）
+- ❌ 不过度使用主题色（仅关键交互元素）
+- ❌ 不使用 `@media(prefers-color-scheme:dark)`（用 `.dark` class）
+- ❌ 不使用废弃别名 `--brand` / `--bg` / `--surface` / `--t2` / `--t3` / `--r-sm` 等
 
 ## Agent skills
 

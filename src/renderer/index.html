@@ -28,10 +28,10 @@
       <!-- 功能面板 -->
       <div class="sb-panel" id="sbpanel-features">
         <button class="sb-btn sb-feat active" data-feat="main" type="button"><span class="icon" data-icon="play"></span><span>主控</span></button>
-        <button class="sb-btn sb-feat" data-feat="edit" type="button"><span class="icon" data-icon="settings"></span><span>剪辑</span></button>
+        <button class="sb-btn sb-feat" data-feat="edit" type="button"><span class="icon" data-icon="scissors"></span><span>剪辑</span></button>
         <button class="sb-btn sb-feat" data-feat="publish" type="button"><span class="icon" data-icon="send"></span><span>发布</span></button>
-        <button class="sb-btn sb-feat" data-feat="style-ref" type="button"><span class="icon" data-icon="mic"></span><span>风格参考</span></button>
-        <button class="sb-btn sb-feat" data-feat="subtitle-voice" type="button"><span class="icon" data-icon="settings"></span><span>字幕与音色</span></button>
+        <button class="sb-btn sb-feat" data-feat="style-ref" type="button"><span class="icon" data-icon="sparkle"></span><span>风格参考</span></button>
+        <button class="sb-btn sb-feat" data-feat="subtitle-voice" type="button"><span class="icon" data-icon="mic"></span><span>字幕与音色</span></button>
       </div>
 
       <!-- 状态面板 -->
@@ -144,28 +144,32 @@
             </div>
             <!-- 发布设置 -->
             <section class="publish-settings-card">
-              <div class="publish-form">
-                <div class="publish-form-row">
-                  <label>平台<select id="publish-platform"><option value="videoChannel">视频号</option><option value="douyin">抖音</option></select></label>
-                  <label class="publish-check"><input id="publish-original" type="checkbox" /> 声明原创</label>
-                  <label class="publish-check"><input id="publish-scheduled" type="checkbox" /> 定时发布</label>
+              <!-- 平台选择 -->
+              <div class="ps-row">
+                <span class="ps-label">平台</span>
+                <div class="ps-platform-btns">
+                  <button class="ps-platform-btn active" data-platform="videoChannel" type="button">视频号</button>
+                  <button class="ps-platform-btn" data-platform="douyin" type="button">抖音</button>
                 </div>
-                <div class="publish-form-row">
-                  <label>发布文案<textarea id="publish-copy" rows="2" placeholder="可选；留空时使用默认规则"></textarea></label>
-                  <label>话题标签<input id="publish-topics" type="text" placeholder="#动画 #游戏视频" /></label>
+                <div class="ps-toggles">
+                  <label class="ps-toggle-label"><span class="ps-toggle" id="publish-original-toggle"></span><span>原创</span></label>
+                  <label class="ps-toggle-label"><span class="ps-toggle" id="publish-scheduled-toggle"></span><span>定时</span></label>
                 </div>
-                <div class="publish-schedule-wrapper" id="publish-schedule-wrapper">
-                  <input id="publish-schedule-time" type="time" value="10:30" disabled />
-                  <div class="publish-schedule-date-row">
-                    <select id="publish-schedule-month" disabled>
-                      <option value="1">1月</option><option value="2">2月</option><option value="3">3月</option>
-                      <option value="4">4月</option><option value="5">5月</option><option value="6">6月</option>
-                      <option value="7">7月</option><option value="8">8月</option><option value="9">9月</option>
-                      <option value="10">10月</option><option value="11">11月</option><option value="12">12月</option>
-                    </select>
-                    <select id="publish-schedule-day" disabled></select>
-                  </div>
-                </div>
+              </div>
+              <!-- 定时选择（默认隐藏） -->
+              <div class="ps-schedule hidden" id="publish-schedule-wrapper">
+                <input id="publish-schedule-time" type="time" value="10:30" disabled />
+                <select id="publish-schedule-month" disabled></select>
+                <select id="publish-schedule-day" disabled></select>
+              </div>
+              <!-- 文案 + 话题 -->
+              <div class="ps-field">
+                <label class="ps-field-label">发布文案</label>
+                <textarea id="publish-copy" rows="2" placeholder="可选；留空时使用默认规则"></textarea>
+              </div>
+              <div class="ps-field">
+                <label class="ps-field-label">话题标签</label>
+                <input id="publish-topics" type="text" placeholder="#动画 #游戏视频" />
               </div>
             </section>
             <!-- 底部控制栏 -->
@@ -230,6 +234,13 @@
               <h3 class="sv-title">音色克隆</h3>
               <p class="sv-desc">上传音频样本，克隆专属音色</p>
               <div class="voice-list" id="voice-list"></div>
+
+              <!-- 预置音色下载 -->
+              <div class="sv-sep"></div>
+              <h3 class="sv-title">预置音色</h3>
+              <p class="sv-desc">一键下载内置音色，无需克隆</p>
+              <div id="preset-voice-list" class="voice-list"></div>
+
               <div class="sv-sep"></div>
               <div class="voice-dropzone" id="voice-dropzone">
                 <span class="icon" data-icon="mic"></span>
@@ -290,6 +301,11 @@
       <div class="s-hint">需要选取支持识别图片的模型</div>
       <div class="s-row"><span class="s-label">Base URL</span><input id="s-apiBaseUrl" type="text" placeholder="https://apihub.agnes-ai.com/v1" /></div>
       <div class="s-row"><span class="s-label">选择模型</span><select id="s-apiModelId"><option value="">请先获取模型</option></select></div>
+
+      <div class="s-divider"></div>
+
+      <div class="s-section-label">风格与音色</div>
+      <div class="s-row"><button type="button" id="reload-default-styles-btn" class="btn btn-ghost"><span class="icon" data-icon="refresh"></span>重新加载内置风格</button></div>
 
       <div class="s-divider"></div>
 

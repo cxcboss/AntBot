@@ -221,6 +221,74 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
     }
   });
 
+  // 批量克隆音色（临时功能，用于预置音色）
+  ipcMain.handle('voice:batch-clone', async (_event, { voices, refText }) => {
+    const settings = await store.getSettings();
+    const win = mainWindowRef();
+    const results = [];
+    for (const v of voices) {
+      if (win && !win.isDestroyed()) win.webContents.send('voice:batch-progress', { name: v.name, status: 'cloning', total: voices.length, done: results.length });
+      try {
+        const result = await runVoiceClone({ samplePath: v.path, referenceText: refText, profileName: v.name, language: 'zh' }, settings, {
+          log: () => {},
+          progress: (p) => { if (win && !win.isDestroyed()) win.webContents.send('voice:batch-progress', { name: v.name, status: 'cloning', step: p.step, percent: p.percent, total: voices.length, done: results.length }); }
+        });
+        results.push({ name: v.name, ok: true, voiceId: result.voiceId });
+      } catch (e) {
+        results.push({ name: v.name, ok: false, error: e.message });
+      }
+    }
+    if (win && !win.isDestroyed()) win.webContents.send('voice:batch-progress', { name: '', status: 'done', total: voices.length, done: results.length, results });
+    return results;
+  });
+
+  // 下载预置音色
+  ipcMain.handle('voice:download-preset', async (_event, { voiceId, voiceName, downloadUrl }) => {
+    const extractZip = (await import('extract-zip')).default;
+    const dataDir = path.join(os.homedir(), 'AntBot');
+    const profilesDir = path.join(dataDir, 'voicebox-data', 'profiles');
+    const profileDir = path.join(profilesDir, voiceId);
+    const tmpDir = path.join(os.tmpdir(), `voice-dl-${voiceId}`);
+    const zipPath = path.join(os.tmpdir(), `voice-${voiceId}.zip`);
+
+    try {
+      await fs.mkdir(profileDir, { recursive: true });
+      await fs.mkdir(tmpDir, { recursive: true });
+
+      // 下载 zip
+      const res = await fetch(downloadUrl);
+      if (!res.ok) throw new Error(`下载失败: HTTP ${res.status}`);
+      const buf = Buffer.from(await res.arrayBuffer());
+      await fs.writeFile(zipPath, buf);
+
+      // 解压
+      await extractZip(zipPath, { dir: tmpDir });
+
+      // 复制 WAV 到 profile 目录
+      const wavFile = (await fs.readdir(tmpDir)).find(f => f.endsWith('.wav'));
+      if (!wavFile) throw new Error('zip 中未找到 WAV 文件');
+      await fs.copyFile(path.join(tmpDir, wavFile), path.join(profileDir, 'ref.wav'));
+
+      // 更新 voices.json
+      const voicesPath = path.join(dataDir, 'voices.json');
+      let voices = [];
+      try { voices = JSON.parse(await fs.readFile(voicesPath, 'utf-8')); } catch {}
+      if (!voices.find(v => v.id === voiceId)) {
+        voices.push({ id: voiceId, name: voiceName });
+        await fs.writeFile(voicesPath, JSON.stringify(voices, null, 2));
+      }
+
+      appLog('info', `预置音色下载完成: ${voiceName} (${voiceId})`);
+      return { ok: true };
+    } catch (e) {
+      appLog('error', `预置音色下载失败: ${e.message}`);
+      return { ok: false, error: e.message };
+    } finally {
+      await fs.unlink(zipPath).catch(() => {});
+      await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
   ipcMain.handle('dialog:pick-audio-file', async () => {
     const result = await dialog.showOpenDialog({ title: '选择语音样本文件', properties: ['openFile'], filters: [{ name: 'Audio', extensions: ['wav', 'mp3', 'm4a', 'aac', 'flac', 'ogg'] }] });
     return result.canceled || !result.filePaths?.length ? '' : result.filePaths[0];
@@ -1382,6 +1450,19 @@ except Exception as e:
     return result.canceled || !result.filePaths?.length ? '' : result.filePaths[0];
   });
 
+  const BUILTIN_STYLES = [
+    {id:'builtin-1',name:'电影解说',prompt:'你是一位专业的电影解说博主。文案风格要求：\n- 开头用一句话抓住注意力，制造悬念或抛出问题\n- 用“你敢信”“谁能想到”“万万没想到”等口语化表达制造节奏感\n- 善用短句推进剧情，三五个字就换一个画面\n- 关键情节用反问句引导观众思考\n- 人物对话用间接引述，保持解说节奏不被打断\n- 适当加入个人点评，但不剧透结局\n- 结尾留悬念或升华主题，引导互动\n- 全程口语化，像在跟朋友聊天一样自然',type:'text',builtin:true},
+    {id:'builtin-2',name:'探店vlog',prompt:'你是一位真实的探店美食博主。文案风格要求：\n- 以第一人称视角叙述，像在带朋友逛店\n- 开头交代店铺背景或推荐理由，制造期待感\n- 描述食物时用具体的感官词：色泽、香气、口感、温度\n- 用“绝了”“真的会谢”“家人们谁懂啊”等当下流行口语\n- 价格和分量要具体提及，增加可信度\n- 适当吐槽不好的地方，显得真实不做作\n- 推荐必点菜品，给出明确建议\n- 结尾总结值不值得来，给出评分或推荐指数',type:'text',builtin:true},
+    {id:'builtin-3',name:'儿童游戏',prompt:'你是一位活泼的儿童游戏内容创作者。文案风格要求：\n- 语速节奏明快，句子短小，每句不超过10个字\n- 大量使用感叹句和拟声词：“哇！”“叮咚！”“嘭！”\n- 用小朋友能理解的简单词汇，避免抽象概念\n- 加入互动引导：“小朋友们，你们猜猜看？”“一起来数一数！”\n- 用夸张的语气表达惊喜和发现\n- 每个步骤都用“首先”“然后”“接下来”清晰串联\n- 传递正向价值观：分享、勇敢、好奇心\n- 结尾用鼓励的话：“你真棒！下次我们再一起玩哦！”',type:'text',builtin:true},
+    {id:'builtin-4',name:'儿童手工',prompt:'你是一位温柔耐心的手工教学博主。文案风格要求：\n- 开头展示成品，用“只需要三步”“超级简单”降低门槛\n- 材料清单用口语化描述：“找一张彩色纸”“拿出你的小剪刀”\n- 每个步骤配一句简短说明，节奏平稳不急躁\n- 用鼓励性语言：“没关系，歪一点也很可爱”\n- 适当加入小贴士和变化玩法\n- 用“小朋友们”“宝贝们”等亲切称呼\n- 强调安全提醒时语气温和不说教\n- 结尾鼓励展示作品，培养成就感',type:'text',builtin:true},
+    {id:'builtin-5',name:'生活日常',prompt:'你是一位有温度的生活记录者。文案风格要求：\n- 用细腻的观察切入日常生活的小场景\n- 语言平实但有画面感，像在写日记\n- 善用五感描写：看到什么、听到什么、闻到什么\n- 在平凡小事中发现意义，自然升华但不煽情\n- 用“你会发现”“其实”“说真的”等过渡词拉近距离\n- 适当幽默自嘲，不端着\n- 情感表达克制真实，不堆砌形容词\n- 结尾回扣开头，给人回味感',type:'text',builtin:true},
+    {id:'builtin-6',name:'知识科普',prompt:'你是一位深入浅出的知识科普博主。文案风格要求：\n- 开头抛出一个反常识的问题或现象，激发好奇心\n- 用类比和比喻解释复杂概念：“你可以把它想象成...”\n- 数据和结论要有出处感，用“研究发现”“数据显示”\n- 逻辑链条清晰：现象→原因→原理→应用\n- 适当用“换句话说”“通俗来讲”做转折\n- 避免专业术语堆砌，必须用时要立刻解释\n- 在关键节点设置小结，帮助观众跟上思路\n- 结尾回扣主题，给出实用建议或延伸思考',type:'text',builtin:true},
+    {id:'builtin-7',name:'搞笑段子',prompt:'你是一位节奏感极强的搞笑内容创作者。文案风格要求：\n- 铺垫要短，包袱要快，三句话内必须出笑点\n- 用反转制造意外感：“我以为...结果...”\n- 善用夸张和对比，把小事说大、大事说小\n- 大量使用网络热梗和流行语，但要自然不生硬\n- 吐槽要有对象感，像在跟观众一起吐槽\n- 语气要有表演感，可以用“请问”“不是”“凭什么”\n- 节奏上注意停顿和重音的暗示\n- 结尾要么神转折，要么戛然而止留回味',type:'text',builtin:true},
+    {id:'builtin-8',name:'情感文案',prompt:'你是一位有洞察力的情感文案创作者。文案风格要求：\n- 以一个具体场景或细节切入，不空谈道理\n- 语言偏文艺但不矫情，用短句营造节奏感\n- 善用第二人称“你”，让观众有代入感\n- 情感递进：场景→感受→思考→领悟\n- 金句要精炼，适合截图分享\n- 用“后来才明白”“终于发现”等顿悟式表达\n- 不说教不灌输，引导观众自己感受\n- 结尾留白，给读者思考空间',type:'text',builtin:true},
+    {id:'builtin-9',name:'美食制作',prompt:'你是一位有烟火气的美食制作博主。文案风格要求：\n- 开头交代菜品故事或季节背景，营造氛围\n- 食材描述具体到量：“两勺生抽”“一小撮盐”\n- 关键步骤用感官词描述状态：“煸到微微焦黄”“听到滋滋响”\n- 语气温暖亲切，像在厨房边做边聊\n- 穿插小技巧和替代方案：“没有XX可以用YY代替”\n- 用“这个时候”“接下来”“等到”串联步骤\n- 适当加入家常感悟，增加人情味\n- 结尾描述成品和品尝感受，激发食欲',type:'text',builtin:true},
+    {id:'builtin-10',name:'旅行记录',prompt:'你是一位有审美感的旅行记录者。文案风格要求：\n- 开头用地点和第一印象切入，制造向往感\n- 描写风景时注重视觉层次：色彩、光影、空间感\n- 用五感丰富画面：风声、温度、气味、触感\n- 穿插当地人文故事或历史小知识\n- 推荐路线和时间要具体实用\n- 用“如果你也来”“建议你一定要”等推荐句式\n- 适当表达个人感受，但不滥情\n- 结尾升华旅行意义，激发出发的冲动',type:'text',builtin:true},
+  ];
+
   // ── Style reference persistence ──
   async function getStylesFilePath() {
     const settings = await store.getSettings();
@@ -1391,13 +1472,32 @@ except Exception as e:
   }
 
   ipcMain.handle('styles:load', async () => {
+    const filePath = await getStylesFilePath();
+    let styles = [];
     try {
-      const filePath = await getStylesFilePath();
-      const raw = await fs.readFile(filePath, 'utf-8');
-      return JSON.parse(raw);
-    } catch {
-      return [];
+      styles = JSON.parse(await fs.readFile(filePath, 'utf-8'));
+    } catch {}
+
+    // 合并内置风格（仅首次）
+    const hasBuiltin = styles.some(s => s.builtin);
+    if (!hasBuiltin && BUILTIN_STYLES.length) {
+      styles = [...BUILTIN_STYLES, ...styles];
+      try { await fs.writeFile(filePath, JSON.stringify(styles, null, 2), 'utf-8'); } catch {}
+      appLog('info', `已合并 ${BUILTIN_STYLES.length} 个内置风格`);
     }
+
+    return styles;
+  });
+
+  ipcMain.handle('styles:reload-defaults', async () => {
+    const filePath = await getStylesFilePath();
+    let styles = [];
+    try { styles = JSON.parse(await fs.readFile(filePath, 'utf-8')); } catch {}
+    styles = styles.filter(s => !s.builtin);
+    styles = [...BUILTIN_STYLES, ...styles];
+    await fs.writeFile(filePath, JSON.stringify(styles, null, 2), 'utf-8');
+    appLog('info', `重新加载了 ${BUILTIN_STYLES.length} 个内置风格`);
+    return { ok: true, count: BUILTIN_STYLES.length, styles };
   });
 
   ipcMain.handle('styles:save', async (_event, styles) => {

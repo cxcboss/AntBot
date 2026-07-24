@@ -1,0 +1,171 @@
+/**
+ * AntBot Design Token System
+ * Based on shadcn/ui design principles
+ * Theme: Teal (#0D9488)
+ */
+
+:root {
+  color-scheme: light;
+
+  /* ── 基础色 ── */
+  --background:            #FAFAFA;
+  --foreground:            #0A0A0A;
+
+  --card:                  #FFFFFF;
+  --card-foreground:       #0A0A0A;
+
+  --popover:               #FFFFFF;
+  --popover-foreground:    #0A0A0A;
+
+  /* ── 品牌色 (Teal) ── */
+  --primary:               #0D9488;
+  --primary-hover:         #0F766E;
+  --primary-foreground:    #FFFFFF;
+
+  --secondary:             #F5F3F0;
+  --secondary-foreground:  #1A1D23;
+
+  --muted:                 #F0EDE8;
+  --muted-foreground:      #78716C;
+
+  --accent:                #F0FDFA;
+  --accent-foreground:     #0D9488;
+
+  /* ── 语义色 ── */
+  --destructive:           #DC2626;
+  --destructive-foreground:#FFFFFF;
+  --success:               #16A34A;
+  --success-foreground:    #FFFFFF;
+  --warning:               #D97706;
+  --warning-foreground:    #FFFFFF;
+  --info:                  #2563EB;
+  --info-foreground:       #FFFFFF;
+
+  /* ── 状态背景 ── */
+  --destructive-bg:        #FEF2F2;
+  --success-bg:            #F0FDF4;
+  --warning-bg:            #FFFBEB;
+  --info-bg:               #EFF6FF;
+
+  /* ── 边框与输入 ── */
+  --border:                #E7E5E2;
+  --input:                 #E7E5E2;
+  --ring:                  #0D9488;
+
+  /* ── 圆角 ── */
+  --radius-xs:             4px;
+  --radius-sm:             6px;
+  --radius:                8px;
+  --radius-md:             8px;
+  --radius-lg:             12px;
+  --radius-xl:             16px;
+  --radius-full:           9999px;
+
+  /* ── 阴影 ── */
+  --shadow-xs:             0 1px 2px rgba(0,0,0,0.04);
+  --shadow-sm:             0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow:                0 4px 6px -1px rgba(0,0,0,0.07), 0 2px 4px -2px rgba(0,0,0,0.05);
+  --shadow-md:             0 10px 15px -3px rgba(0,0,0,0.08), 0 4px 6px -4px rgba(0,0,0,0.04);
+  --shadow-lg:             0 20px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.06);
+
+  /* ── 过渡 ── */
+  --transition-fast:       120ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-normal:     200ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow:       300ms cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ── 排版 ── */
+  --font-sans:             -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Inter", sans-serif;
+  --font-mono:             "SF Mono", "Fira Code", "JetBrains Mono", monospace;
+
+  /* ── 间距 (4px 基准) ── */
+  --space-0:   0;
+  --space-1:   4px;
+  --space-2:   8px;
+  --space-3:   12px;
+  --space-4:   16px;
+  --space-5:   20px;
+  --space-6:   24px;
+  --space-8:   32px;
+  --space-10:  40px;
+  --space-12:  48px;
+  --space-16:  64px;
+
+  /* ── 布局 ── */
+  --sidebar-w:             220px;
+  --titlebar-h:            52px;
+}
+
+/* ── 暗色模式 (class-based) ── */
+.dark {
+  color-scheme: dark;
+
+  --background:            #09090B;
+  --foreground:            #FAFAFA;
+
+  --card:                  #111113;
+  --card-foreground:       #FAFAFA;
+
+  --popover:               #111113;
+  --popover-foreground:    #FAFAFA;
+
+  --primary:               #5EEAD4;
+  --primary-hover:         #99F6E4;
+  --primary-foreground:    #042F2E;
+
+  --secondary:             #1C1C1F;
+  --secondary-foreground:  #FAFAFA;
+
+  --muted:                 #1C1C1F;
+  --muted-foreground:      #A1A1AA;
+
+  --accent:                #134E4A;
+  --accent-foreground:     #5EEAD4;
+
+  --destructive:           #EF4444;
+  --destructive-foreground:#FFFFFF;
+  --success:               #22C55E;
+  --success-foreground:    #FFFFFF;
+  --warning:               #F59E0B;
+  --warning-foreground:    #FFFFFF;
+  --info:                  #3B82F6;
+  --info-foreground:       #FFFFFF;
+
+  --destructive-bg:        #450A0A;
+  --success-bg:            #052E16;
+  --warning-bg:            #451A03;
+  --info-bg:               #172554;
+
+  --border:                #27272A;
+  --input:                 #27272A;
+  --ring:                  #5EEAD4;
+
+  --shadow-xs:             0 1px 2px rgba(0,0,0,0.2);
+  --shadow-sm:             0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
+  --shadow:                0 4px 6px -1px rgba(0,0,0,0.35), 0 2px 4px -2px rgba(0,0,0,0.25);
+  --shadow-md:             0 10px 15px -3px rgba(0,0,0,0.4), 0 4px 6px -4px rgba(0,0,0,0.3);
+  --shadow-lg:             0 20px 25px -5px rgba(0,0,0,0.5), 0 8px 10px -6px rgba(0,0,0,0.35);
+}
+
+/* ── 向后兼容别名 (迁移期间) ── */
+:root {
+  --brand:                 var(--primary);
+  --brand-hover:           var(--primary-hover);
+  --brand-bg:              var(--accent);
+  --bg:                    var(--background);
+  --surface:               var(--card);
+  --s-soft:                var(--secondary);
+  --s-muted:               var(--muted);
+  --text:                  var(--foreground);
+  --t2:                    var(--muted-foreground);
+  --t3:                    color-mix(in srgb, var(--muted-foreground) 60%, transparent);
+  --green:                 var(--success);
+  --green-bg:              var(--success-bg);
+  --red:                   var(--destructive);
+  --red-bg:                var(--destructive-bg);
+  --amber:                 var(--warning);
+  --amber-bg:              var(--warning-bg);
+  --border-s:              color-mix(in srgb, var(--border) 70%, var(--foreground));
+  --r-sm:                  var(--radius-sm);
+  --r-md:                  var(--radius-lg);
+  --r-lg:                  var(--radius-xl);
+}
