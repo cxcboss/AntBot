@@ -49,7 +49,7 @@ const compact=(s,n=160)=>String(s||'').replace(/\s+/g,' ').slice(0,n);
 const fmtDate=(v)=>{if(!v)return'--';const d=new Date(v);if(+isNaN(d))return String(v);return`${d.getMonth()+1}月${d.getDate()}日 ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;};
 const fmtDay=(v)=>{if(!v)return'';const d=new Date(v);if(+isNaN(d))return'';return`${d.getMonth()+1}月${d.getDate()}日`;};
 const merge=(t,s)=>{if(!s||typeof s!=='object')return t;for(const[k,v] of Object.entries(s)){if(Array.isArray(v))t[k]=v.slice();else if(v&&typeof v==='object'){if(!t[k]||typeof t[k]!=='object')t[k]={};merge(t[k],v);}else t[k]=v;}return t;};
-const statusMap={queued:'等待',pending:'等待',running:'执行中',completed:'成功',failed:'失败',stopped:'已停止',partial_failed:'部分失败'};
+const statusMap={queued:'等待',pending:'等待',running:'执行中',completed:'成功',warning:'部分完成',failed:'失败',stopped:'已停止',partial_failed:'部分失败'};
 const statusText=(s)=>statusMap[s]||s;
 
 /* ── Icons ── */
@@ -116,7 +116,7 @@ function initDialogClose(){document.querySelectorAll('dialog.dlg').forEach(dlg=>
 /* ── Format bubble text ── */
 function formatBubbleText(raw){
   if(!raw)return'';const lines=raw.split(/\r?\n/).filter(l=>l.trim());
-  return lines.map((line,i)=>{const num=`${i+1}、`;const f=line.replace(/https?:\/\/[^\s,，]+/g,url=>url.slice(-5));return num+esc(f)}).join('\n');
+  return lines.map((line,i)=>{const num=`${i+1}、`;const f=line.replace(/https?:\/\/[^\s,，]+/g,url=>{try{const u=new URL(url);const path=u.pathname.length>15?u.pathname.slice(0,15)+'...':'';return u.hostname+path}catch{return url.slice(0,30)+'...'}});return num+esc(f)}).join('\n');
 }
 function makeBubbleHtml(raw){
   const formatted=formatBubbleText(raw);
@@ -221,7 +221,13 @@ function taskCard(t,live=false){
   const statusLabel=retrying?`重试中 (${t.retryCount})`:statusText(st);
   const canSkip=live&&['queued','pending'].includes(st);
   const canCancel=live&&['queued','pending','running'].includes(st);
-  return`<div class="task ${esc(st)}"><div class="task-head"><div class="task-title">${esc(title)}</div><div class="task-badge">${esc(statusLabel)}</div></div><div class="task-bar"><div class="task-bar-in" style="width:${pg}%"></div></div>${(canSkip||canCancel)?`<div class="task-acts">${canSkip?`<button class="task-btn skip" data-stop="${esc(t.id)}">跳过</button>`:''}${canCancel?`<button class="task-btn cancel" data-stop="${esc(t.id)}">取消</button>`:''}</div>`:''}</div>`;
+  const canRetry=live&&['failed'].includes(st);
+  const msg=t.message?`<div class="task-msg">${esc(t.message)}</div>`:'';
+  const acts=[];
+  if(canSkip)acts.push(`<button class="task-btn skip" data-skip="${esc(t.id)}">跳过</button>`);
+  if(canCancel)acts.push(`<button class="task-btn cancel" data-stop="${esc(t.id)}">取消</button>`);
+  if(canRetry)acts.push(`<button class="task-btn skip" data-retry="${esc(t.id)}">重试</button>`);
+  return`<div class="task ${esc(st)}"><div class="task-head"><div class="task-title">${esc(title)}</div><div class="task-badge">${esc(statusLabel)}</div></div><div class="task-bar"><div class="task-bar-in" style="width:${pg}%"></div></div>${msg}${acts.length?`<div class="task-acts">${acts.join('')}</div>`:''}</div>`;
 }
 function renderChat(opts={}){
   if(!el.stream)return;const stick=opts.stick,vis=(S.history||[]).slice(0,S.chatCount).reverse(),lg=liveGroups();
@@ -1204,7 +1210,7 @@ async function checkVoicebox() {
 
 /* ── Actions ── */
 async function startTasks(){const raw=el.input?.value?.trim();if(!raw){toast('请输入任务','error');return}if(!S.editDefaults?.style&&!S.selectedStyle){toast('建议先在底部菜单选择风格，否则剪辑将无风格指导','info')}try{const r=await window.antbot.startTasks(raw);appendPending({runId:r.runId,inputText:raw});el.input.value='';autoInput();queuePreview();toast(r.queued?`已排队 (${r.queuePosition})`:`已启动 ${r.taskCount} 条`,'success');renderChat({stick:true})}catch(e){toast(`失败: ${e.message}`,'error')}}
-async function stopTasks(){try{await window.antbot.stopTasks();toast('已停止','success');await refreshAppState().catch(()=>{})}catch(e){toast(`失败: ${e.message}`,'error')}}
+async function stopTasks(){if(!window.confirm('确认停止所有任务？'))return;try{await window.antbot.stopTasks();toast('已停止','success');await refreshAppState().catch(()=>{})}catch(e){toast(`失败: ${e.message}`,'error')}}
 async function saveSettings(){
   try{
     const form=readForm();
@@ -2051,7 +2057,19 @@ function bind(){
   el.input?.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){e.preventDefault();void startTasks()}});
   el.runBtn?.addEventListener('click',()=>void startTasks());
   // Chat actions
-  el.stream?.addEventListener('click',e=>{const s=e.target.closest('[data-stop]');if(s){void window.antbot.stopTask(s.dataset.stop).then(()=>toast('已停止','success')).catch(err=>toast(err.message,'error'))}});
+  el.stream?.addEventListener('click',e=>{
+    const stopBtn=e.target.closest('[data-stop]');
+    const skipBtn=e.target.closest('[data-skip]');
+    const retryBtn=e.target.closest('[data-retry]');
+    if(stopBtn){void window.antbot.stopTask(stopBtn.dataset.stop).then(()=>toast('已停止','success')).catch(err=>toast(err.message,'error'))}
+    if(skipBtn){void window.antbot.stopTask(skipBtn.dataset.skip).then(()=>toast('已跳过','success')).catch(err=>toast(err.message,'error'))}
+    if(retryBtn){
+      const taskId=retryBtn.dataset.retry;
+      // 从当前进度中找到任务信息进行重试
+      const task=S.progress?.tasks?.find(t=>t.id===taskId);
+      if(task){void window.antbot.resumeTask({taskId,rawLine:task.rawLine||''}).then(()=>toast('已重试','success')).catch(err=>toast(err.message,'error'))}
+    }
+  });
   // Chips
   el.chips?.addEventListener('click',e=>{
     const tgt=e.target.closest('[data-act]');if(!tgt)return;

@@ -244,13 +244,15 @@ class TaskRunner {
     const requestUserId = typeof requestUser === 'string'
       ? String(requestUser || '').trim()
       : String(requestUser?.id || requestUser?.userId || '').trim();
-    if (this.running && this.currentJob?.userId && requestUserId && this.currentJob.userId !== requestUserId) {
+    // 单用户模式：requestUserId 为空时跳过用户校验
+    if (requestUserId && this.running && this.currentJob?.userId && this.currentJob.userId !== requestUserId) {
       throw new Error(`当前正在执行的是 ${this.currentJob.userName || '其他用户'} 的任务，不能从当前用户停止。`);
     }
 
     let changed = false;
 
-    if (this.running && this.currentJob?.userId === requestUserId && this.currentTaskId) {
+    // 设置停止标志（单用户模式直接设置）
+    if (this.running && this.currentTaskId) {
       this.stopRequested = true;
       changed = true;
     }
@@ -264,7 +266,7 @@ class TaskRunner {
     }
 
     for (const row of this.progressRows) {
-      if (row.userId !== requestUserId) {
+      if (requestUserId && row.userId !== requestUserId) {
         continue;
       }
       if (row.id === this.currentTaskId && row.status === 'running') {
@@ -574,8 +576,8 @@ class TaskRunner {
       publishCopy: task.publishCopy || '',
       publishTopics: Array.isArray(task.publishTopics) ? task.publishTopics.slice() : [],
       publishAt: task.publishAt instanceof Date
-        ? task.publishAt.toISOString()
-        : (task.publishAt || '')
+        ? task.publishAt
+        : (task.publishAt ? new Date(task.publishAt) : null)
     };
   }
 
@@ -795,13 +797,17 @@ class TaskRunner {
 
           let subtitleResult = { subtitlePath: '' };
           if (needsSubtitleFile) {
+            // 重试时清理旧字幕文件
+            const ttf = taskTempFiles.get(task.id);
+            if (ttf?.subtitlePath) {
+              try { await fs.rm(ttf.subtitlePath, { force: true }); } catch {}
+            }
             subtitleResult = await this.runStep(task, 'subtitle', () => generateSubtitle({
               task, tempDir: mainControlCacheDir, baseName, settings,
               inputVideoPath: dlResult.outputPath,
               log: (msg) => this.log(task.id, msg)
             }), 50);
             // #1: 记录字幕文件路径
-            const ttf = taskTempFiles.get(task.id);
             if (ttf) ttf.subtitlePath = subtitleResult.subtitlePath;
           } else {
             this.setTaskState(task.id, { step: STEP_NAMES.subtitle, progress: 50, message: '字幕与旁白已关闭，跳过字幕生成' });
@@ -856,7 +862,9 @@ class TaskRunner {
             ? publishResult.platforms
             : (publishEnabled && Array.isArray(task.platforms) && task.platforms.length ? task.platforms : []);
 
-          this.setTaskState(task.id, { status: 'completed', progress: 100, step: '完成', message: '任务完成', attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit, outputPath: outPath });
+          const platformNames = publishedPlatforms.map(p => p === 'videoChannel' ? '视频号' : '抖音').join('、');
+          const completionMsg = platformNames ? `已发布到 ${platformNames}` : '任务完成';
+          this.setTaskState(task.id, { status: 'completed', progress: 100, step: '完成', message: completionMsg, attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit, outputPath: outPath });
 
           runRecord.items.push(this.buildRunItem(job, task, row, 'completed', {
             outputPath: outPath, publishAt: task.publishAt ? task.publishAt.toISOString() : '',
@@ -875,7 +883,7 @@ class TaskRunner {
           // #3: 修复 — 只要视频已生成就算完成，不受 publishEnabled 限制
           const outputReady = editCompleted && await this.fileExists(outPath);
           if (outputReady) {
-            this.setTaskState(task.id, { status: 'completed', progress: 100, step: '完成', message: publishEnabled ? '发布失败，但视频已生成' : '成品视频已输出', attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit, outputPath: outPath });
+            this.setTaskState(task.id, { status: 'warning', progress: 100, step: '部分完成', message: publishEnabled ? '发布失败，但视频已生成' : '成品视频已输出', attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit, outputPath: outPath });
             runRecord.items.push(this.buildRunItem(job, task, row, 'completed', { outputPath: outPath, publishAt: task.publishAt ? task.publishAt.toISOString() : '', publishedPlatforms: [], publishMode: publishEnabled ? 'failed' : 'disabled', finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, message: publishEnabled ? '发布失败，但视频已生成' : '成品视频已输出' }));
             return { status: 'completed', retryable: false };
           }
@@ -943,19 +951,25 @@ class TaskRunner {
       this.log('', error.message, 'error');
     } finally {
       runRecord.endedAt = nowIso();
-      await this.store.appendHistoryForUser(job.userId, runRecord);
-      if (publishedRecords.length) {
-        await this.store.appendPublishedRecordsForUser(job.userId, publishedRecords);
-      }
-      // #1: 缓存已在上面统一清理
-
+      // 状态重置优先执行，确保 runner 不会卡死
       this.running = false;
       this.stopRequested = false;
       this.currentTaskId = '';
       this.currentJob = null;
+
+      try {
+        await this.store.appendHistoryForUser(job.userId, runRecord);
+        if (publishedRecords.length) {
+          await this.store.appendPublishedRecordsForUser(job.userId, publishedRecords);
+        }
+      } catch (e) {
+        // 历史记录保存失败不应阻止后续清理
+      }
+
+      // #1: 缓存已在上面统一清理
       await this.logWriteChain.catch(() => {});
       this.emitProgress();
-      await this.onRunDone(runRecord);
+      try { await this.onRunDone(runRecord); } catch {}
     }
 
     return runRecord;
@@ -1144,7 +1158,7 @@ class TaskRunner {
     try {
       const entries = await fs.readdir(cacheDir);
       for (const e of entries) {
-        if (e.startsWith('.tmp_') || e.endsWith('.part')) {
+        if (e.startsWith('.tmp_') || e.endsWith('.part') || e.endsWith('.ytdl') || e.includes('.f') && e.includes('-temp')) {
           const fp = path.join(cacheDir, e);
           try { await fs.rm(fp, { recursive: true, force: true }); } catch {}
         }

@@ -366,6 +366,11 @@ body:not([data-platform="darwin"]) .app{padding-top:0}
 .task-head{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 12px 4px}
 .task-title{font-size:12px;font-weight:600}
 .task-badge{font-size:10px;font-weight:500;color:var(--muted-foreground);white-space:nowrap}
+.task.warning .task-badge{color:var(--warning)}
+.task.failed .task-badge{color:var(--destructive)}
+.task-msg{font-size:10px;color:var(--muted-foreground);padding:0 12px 4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.task.failed .task-msg{color:var(--destructive)}
+.task.warning .task-msg{color:var(--warning)}
 .task-bar{height:3px;background:var(--muted);margin:0 12px;border-radius:var(--radius-full)}
 .task-bar-in{height:100%;width:0;background:var(--primary);opacity:.5;transition:width var(--transition-normal);border-radius:var(--radius-full)}
 .task.running .task-bar-in{opacity:1}
