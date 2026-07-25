@@ -693,7 +693,7 @@ class TaskRunner {
 
       await Promise.allSettled(activeTasks.map(async (task) => {
         const row = this.progressRows.find(r => r.id === task.id);
-        if (!row) return;
+        if (!row || this.stopRequested) return;
 
         this.setTaskState(task.id, {
           status: 'running',
@@ -746,7 +746,7 @@ class TaskRunner {
         if (expiredPublishMessage) {
           this.setTaskState(task.id, { status: 'failed', step: '失败', message: expiredPublishMessage, attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit });
           this.log(task.id, expiredPublishMessage, 'error');
-          runRecord.items.push(this.buildRunItem(job, task, task, 'failed', { message: expiredPublishMessage, finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, retryable: true }));
+          runRecord.items.push(this.buildRunItem(job, task, row, 'failed', { message: expiredPublishMessage, finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, retryable: true }));
           return { status: 'failed', retryable: true };
         }
 
@@ -755,8 +755,8 @@ class TaskRunner {
         if (!dlResult || dlResult.error) {
           const errMsg = dlResult?.error?.message || '视频下载失败';
           this.setTaskState(task.id, { status: 'failed', step: '失败', message: errMsg, attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit });
-          runRecord.items.push(this.buildRunItem(job, task, row, 'failed', { message: errMsg, finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, retryable: true }));
-          return { status: 'failed', retryable: true };
+          runRecord.items.push(this.buildRunItem(job, task, row, 'failed', { message: errMsg, finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, retryable: false }));
+          return { status: 'failed', retryable: false };
         }
 
         this.currentTaskId = task.id;
@@ -833,7 +833,7 @@ class TaskRunner {
           // 清理缓存
           await this.cleanupMainControlCache(dlResult.outputPath, subtitleResult.subtitlePath, createdTempFiles);
 
-          await sleep(settings.browser.pauseBetweenTasksMs || 0);
+          await sleep(settings?.browser?.pauseBetweenTasksMs || 0);
           return { status: 'completed', retryable: false };
         } catch (error) {
           const outputReady = !publishEnabled && editCompleted && await this.fileExists(outPath);
