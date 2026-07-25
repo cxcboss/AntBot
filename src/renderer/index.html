@@ -30,6 +30,7 @@
         <button class="sb-btn sb-feat active" data-feat="main" type="button"><span class="icon" data-icon="play"></span><span>主控</span></button>
         <button class="sb-btn sb-feat" data-feat="edit" type="button"><span class="icon" data-icon="scissors"></span><span>剪辑</span></button>
         <button class="sb-btn sb-feat" data-feat="publish" type="button"><span class="icon" data-icon="send"></span><span>发布</span></button>
+        <button class="sb-btn sb-feat" data-feat="download" type="button"><span class="icon" data-icon="download"></span><span>下载</span></button>
         <button class="sb-btn sb-feat" data-feat="style-ref" type="button"><span class="icon" data-icon="sparkle"></span><span>风格参考</span></button>
         <button class="sb-btn sb-feat" data-feat="subtitle-voice" type="button"><span class="icon" data-icon="mic"></span><span>字幕与音色</span></button>
       </div>
@@ -184,6 +185,44 @@
               <div class="publish-bar-right">
                 <button class="btn btn-primary" id="publish-main-btn" type="button" disabled>通过浏览器发布</button>
               </div>
+            </div>
+          </div>
+        </div>
+        <!-- 下载页 -->
+        <div class="feat-view" id="view-download">
+          <div class="dl-layout">
+            <!-- yt-dlp 安装提示 -->
+            <div class="dl-setup hidden" id="dl-setup">
+              <div class="dl-setup-icon"><span class="icon" data-icon="download"></span></div>
+              <p>需要安装 yt-dlp 下载工具</p>
+              <button class="btn btn-primary" id="dl-install-btn" type="button">一键安装</button>
+              <p class="dl-setup-hint" id="dl-setup-hint"></p>
+            </div>
+            <!-- YouTube 登录提示 -->
+            <div class="dl-setup hidden" id="dl-yt-login">
+              <div class="dl-setup-icon"><span class="icon" data-icon="user"></span></div>
+              <p>YouTube 下载需要登录</p>
+              <p style="font-size:12px;color:var(--muted-foreground)">登录 Google 账号后，视频下载将自动使用 cookies</p>
+              <button class="btn btn-primary" id="dl-yt-login-btn" type="button">登录 YouTube</button>
+              <button class="btn btn-ghost" id="dl-yt-skip-btn" type="button" style="margin-top:4px">跳过</button>
+            </div>
+            <!-- 任务列表 -->
+            <div class="dl-list" id="dl-list">
+              <div class="dl-empty" id="dl-empty">
+                <div class="dl-empty-icon"><span class="icon" data-icon="download"></span></div>
+                <p>粘贴视频链接开始下载</p>
+                <p class="dl-empty-sub">支持 YouTube、抖音、TikTok、B站</p>
+              </div>
+              <div class="dl-cards" id="dl-cards"></div>
+            </div>
+            <!-- 批量操作栏 -->
+            <div class="dl-batch-bar" id="dl-batch-bar">
+              <button class="btn btn-sm btn-ghost" id="dl-select-all" type="button">全选</button>
+              <button class="btn btn-sm btn-ghost" id="dl-batch-clean" type="button" style="display:none">清理选中</button>
+            </div>
+            <!-- 底部输入框 -->
+            <div class="dl-composer">
+              <textarea id="dl-input" rows="1" placeholder="粘贴视频链接，多个用逗号或换行隔开"></textarea>
             </div>
           </div>
         </div>
