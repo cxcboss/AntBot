@@ -227,6 +227,14 @@ async function bootstrap() {
   ipcCleanup = ipc.cleanup;
 }
 
+// 全局未处理异常捕获
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err);
+});
+
 app.whenReady().then(async () => {
   // Register safe-file protocol handler
   protocol.handle('safe-file', (request) => {
@@ -265,4 +273,9 @@ app.on('before-quit', async () => {
   if (ipcCleanup) await ipcCleanup().catch(() => {});
   systemControl?.dispose();
   bridgeServiceManager.stop();
+  // 关闭 voicebox 后端释放内存
+  try {
+    const { shutdownVoicebox } = require('./services/autoDubClient');
+    await shutdownVoicebox(() => {}).catch(() => {});
+  } catch {}
 });

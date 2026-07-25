@@ -91,6 +91,8 @@ function switchFeature(feat){
   renderStatus();
   if(feat==='subtitle-voice') loadPresetVoices();
   if(feat==='download') initDownloadPage();
+  // 清理下载页定时器
+  if(feat!=='download' && _dlDotsTimer){clearInterval(_dlDotsTimer);_dlDotsTimer=null;}
   if(isMobile())closeSidebar();
 }
 
@@ -279,8 +281,8 @@ function showSliderPopup(anchor,type){
     else{const v=Number(range.value);val.textContent=v===0?'不重试':`${v}次`}
   });
   range.addEventListener('change',()=>{
-    if(type==='speed'){const v=Number(range.value);S.settings.style.voiceSpeed=v;void qPatch({style:{voiceSpeed:v}},`语速 ${v.toFixed(1)}x`)}
-    else{const v=Number(range.value);S.settings.retry.failedTaskRetries=v;void qPatch({retry:{failedTaskRetries:v}},v===0?'不重试':`重试 ${v} 次`)}
+    if(type==='speed'){const v=Number(range.value);if(S.settings?.style)S.settings.style.voiceSpeed=v;void qPatch({style:{voiceSpeed:v}},`语速 ${v.toFixed(1)}x`)}
+    else{const v=Number(range.value);if(S.settings?.retry)S.settings.retry.failedTaskRetries=v;void qPatch({retry:{failedTaskRetries:v}},v===0?'不重试':`重试 ${v} 次`)}
   });
 }
 function showMorePopup(anchor){
@@ -1917,7 +1919,7 @@ function bindPublishPage(){
 
   setDefaultSchedule();
   refreshBridge();
-  setInterval(refreshBridge, 3000);
+  if(!S._bridgeInterval)S._bridgeInterval=setInterval(refreshBridge, 3000);
   loadPublishHistory();
   render();
 

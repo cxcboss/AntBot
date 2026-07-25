@@ -399,12 +399,16 @@ class TaskRunner {
           }
         }
       }
-      if (row.status === 'stopped') {
+      if (row.status === 'stopped' || row.status === 'failed') {
         this.setTaskState(targetId, {
           status: 'pending',
           step: '等待执行',
           message: '已恢复，等待执行'
         });
+        // 如果 runner 空闲，触发执行
+        if (!this.running) {
+          this._tick?.();
+        }
       }
       return { resumed: true, taskId: targetId };
     }
@@ -697,50 +701,44 @@ class TaskRunner {
       const activeTasks = tasks.filter(t => !t.__stopped);
       const downloadResults = new Map();
 
-      await Promise.allSettled(activeTasks.map(async (task) => {
-        const row = this.progressRows.find(r => r.id === task.id);
-        if (!row || this.stopRequested) return;
+      // 并发限制（最多 5 个同时下载）
+      const MAX_DOWNLOAD_CONCURRENCY = 5;
+      const downloadPool = async (tasks) => {
+        const results = [];
+        let idx = 0;
+        const workers = Array.from({ length: Math.min(MAX_DOWNLOAD_CONCURRENCY, tasks.length) }, async () => {
+          while (idx < tasks.length) {
+            const i = idx++;
+            const task = tasks[i];
+            const row = this.progressRows.find(r => r.id === task.id);
+            if (!row || this.stopRequested) continue;
 
-        this.setTaskState(task.id, {
-          status: 'running',
-          progress: 5,
-          step: '下载中',
-          message: '正在下载视频...'
-        });
+            this.setTaskState(task.id, { status: 'running', progress: 5, step: '下载中', message: `下载中 (${i + 1}/${tasks.length})...` });
+            const baseName = buildTaskBaseName(task, sequence++, new Date());
+            task._baseName = baseName;
+            task._cacheDir = mainControlCacheDir;
 
-        const baseName = buildTaskBaseName(task, sequence++, new Date());
-        task._baseName = baseName;
-        task._cacheDir = mainControlCacheDir;
-
-        try {
-          // #2: 每次循环检查 stopRequested，已启动的下载无法中止但新任务不启动
-          if (this.stopRequested) {
-            downloadResults.set(task.id, { error: new Error('用户停止') });
-            this.setTaskState(task.id, { status: 'stopped', step: '已停止', message: '已停止' });
-            return;
+            try {
+              if (this.stopRequested) {
+                downloadResults.set(task.id, { error: new Error('用户停止') });
+                this.setTaskState(task.id, { status: 'stopped', step: '已停止', message: '已停止' });
+                continue;
+              }
+              const downloadResult = await downloadVideo({ task, tempDir: mainControlCacheDir, baseName, settings, log: (msg) => this.log(task.id, msg) });
+              downloadResults.set(task.id, downloadResult);
+              taskTempFiles.set(task.id, { downloadPath: downloadResult.outputPath, subtitlePath: '' });
+              this.setTaskState(task.id, { progress: 25, step: '下载完成', message: '视频下载完成，等待剪辑...' });
+            } catch (err) {
+              downloadResults.set(task.id, { error: err });
+              this.setTaskState(task.id, { status: 'failed', step: '下载失败', message: err.message });
+              this.log(task.id, `下载失败: ${err.message}`, 'error');
+            }
           }
-          const downloadResult = await downloadVideo({
-            task, tempDir: mainControlCacheDir, baseName, settings,
-            log: (msg) => this.log(task.id, msg)
-          });
-          downloadResults.set(task.id, downloadResult);
-          // #1: 记录下载文件路径，不立即清理
-          taskTempFiles.set(task.id, { downloadPath: downloadResult.outputPath, subtitlePath: '' });
-          this.setTaskState(task.id, {
-            progress: 25,
-            step: '下载完成',
-            message: '视频下载完成，等待剪辑...'
-          });
-        } catch (err) {
-          downloadResults.set(task.id, { error: err });
-          this.setTaskState(task.id, {
-            status: 'failed',
-            step: '下载失败',
-            message: err.message
-          });
-          this.log(task.id, `下载失败: ${err.message}`, 'error');
-        }
-      }));
+        });
+        await Promise.allSettled(workers);
+      };
+
+      await downloadPool(activeTasks);
 
       // #4: 下载阶段汇总
       const dlSuccess = [...downloadResults.values()].filter(r => !r.error).length;
