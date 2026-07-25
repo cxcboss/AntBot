@@ -231,43 +231,12 @@ class DownloadManager {
   }
 
   // ── Task management ──
-  // 检查重复URL
-  checkDuplicates(inputText) {
-    const urls = parseUrls(inputText);
-    const existing = new Set([...this.tasks.values()].filter(t => t.status !== 'failed' && t.status !== 'cancelled').map(t => t.url));
-    return urls.filter(u => existing.has(u));
-  }
-
-  async addTasks(inputText, { skipDuplicates = false } = {}) {
+  async addTasks(inputText) {
     const urls = parseUrls(inputText);
     if (!urls.length) throw new Error('未识别到有效链接');
 
-    // 已存在的 URL（排除失败/取消的）
-    const existing = new Map();
-    for (const t of this.tasks.values()) {
-      if (t.status !== 'failed' && t.status !== 'cancelled') existing.set(t.url, t);
-    }
-
-    const duplicates = urls.filter(u => existing.has(u));
-    // skipDuplicates=true 时跳过重复，否则全部下载
-    const urlsToDownload = skipDuplicates ? urls.filter(u => !existing.has(u)) : urls;
-
-    // 对于失败/取消的任务，重置状态让它重新下载
     const newTasks = [];
-    for (const url of urlsToDownload) {
-      const existingTask = [...this.tasks.values()].find(t => t.url === url);
-      if (existingTask && (existingTask.status === 'failed' || existingTask.status === 'cancelled')) {
-        // 重置已有失败任务
-        existingTask.status = 'pending';
-        existingTask.progress = 0;
-        existingTask.speed = '';
-        existingTask.error = '';
-        existingTask.retries = 0;
-        existingTask.tmpDir = path.join(this.downloadDir, `.tmp_${existingTask.filename}`);
-        newTasks.push(existingTask);
-        continue;
-      }
-      if (existing.has(url)) continue; // 已在下载中/已完成，跳过
+    for (const url of urls) {
       const platform = detectPlatform(url);
       const filename = generateFilename(platform.prefix);
       const task = {
@@ -282,15 +251,11 @@ class DownloadManager {
       newTasks.push(task);
     }
 
-    if (!newTasks.length) {
-      const err = new Error('所有链接已在下载列表中');
-      err.duplicates = duplicates;
-      throw err;
-    }
+    if (!newTasks.length) throw new Error('未识别到有效链接');
     await this.saveState();
     for (const t of newTasks) this.onTaskUpdate(this._serialize(t));
     this._tick();
-    return { tasks: newTasks.map(t => this._serialize(t)), duplicates };
+    return { tasks: newTasks.map(t => this._serialize(t)) };
   }
 
   async cancelTask(taskId) {

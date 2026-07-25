@@ -25,8 +25,7 @@ contextBridge.exposeInMainWorld('antbot', {
   downloadPresetVoice: (payload) => ipcRenderer.invoke('voice:download-preset', payload),
 
   // Download
-  downloadAdd: (text, skipDuplicates) => ipcRenderer.invoke('download:add', { text, skipDuplicates }),
-  downloadCheckDuplicates: (text) => ipcRenderer.invoke('download:check-duplicates', text),
+  downloadAdd: (text) => ipcRenderer.invoke('download:add', text),
   downloadCancel: (taskId) => ipcRenderer.invoke('download:cancel', taskId),
   downloadRetry: (taskId) => ipcRenderer.invoke('download:retry', taskId),
   downloadList: () => ipcRenderer.invoke('download:list'),

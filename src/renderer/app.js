@@ -2315,7 +2315,6 @@ function renderDownloadCards() {
   const hasSelected = S.selectedDlTasks.size > 0;
 
   cards.innerHTML = sorted.map(t => {
-    const pc = platformClass[t.platform] || 'dl';
     const selected = S.selectedDlTasks.has(t.id) ? ' selected' : '';
     const time = t.createdAt ? new Date(t.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
 
@@ -2333,16 +2332,44 @@ function renderDownloadCards() {
     }
 
     const displayName = t.filename || t.url;
+    const showOpen = t.status === 'completed' && t.outputPath;
+    const showClean = t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled';
+
     return `<div class="dl-card${selected}" data-dl-id="${esc(t.id)}">
       <div class="dl-card-head">
-        <span class="dl-card-platform ${pc}">${esc(t.platform)}</span>
+        <span class="dl-card-platform">${esc(t.platform)}</span>
         <span class="dl-card-name">${esc(displayName)}</span>
         ${statusHtml}
+        <span class="dl-card-actions">
+          ${showOpen ? `<button class="dl-icon-btn" data-dl-open="${esc(t.id)}" title="打开文件"><span class="icon" data-icon="folderOpen"></span></button>` : ''}
+          ${showClean ? `<button class="dl-icon-btn" data-dl-clean="${esc(t.id)}" title="清理记录"><span class="icon" data-icon="trash"></span></button>` : ''}
+        </span>
       </div>
       <div class="dl-card-url">${esc(t.url)}</div>
       <div class="dl-card-time">${time}</div>
     </div>`;
   }).join('');
+
+  injectIcons();
+
+  // 按钮事件
+  cards.querySelectorAll('[data-dl-open]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const task = S.downloadTasks.find(t => t.id === btn.dataset.dlOpen);
+      if (task?.outputPath) window.antbot.revealInFolder(task.outputPath).catch(() => {});
+    });
+  });
+  cards.querySelectorAll('[data-dl-clean]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.dlClean;
+      await window.antbot.downloadCleanTask(id);
+      S.downloadTasks = S.downloadTasks.filter(t => t.id !== id);
+      S.selectedDlTasks.delete(id);
+      renderDownloadCards();
+    });
+  });
 
   // 启动等待动画
   startDlDotsAnimation();
@@ -2516,24 +2543,10 @@ function bindDownloadPage() {
         if (!text) return;
         input.disabled = true;
         try {
-          // 检查重复
-          const duplicates = await window.antbot.downloadCheckDuplicates(text);
-          let skipDuplicates = false;
-          if (duplicates && duplicates.length > 0) {
-            const total = text.split(/https?:\/\//i).length - 1;
-            const dupCount = duplicates.length;
-            const msg = dupCount === total
-              ? `${dupCount} 个链接已下载过，是否重新下载？`
-              : `${dupCount} 个链接已下载过，是否跳过？（共 ${total} 个链接）`;
-            skipDuplicates = !window.confirm(msg);
-          }
-          const r = await window.antbot.downloadAdd(text, skipDuplicates);
+          const r = await window.antbot.downloadAdd(text);
           if (r.ok) {
             const count = r.tasks?.length || 0;
-            const skipped = r.duplicates?.length || 0;
-            let msg = `已添加 ${count} 个下载任务`;
-            if (skipped > 0 && skipDuplicates) msg += `，跳过 ${skipped} 个重复`;
-            toast(msg, 'success');
+            toast(`已添加 ${count} 个下载任务`, 'success');
             input.value = '';
             input.style.height = 'auto';
           } else {

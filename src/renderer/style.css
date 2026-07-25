@@ -678,13 +678,13 @@ body:not([data-platform="darwin"]) .toasts{top:8px}
 .dl-card:hover{border-color:color-mix(in srgb, var(--border) 50%, var(--foreground));box-shadow:var(--shadow-sm)}
 .dl-card.selected{border-color:var(--primary);background:var(--accent)}
 .dl-card-head{display:flex;align-items:center;gap:8px;margin-bottom:4px}
-.dl-card-platform{font-size:10px;font-weight:600;padding:2px 8px;border-radius:var(--radius-full);flex-shrink:0}
-.dl-card-platform.yt{background:#fee2e2;color:#dc2626}
-.dl-card-platform.dy{background:#f3f4f6;color:#111827}
-.dark .dl-card-platform.dy{background:#374151;color:#e5e7eb}
-.dl-card-platform.tk{background:#ecfdf5;color:#059669}
-.dl-card-platform.b{background:#fdf2f8;color:#db2777}
-.dl-card-platform.dl{background:var(--muted);color:var(--muted-foreground)}
+.dl-card-platform{font-size:11px;font-weight:500;color:var(--muted-foreground);flex-shrink:0}
+.dl-card-name{flex:1;min-width:0;font-size:13px;font-weight:600;color:var(--foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dl-card-actions{display:flex;gap:2px;flex-shrink:0;margin-left:4px;opacity:0;transition:opacity var(--transition-fast)}
+.dl-card:hover .dl-card-actions{opacity:1}
+.dl-icon-btn{width:22px;height:22px;display:flex;align-items:center;justify-content:center;border-radius:var(--radius);background:none;border:none;color:var(--muted-foreground);cursor:pointer;transition:all var(--transition-fast)}
+.dl-icon-btn:hover{background:var(--muted);color:var(--foreground)}
+.dl-icon-btn .icon{width:13px;height:13px}
 .dl-card-name{flex:1;min-width:0;font-size:13px;font-weight:600;color:var(--foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dl-card-url{font-size:11px;color:var(--muted-foreground);overflow-x:auto;white-space:nowrap;scrollbar-width:none;-ms-overflow-style:none}
 .dl-card-url::-webkit-scrollbar{display:none}

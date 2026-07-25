@@ -1626,18 +1626,14 @@ except Exception as e:
   });
   downloadManager.init().catch(e => appLog('error', `DownloadManager init failed: ${e.message}`));
 
-  ipcMain.handle('download:add', async (_event, { text, skipDuplicates }) => {
+  ipcMain.handle('download:add', async (_event, text) => {
     try {
       const settings = await store.getSettings();
       downloadManager.outputBaseDir = settings.paths?.outputBaseDir || path.join(os.homedir(), 'Desktop', '视频');
       downloadManager.downloadDir = path.join(downloadManager.outputBaseDir, '视频下载');
-      const result = await downloadManager.addTasks(text, { skipDuplicates });
+      const result = await downloadManager.addTasks(text);
       return { ok: true, ...result };
-    } catch (e) { return { ok: false, error: e.message, duplicates: e.duplicates || [] }; }
-  });
-
-  ipcMain.handle('download:check-duplicates', async (_event, text) => {
-    return downloadManager.checkDuplicates(text);
+    } catch (e) { return { ok: false, error: e.message }; }
   });
 
   ipcMain.handle('download:cancel', async (_event, taskId) => { await downloadManager.cancelTask(taskId); return { ok: true }; });
