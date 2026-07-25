@@ -75,5 +75,6 @@ module.exports = {
   ensureDir,
   getDaySequence,
   buildTaskBaseName,
-  buildOutputPath
+  buildOutputPath,
+  buildPreciseTimestamp
 };

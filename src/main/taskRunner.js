@@ -1,8 +1,9 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const os = require('node:os');
 const { app } = require('electron');
 const { STEP_NAMES } = require('./services/config');
-const { ensureDir, getDaySequence, buildTaskBaseName, buildOutputPath } = require('./services/fileUtil');
+const { ensureDir, getDaySequence, buildTaskBaseName, buildOutputPath, buildPreciseTimestamp } = require('./services/fileUtil');
 const { downloadVideo } = require('./services/downloader');
 const { generateSubtitle } = require('./services/gemini');
 const { editVideo } = require('./services/editor');
@@ -667,8 +668,15 @@ class TaskRunner {
 
     try {
       const settings = await this.store.getSettingsForUser(job.userId);
-      await ensureDir(settings.paths.tempDir);
-      let sequence = await getDaySequence(settings.paths.tempDir, new Date());
+      const outputBaseDir = settings.paths.outputBaseDir || path.join(os.homedir(), 'Desktop', '视频');
+      const mainControlCacheDir = path.join(outputBaseDir, '主控缓存');
+      const mainControlOutputDir = path.join(outputBaseDir, '主控输出');
+      await ensureDir(mainControlCacheDir);
+      await ensureDir(mainControlOutputDir);
+      settings.paths._mainControlCacheDir = mainControlCacheDir;
+      settings.paths._mainControlOutputDir = mainControlOutputDir;
+
+      let sequence = await getDaySequence(mainControlCacheDir, new Date());
       const retryLimit = Math.max(0, Number(settings?.retry?.failedTaskRetries ?? 0));
       const failedTasks = [];
 
@@ -678,164 +686,131 @@ class TaskRunner {
       }));
       this.emitProgress();
 
+      // ── Phase 1: 并行下载所有视频 ──
+      this.log('', `开始并行下载 ${tasks.length} 个视频...`);
+      const activeTasks = tasks.filter(t => !t.__stopped);
+      const downloadResults = new Map();
+
+      await Promise.allSettled(activeTasks.map(async (task) => {
+        const row = this.progressRows.find(r => r.id === task.id);
+        if (!row) return;
+
+        this.setTaskState(task.id, {
+          status: 'running',
+          progress: 5,
+          step: '下载中',
+          message: '正在下载视频...'
+        });
+
+        const baseName = buildTaskBaseName(task, sequence++, new Date());
+        task._baseName = baseName;
+        task._cacheDir = mainControlCacheDir;
+
+        try {
+          const downloadResult = await downloadVideo({
+            task, tempDir: mainControlCacheDir, baseName, settings,
+            log: (msg) => this.log(task.id, msg)
+          });
+          downloadResults.set(task.id, downloadResult);
+          this.setTaskState(task.id, {
+            progress: 25,
+            step: '下载完成',
+            message: '视频下载完成，等待剪辑...'
+          });
+        } catch (err) {
+          downloadResults.set(task.id, { error: err });
+          this.setTaskState(task.id, {
+            status: 'failed',
+            step: '下载失败',
+            message: err.message
+          });
+          this.log(task.id, `下载失败: ${err.message}`, 'error');
+        }
+      }));
+
+      this.log('', `下载阶段完成。成功: ${[...downloadResults.values()].filter(r => !r.error).length}/${activeTasks.length}`);
+
+      // ── Phase 2: 串行执行 subtitle → edit → publish ──
       const runSingleTask = async (task, attemptIndex = 0) => {
         const row = this.progressRows.find((item) => item.id === task.id);
-        if (!row) {
-          return { status: 'skipped', retryable: false };
-        }
+        if (!row) return { status: 'skipped', retryable: false };
 
         if (task.__stopped) {
-          this.setTaskState(task.id, {
-            status: 'stopped',
-            step: '已停止',
-            message: '任务已停止'
-          });
+          this.setTaskState(task.id, { status: 'stopped', step: '已停止', message: '任务已停止' });
           runRecord.status = 'stopped';
-          runRecord.items.push(this.buildRunItem(job, task, row, 'stopped', {
-            message: '执行前被停止',
-            finishedAt: nowIso(),
-            attempt: attemptIndex + 1,
-            retryCount: attemptIndex,
-            retryable: false
-          }));
+          runRecord.items.push(this.buildRunItem(job, task, row, 'stopped', { message: '执行前被停止', finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, retryable: false }));
           return { status: 'stopped', retryable: false };
         }
 
         const expiredPublishMessage = this.getExpiredPublishMessage(task);
         if (expiredPublishMessage) {
-          this.setTaskState(task.id, {
-            status: 'failed',
-            step: '失败',
-            message: expiredPublishMessage,
-            attempt: attemptIndex + 1,
-            retryCount: attemptIndex,
-            retryLimit
-          });
+          this.setTaskState(task.id, { status: 'failed', step: '失败', message: expiredPublishMessage, attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit });
           this.log(task.id, expiredPublishMessage, 'error');
-          runRecord.items.push(this.buildRunItem(job, task, row, 'failed', {
-            message: expiredPublishMessage,
-            finishedAt: nowIso(),
-            attempt: attemptIndex + 1,
-            retryCount: attemptIndex,
-            retryable: true
-          }));
+          runRecord.items.push(this.buildRunItem(job, task, task, 'failed', { message: expiredPublishMessage, finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, retryable: true }));
+          return { status: 'failed', retryable: true };
+        }
+
+        // 检查下载结果
+        const dlResult = downloadResults.get(task.id);
+        if (!dlResult || dlResult.error) {
+          const errMsg = dlResult?.error?.message || '视频下载失败';
+          this.setTaskState(task.id, { status: 'failed', step: '失败', message: errMsg, attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit });
+          runRecord.items.push(this.buildRunItem(job, task, row, 'failed', { message: errMsg, finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, retryable: true }));
           return { status: 'failed', retryable: true };
         }
 
         this.currentTaskId = task.id;
-        const attemptLabel = attemptIndex > 0 ? `重试中（第${attemptIndex}次）` : '准备执行';
-        this.setTaskState(task.id, {
-          status: 'running',
-          progress: 5,
-          step: '准备中',
-          message: attemptLabel,
-          attempt: attemptIndex + 1,
-          retryCount: attemptIndex,
-          retryLimit
-        });
-        if (attemptIndex > 0) {
-          this.log(task.id, `开始重试（第${attemptIndex}次）`);
-        }
+        this.setTaskState(task.id, { status: 'running', progress: 30, step: '字幕生成', message: attemptIndex > 0 ? `重试中（第${attemptIndex}次）` : '正在生成字幕...', attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit });
 
-        const taskDate = task.publishAt || new Date();
-        const baseName = buildTaskBaseName(task, sequence, taskDate);
-        sequence += 1;
-        let currentStep = 'prepare';
+        const baseName = task._baseName;
         let outDir = '';
         let outPath = '';
         const publishEnabled = settings?.publish?.enabled !== false;
         let editCompleted = false;
 
         try {
-          currentStep = 'download';
-          const downloadResult = await this.runStep(
-            task,
-            'download',
-            () => downloadVideo({ task, tempDir: settings.paths.tempDir, baseName, settings, log: (msg) => this.log(task.id, msg) }),
-            25
-          );
-          createdTempFiles.push(downloadResult.outputPath);
           const voiceoverEnabled = settings?.style?.voiceoverEnabled !== false;
           const subtitleEnabled = voiceoverEnabled && settings?.style?.subtitleEnabled !== false;
           const needsSubtitleFile = voiceoverEnabled || subtitleEnabled;
 
           let subtitleResult = { subtitlePath: '' };
           if (needsSubtitleFile) {
-            currentStep = 'subtitle';
-            subtitleResult = await this.runStep(
-              task,
-              'subtitle',
-              () => generateSubtitle({
-                task,
-                tempDir: settings.paths.tempDir,
-                baseName,
-                settings,
-                inputVideoPath: downloadResult.outputPath,
-                log: (msg) => this.log(task.id, msg)
-              }),
-              50
-            );
+            subtitleResult = await this.runStep(task, 'subtitle', () => generateSubtitle({
+              task, tempDir: mainControlCacheDir, baseName, settings,
+              inputVideoPath: dlResult.outputPath,
+              log: (msg) => this.log(task.id, msg)
+            }), 50);
             createdTempFiles.push(subtitleResult.subtitlePath);
           } else {
-            this.setTaskState(task.id, {
-              step: STEP_NAMES.subtitle,
-              progress: 50,
-              message: '字幕与旁白已关闭，跳过字幕生成'
-            });
+            this.setTaskState(task.id, { step: STEP_NAMES.subtitle, progress: 50, message: '字幕与旁白已关闭，跳过字幕生成' });
             this.log(task.id, '字幕生成已跳过（旁白语音关闭）。');
           }
 
-          ({ outDir, outPath } = buildOutputPath(settings.paths.outputBaseDir, task, taskDate, settings.__userName || job.userName));
+          // 输出到 主控输出/{YYYYMMDD}/
+          const dayDir = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+          outDir = path.join(mainControlOutputDir, dayDir);
+          await ensureDir(outDir);
+          const videoName = task._baseName || `task_${Date.now()}`;
+          const ts = buildPreciseTimestamp(new Date());
+          outPath = path.join(outDir, `${videoName}_${ts}.mp4`);
 
-          currentStep = 'edit';
-          const editResult = await this.runStep(
-            task,
-            'edit',
-            () => editVideo({
-              task,
-              settings,
-              inputVideoPath: downloadResult.outputPath,
-              subtitlePath: subtitleResult.subtitlePath,
-              outputPath: outPath,
-              log: (msg) => this.log(task.id, msg)
-            }),
-            75
-          );
+          await this.runStep(task, 'edit', () => editVideo({
+            task, settings,
+            inputVideoPath: dlResult.outputPath,
+            subtitlePath: subtitleResult.subtitlePath,
+            outputPath: outPath,
+            log: (msg) => this.log(task.id, msg)
+          }), 75);
           editCompleted = true;
-          if (editResult?.voiceClone?.voiceId) {
-            const currentVoice = settings.voiceClone || {};
-            const nextVoice = {
-              ...currentVoice,
-              voiceId: editResult.voiceClone.voiceId,
-              profileName: editResult.voiceClone.profileName || currentVoice.profileName || '',
-              language: editResult.voiceClone.language || currentVoice.language || 'zh'
-            };
-            settings.voiceClone = await this.store.setVoiceClone(nextVoice);
-            if (editResult.voiceClone.recovered) {
-              this.log(task.id, `已自动恢复并保存语音档案：${nextVoice.profileName || nextVoice.voiceId}`);
-            }
-          }
 
           let publishResult = null;
           if (publishEnabled) {
-            currentStep = 'publish';
-            publishResult = await this.runStep(
-              task,
-              'publish',
-              () => publishVideo({
-                task,
-                settings,
-                outputPath: outPath,
-                log: (msg) => this.log(task.id, msg)
-              }),
-              95
-            );
+            publishResult = await this.runStep(task, 'publish', () => publishVideo({
+              task, settings, outputPath: outPath,
+              log: (msg) => this.log(task.id, msg)
+            }), 95);
           } else {
-            this.setTaskState(task.id, {
-              step: STEP_NAMES.publish,
-              progress: 95,
-              message: '自动发布已关闭，输出视频即视为完成'
-            });
+            this.setTaskState(task.id, { step: STEP_NAMES.publish, progress: 95, message: '自动发布已关闭，输出视频即视为完成' });
             this.log(task.id, '自动发布已关闭，输出视频已视为任务完成。');
           }
 
@@ -843,100 +818,46 @@ class TaskRunner {
             ? publishResult.platforms
             : (publishEnabled && Array.isArray(task.platforms) && task.platforms.length ? task.platforms : []);
 
-          this.setTaskState(task.id, {
-            status: 'completed',
-            progress: 100,
-            step: '完成',
-            message: '任务完成',
-            attempt: attemptIndex + 1,
-            retryCount: attemptIndex,
-            retryLimit,
-            outputPath: outPath
-          });
+          this.setTaskState(task.id, { status: 'completed', progress: 100, step: '完成', message: '任务完成', attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit, outputPath: outPath });
 
           runRecord.items.push(this.buildRunItem(job, task, row, 'completed', {
-            outputPath: outPath,
-            publishAt: task.publishAt ? task.publishAt.toISOString() : '',
-            publishedPlatforms,
-            publishMode: publishEnabled ? (publishResult?.mode || '') : 'disabled',
-            finishedAt: nowIso(),
-            attempt: attemptIndex + 1,
-            retryCount: attemptIndex
+            outputPath: outPath, publishAt: task.publishAt ? task.publishAt.toISOString() : '',
+            publishedPlatforms, publishMode: publishEnabled ? (publishResult?.mode || '') : 'disabled',
+            finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex
           }));
 
           if (publishEnabled && publishedPlatforms.length) {
-            publishedRecords.push({
-              userId: job.userId,
-              userName: job.userName,
-              taskName: row.taskName,
-              outputPath: outPath,
-              publishAt: task.publishAt ? task.publishAt.toISOString() : nowIso(),
-              publishedPlatforms,
-              publishMode: publishResult?.mode || '',
-              completedAt: nowIso(),
-              runId: this.runId
-            });
+            publishedRecords.push({ userId: job.userId, userName: job.userName, taskName: row.taskName, outputPath: outPath, publishAt: task.publishAt ? task.publishAt.toISOString() : nowIso(), publishedPlatforms, publishMode: publishResult?.mode || '', completedAt: nowIso(), runId: this.runId });
           }
 
+          // 清理缓存
+          await this.cleanupMainControlCache(dlResult.outputPath, subtitleResult.subtitlePath, createdTempFiles);
+
           await sleep(settings.browser.pauseBetweenTasksMs || 0);
-          await ensureDir(outDir);
           return { status: 'completed', retryable: false };
         } catch (error) {
           const outputReady = !publishEnabled && editCompleted && await this.fileExists(outPath);
           if (outputReady) {
-            this.setTaskState(task.id, {
-              status: 'completed',
-              progress: 100,
-              step: '完成',
-              message: '自动发布已关闭，成品视频已输出',
-              attempt: attemptIndex + 1,
-              retryCount: attemptIndex,
-              retryLimit,
-              outputPath: outPath
-            });
-            runRecord.items.push(this.buildRunItem(job, task, row, 'completed', {
-              outputPath: outPath,
-              publishAt: task.publishAt ? task.publishAt.toISOString() : '',
-              publishedPlatforms: [],
-              publishMode: 'disabled',
-              finishedAt: nowIso(),
-              attempt: attemptIndex + 1,
-              retryCount: attemptIndex,
-              message: '自动发布已关闭，成品视频已输出'
-            }));
+            this.setTaskState(task.id, { status: 'completed', progress: 100, step: '完成', message: '自动发布已关闭，成品视频已输出', attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit, outputPath: outPath });
+            runRecord.items.push(this.buildRunItem(job, task, row, 'completed', { outputPath: outPath, publishAt: task.publishAt ? task.publishAt.toISOString() : '', publishedPlatforms: [], publishMode: 'disabled', finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, message: '自动发布已关闭，成品视频已输出' }));
+            await this.cleanupMainControlCache(dlResult.outputPath, '', createdTempFiles);
             return { status: 'completed', retryable: false };
           }
 
           const isStopped = task.__stopped || (this.stopRequested && this.currentTaskId === task.id);
-          const noRetryEncryptedDownload = currentStep === 'download' && this.isEncryptedDownloadError(error);
+          const noRetryEncryptedDownload = false;
           const status = isStopped ? 'stopped' : 'failed';
-          const finalMessage = noRetryEncryptedDownload
-            ? `${error.message}（已识别为加密视频源，不再自动重试）`
-            : error.message;
+          const finalMessage = error.message;
           const retryable = status === 'failed' && !noRetryEncryptedDownload;
 
-          this.setTaskState(task.id, {
-            status,
-            progress: row.progress,
-            step: status === 'failed' ? '失败' : '停止',
-            message: finalMessage,
-            attempt: attemptIndex + 1,
-            retryCount: attemptIndex,
-            retryLimit
-          });
-
+          this.setTaskState(task.id, { status, progress: row.progress, step: status === 'failed' ? '失败' : '停止', message: finalMessage, attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit });
           this.log(task.id, finalMessage, 'error');
 
-          if (status === 'stopped') {
-            runRecord.status = 'stopped';
-          }
-          runRecord.items.push(this.buildRunItem(job, task, row, status, {
-            message: finalMessage,
-            finishedAt: nowIso(),
-            attempt: attemptIndex + 1,
-            retryCount: attemptIndex,
-            retryable
-          }));
+          if (status === 'stopped') runRecord.status = 'stopped';
+          runRecord.items.push(this.buildRunItem(job, task, row, status, { message: finalMessage, finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, retryable }));
+
+          // 清理缓存
+          await this.cleanupMainControlCache(dlResult?.outputPath, '', createdTempFiles);
 
           return { status, retryable };
         } finally {
@@ -1177,6 +1098,36 @@ class TaskRunner {
         }
       } catch {
         // noop
+      }
+    }
+  }
+
+  async cleanupMainControlCache(downloadPath, subtitlePath, createdTempFiles) {
+    // 清理下载文件
+    if (downloadPath) {
+      try { await fs.rm(downloadPath, { force: true }); } catch {}
+      // 清理 yt-dlp 的中间分轨文件
+      const dir = path.dirname(downloadPath);
+      const base = path.basename(downloadPath, path.extname(downloadPath));
+      try {
+        const entries = await fs.readdir(dir);
+        for (const e of entries) {
+          if (e.startsWith(base) && e !== path.basename(downloadPath)) {
+            await fs.rm(path.join(dir, e), { force: true }).catch(() => {});
+          }
+        }
+      } catch {}
+    }
+    // 清理字幕文件
+    if (subtitlePath) {
+      try { await fs.rm(subtitlePath, { force: true }); } catch {}
+    }
+    // 清理帧提取等临时目录
+    if (Array.isArray(createdTempFiles)) {
+      for (const f of createdTempFiles) {
+        if (f && f.includes('_tmp')) {
+          try { await fs.rm(f, { recursive: true, force: true }); } catch {}
+        }
       }
     }
   }

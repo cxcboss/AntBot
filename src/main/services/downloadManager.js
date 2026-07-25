@@ -471,17 +471,18 @@ class DownloadManager {
   }
 
   async _findOutput(task) {
-    // Wait for file to appear (ffmpeg merge may take a moment)
-    for (let i = 0; i < 20; i++) {
+    // Wait for final merged file to appear (ffmpeg merge may take a moment)
+    const targetName = `${task.filename}.mp4`;
+    for (let i = 0; i < 30; i++) {
       try {
         const entries = await fs.readdir(task.tmpDir);
         for (const e of entries) {
-          if (e.endsWith('.mp4') && !e.includes('.part')) {
+          // 只匹配最终合并文件，排除中间分轨文件（.f399.mp4, .f140.m4a 等）
+          if (e === targetName && !e.includes('.part')) {
             const fp = path.join(task.tmpDir, e);
             const stat = await fs.stat(fp);
             if (stat.isFile() && stat.size > 0) {
-              // Move to final location
-              const finalPath = path.join(this.downloadDir, `${task.filename}.mp4`);
+              const finalPath = path.join(this.downloadDir, targetName);
               await fs.rename(fp, finalPath);
               return finalPath;
             }
