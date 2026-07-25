@@ -664,7 +664,8 @@ class TaskRunner {
     };
 
     const publishedRecords = [];
-    const createdTempFiles = [];
+    // #1: 按任务收集临时文件，整批结束后统一清理
+    const taskTempFiles = new Map(); // taskId → {downloadPath, subtitlePath}
 
     try {
       const settings = await this.store.getSettingsForUser(job.userId);
@@ -675,6 +676,9 @@ class TaskRunner {
       await ensureDir(mainControlOutputDir);
       settings.paths._mainControlCacheDir = mainControlCacheDir;
       settings.paths._mainControlOutputDir = mainControlOutputDir;
+
+      // #6: 启动时清理残留缓存
+      await this.cleanupStaleCache(mainControlCacheDir);
 
       let sequence = await getDaySequence(mainControlCacheDir, new Date());
       const retryLimit = Math.max(0, Number(settings?.retry?.failedTaskRetries ?? 0));
@@ -707,11 +711,19 @@ class TaskRunner {
         task._cacheDir = mainControlCacheDir;
 
         try {
+          // #2: 每次循环检查 stopRequested，已启动的下载无法中止但新任务不启动
+          if (this.stopRequested) {
+            downloadResults.set(task.id, { error: new Error('用户停止') });
+            this.setTaskState(task.id, { status: 'stopped', step: '已停止', message: '已停止' });
+            return;
+          }
           const downloadResult = await downloadVideo({
             task, tempDir: mainControlCacheDir, baseName, settings,
             log: (msg) => this.log(task.id, msg)
           });
           downloadResults.set(task.id, downloadResult);
+          // #1: 记录下载文件路径，不立即清理
+          taskTempFiles.set(task.id, { downloadPath: downloadResult.outputPath, subtitlePath: '' });
           this.setTaskState(task.id, {
             progress: 25,
             step: '下载完成',
@@ -728,7 +740,15 @@ class TaskRunner {
         }
       }));
 
-      this.log('', `下载阶段完成。成功: ${[...downloadResults.values()].filter(r => !r.error).length}/${activeTasks.length}`);
+      // #4: 下载阶段汇总
+      const dlSuccess = [...downloadResults.values()].filter(r => !r.error).length;
+      const dlFailed = activeTasks.length - dlSuccess;
+      this.log('', `下载阶段完成。成功: ${dlSuccess}/${activeTasks.length}`);
+      if (dlSuccess === 0 && activeTasks.length > 0) {
+        this.setTaskState(activeTasks[0]?.id || '', {
+          step: '下载失败', message: `全部 ${dlFailed} 个视频下载失败，请检查链接和网络`
+        });
+      }
 
       // ── Phase 2: 串行执行 subtitle → edit → publish ──
       const runSingleTask = async (task, attemptIndex = 0) => {
@@ -780,7 +800,9 @@ class TaskRunner {
               inputVideoPath: dlResult.outputPath,
               log: (msg) => this.log(task.id, msg)
             }), 50);
-            createdTempFiles.push(subtitleResult.subtitlePath);
+            // #1: 记录字幕文件路径
+            const ttf = taskTempFiles.get(task.id);
+            if (ttf) ttf.subtitlePath = subtitleResult.subtitlePath;
           } else {
             this.setTaskState(task.id, { step: STEP_NAMES.subtitle, progress: 50, message: '字幕与旁白已关闭，跳过字幕生成' });
             this.log(task.id, '字幕生成已跳过（旁白语音关闭）。');
@@ -830,34 +852,28 @@ class TaskRunner {
             publishedRecords.push({ userId: job.userId, userName: job.userName, taskName: row.taskName, outputPath: outPath, publishAt: task.publishAt ? task.publishAt.toISOString() : nowIso(), publishedPlatforms, publishMode: publishResult?.mode || '', completedAt: nowIso(), runId: this.runId });
           }
 
-          // 清理缓存
-          await this.cleanupMainControlCache(dlResult.outputPath, subtitleResult.subtitlePath, createdTempFiles);
-
+          // #1: 不在这里清理，整批结束后统一清理
           await sleep(settings?.browser?.pauseBetweenTasksMs || 0);
           return { status: 'completed', retryable: false };
         } catch (error) {
-          const outputReady = !publishEnabled && editCompleted && await this.fileExists(outPath);
+          // #3: 修复 — 只要视频已生成就算完成，不受 publishEnabled 限制
+          const outputReady = editCompleted && await this.fileExists(outPath);
           if (outputReady) {
-            this.setTaskState(task.id, { status: 'completed', progress: 100, step: '完成', message: '自动发布已关闭，成品视频已输出', attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit, outputPath: outPath });
-            runRecord.items.push(this.buildRunItem(job, task, row, 'completed', { outputPath: outPath, publishAt: task.publishAt ? task.publishAt.toISOString() : '', publishedPlatforms: [], publishMode: 'disabled', finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, message: '自动发布已关闭，成品视频已输出' }));
-            await this.cleanupMainControlCache(dlResult.outputPath, '', createdTempFiles);
+            this.setTaskState(task.id, { status: 'completed', progress: 100, step: '完成', message: publishEnabled ? '发布失败，但视频已生成' : '成品视频已输出', attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit, outputPath: outPath });
+            runRecord.items.push(this.buildRunItem(job, task, row, 'completed', { outputPath: outPath, publishAt: task.publishAt ? task.publishAt.toISOString() : '', publishedPlatforms: [], publishMode: publishEnabled ? 'failed' : 'disabled', finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, message: publishEnabled ? '发布失败，但视频已生成' : '成品视频已输出' }));
             return { status: 'completed', retryable: false };
           }
 
           const isStopped = task.__stopped || (this.stopRequested && this.currentTaskId === task.id);
-          const noRetryEncryptedDownload = false;
           const status = isStopped ? 'stopped' : 'failed';
           const finalMessage = error.message;
-          const retryable = status === 'failed' && !noRetryEncryptedDownload;
+          const retryable = status === 'failed';
 
           this.setTaskState(task.id, { status, progress: row.progress, step: status === 'failed' ? '失败' : '停止', message: finalMessage, attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit });
           this.log(task.id, finalMessage, 'error');
 
           if (status === 'stopped') runRecord.status = 'stopped';
           runRecord.items.push(this.buildRunItem(job, task, row, status, { message: finalMessage, finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, retryable }));
-
-          // 清理缓存
-          await this.cleanupMainControlCache(dlResult?.outputPath, '', createdTempFiles);
 
           return { status, retryable };
         } finally {
@@ -893,6 +909,11 @@ class TaskRunner {
       if (runRecord.status === 'completed' && pendingRetries.length) {
         runRecord.status = 'partial_failed';
       }
+
+      // #1: 整批结束后统一清理缓存
+      for (const [, tmp] of taskTempFiles) {
+        await this.cleanupMainControlCache(tmp.downloadPath, tmp.subtitlePath);
+      }
     } catch (error) {
       runRecord.status = 'failed';
       runRecord.items.push({
@@ -910,7 +931,7 @@ class TaskRunner {
       if (publishedRecords.length) {
         await this.store.appendPublishedRecordsForUser(job.userId, publishedRecords);
       }
-      await this.cleanupTempFiles(createdTempFiles);
+      // #1: 缓存已在上面统一清理
 
       this.running = false;
       this.stopRequested = false;
@@ -1102,7 +1123,20 @@ class TaskRunner {
     }
   }
 
-  async cleanupMainControlCache(downloadPath, subtitlePath, createdTempFiles) {
+  async cleanupStaleCache(cacheDir) {
+    // 清理上次崩溃残留的临时文件
+    try {
+      const entries = await fs.readdir(cacheDir);
+      for (const e of entries) {
+        if (e.startsWith('.tmp_') || e.endsWith('.part')) {
+          const fp = path.join(cacheDir, e);
+          try { await fs.rm(fp, { recursive: true, force: true }); } catch {}
+        }
+      }
+    } catch {}
+  }
+
+  async cleanupMainControlCache(downloadPath, subtitlePath) {
     // 清理下载文件
     if (downloadPath) {
       try { await fs.rm(downloadPath, { force: true }); } catch {}
@@ -1121,14 +1155,6 @@ class TaskRunner {
     // 清理字幕文件
     if (subtitlePath) {
       try { await fs.rm(subtitlePath, { force: true }); } catch {}
-    }
-    // 清理帧提取等临时目录
-    if (Array.isArray(createdTempFiles)) {
-      for (const f of createdTempFiles) {
-        if (f && f.includes('_tmp')) {
-          try { await fs.rm(f, { recursive: true, force: true }); } catch {}
-        }
-      }
     }
   }
 }

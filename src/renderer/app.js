@@ -1203,7 +1203,7 @@ async function checkVoicebox() {
 }
 
 /* ── Actions ── */
-async function startTasks(){const raw=el.input?.value?.trim();if(!raw){toast('请输入任务','error');return}if(S.startup?.type!=='result')await runStartup();const ls=S.startup?.result?.loginState||{};if(!ls.videoChannel?.loggedIn&&!ls.douyin?.loggedIn){toast('请先登录视频号或抖音','error');return}try{const r=await window.antbot.startTasks(raw);appendPending({runId:r.runId,inputText:raw});el.input.value='';autoInput();queuePreview();toast(r.queued?`已排队 (${r.queuePosition})`:`已启动 ${r.taskCount} 条`,'success');renderChat({stick:true})}catch(e){toast(`失败: ${e.message}`,'error')}}
+async function startTasks(){const raw=el.input?.value?.trim();if(!raw){toast('请输入任务','error');return}if(S.startup?.type!=='result')await runStartup();const ls=S.startup?.result?.loginState||{};if(!ls.videoChannel?.loggedIn&&!ls.douyin?.loggedIn){toast('请先登录视频号或抖音','error');return}if(!S.editDefaults?.style&&!S.selectedStyle){toast('建议先在底部菜单选择风格，否则剪辑将无风格指导','info')}try{const r=await window.antbot.startTasks(raw);appendPending({runId:r.runId,inputText:raw});el.input.value='';autoInput();queuePreview();toast(r.queued?`已排队 (${r.queuePosition})`:`已启动 ${r.taskCount} 条`,'success');renderChat({stick:true})}catch(e){toast(`失败: ${e.message}`,'error')}}
 async function stopTasks(){try{await window.antbot.stopTasks();toast('已停止','success');await refreshAppState().catch(()=>{})}catch(e){toast(`失败: ${e.message}`,'error')}}
 async function saveSettings(){
   try{
