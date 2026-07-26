@@ -916,15 +916,21 @@ class TaskRunner {
                 this.log(task.id, '桥接服务已启动');
               }
 
-              // 2. 等待浏览器插件连接（最多 30 秒）
+              // 2. 创建桥接客户端 + 唤醒浏览器插件
               const bridge = createBrowserPublishBridge({
                 baseUrl: extensionConfig.baseUrl,
                 timeoutMs: Number(extensionConfig.timeoutMs) || 30 * 60 * 1000
               });
-              this.setTaskState(task.id, { step: '等待插件', message: '等待浏览器插件连接...' });
-              this.log(task.id, '等待浏览器插件连接...');
+              this.setTaskState(task.id, { step: '等待插件', message: '唤醒浏览器插件...' });
+              this.log(task.id, '唤醒浏览器插件...');
+              for (let w = 0; w < 3; w++) {
+                try { await bridge.getStatus(); } catch {}
+                await new Promise(r => setTimeout(r, 500));
+              }
+
+              // 3. 等待插件开始轮询（最多 15 秒）
               let extensionReady = false;
-              for (let i = 0; i < 30; i++) {
+              for (let i = 0; i < 15; i++) {
                 try {
                   const bridgeStatus = await bridge.getStatus();
                   if (bridgeStatus.extensionConnected) {
@@ -936,7 +942,7 @@ class TaskRunner {
                 await new Promise(r => setTimeout(r, 1000));
               }
               if (!extensionReady) {
-                throw new Error('浏览器插件未连接，请打开浏览器并确认插件已启用，然后重试');
+                throw new Error('浏览器插件未响应，请打开 Chrome 确认插件已启用，然后重试');
               }
             }
 
