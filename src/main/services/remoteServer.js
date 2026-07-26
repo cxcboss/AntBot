@@ -85,88 +85,214 @@ async function getMobileHTML() {
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>搬运蚁 - 远程控制</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{--bg:#FAFAFA;--card:#FFF;--text:#0A0A0A;--muted:#78716C;--border:#E7E5E2;--primary:#0D9488;--primary-hover:#0F766E;--primary-fg:#FFF;--accent:#F0FDFA;--accent-fg:#0D9488;--destructive:#DC2626;--success:#16A34A;--warning:#D97706;--radius:8px;--radius-lg:12px;--shadow:0 1px 3px rgba(0,0,0,0.06)}
 @media(prefers-color-scheme:dark){:root{--bg:#09090B;--card:#111113;--text:#FAFAFA;--muted:#A1A1AA;--border:#27272A;--primary:#5EEAD4;--primary-hover:#99F6E4;--primary-fg:#042F2E;--accent:#134E4A;--accent-fg:#5EEAD4;--shadow:0 1px 3px rgba(0,0,0,0.3)}}
-body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","PingFang SC",sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
-.container{max-width:480px;margin:0 auto;padding:0 16px}
+body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","PingFang SC",sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;overflow:hidden;height:100vh;height:100dvh}
 
-/* Login */
-.login{min-height:100vh;display:flex;align-items:center;justify-content:center}
-.login-box{width:100%;max-width:360px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:32px 24px;box-shadow:var(--shadow)}
-.login-title{font-size:20px;font-weight:700;text-align:center;margin-bottom:4px}
-.login-sub{font-size:13px;color:var(--muted);text-align:center;margin-bottom:24px}
-.login-logo{text-align:center;margin-bottom:16px;font-size:32px}
+/* Layout */
+.app{display:flex;flex-direction:column;height:100vh;height:100dvh}
+.header{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);background:var(--card);flex-shrink:0;height:48px;z-index:20}
+.header-title{flex:1;font-size:16px;font-weight:700}
+.header-user{font-size:12px;color:var(--muted);cursor:pointer;display:flex;align-items:center;gap:4px}
+.header-user:hover{color:var(--text)}
 
-/* Header */
-.header{position:sticky;top:0;z-index:10;background:var(--card);border-bottom:1px solid var(--border);padding:12px 16px;display:flex;align-items:center;gap:12px}
-.header-title{font-size:16px;font-weight:700;flex:1}
-.status-dot{width:8px;height:8px;border-radius:50%;background:var(--success)}
-.status-dot.offline{background:var(--muted)}
+/* Sidebar */
+.sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.3);z-index:30}
+.sidebar-overlay.show{display:block}
+.sidebar{position:fixed;left:0;top:0;bottom:0;width:240px;background:var(--card);border-right:1px solid var(--border);z-index:31;transform:translateX(-100%);transition:transform 200ms;display:flex;flex-direction:column}
+.sidebar.open{transform:translateX(0)}
+.sidebar-header{padding:16px;border-bottom:1px solid var(--border);font-size:16px;font-weight:700}
+.sidebar-nav{padding:8px;flex:1}
+.nav-item{display:flex;align-items:center;gap:8px;width:100%;padding:10px 12px;border-radius:var(--radius);font-size:14px;color:var(--text);background:none;border:none;cursor:pointer;transition:background 120ms}
+.nav-item:hover{background:var(--accent)}
+.nav-item.active{background:var(--accent);color:var(--accent-fg);font-weight:600}
+.nav-icon{width:18px;height:18px;opacity:0.7}
+.nav-item.active .nav-icon{opacity:1}
 
-/* Input */
-.input{width:100%;height:40px;padding:0 12px;border:1px solid var(--input,var(--border));border-radius:var(--radius);background:var(--card);color:var(--text);font-size:14px;font-family:inherit}
-.input:focus{outline:none;border-color:var(--ring,var(--primary));box-shadow:0 0 0 3px color-mix(in srgb,var(--primary) 15%,transparent)}
-.textarea{min-height:80px;padding:8px 12px;resize:vertical;line-height:1.5}
+/* Main content */
+.content{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}
 
-/* Button */
-.btn{display:inline-flex;align-items:center;justify-content:center;height:40px;padding:0 16px;border-radius:var(--radius);font-size:14px;font-weight:500;border:none;cursor:pointer;transition:all 120ms}
-.btn-primary{background:var(--primary);color:var(--primary-fg)}
-.btn-primary:hover{background:var(--primary-hover)}
-.btn-primary:active{transform:scale(0.98)}
-.btn-primary:disabled{opacity:0.5;cursor:not-allowed}
-.btn-ghost{background:transparent;border:1px solid var(--border);color:var(--text)}
-.btn-ghost:hover{background:var(--accent)}
-.btn-sm{height:32px;padding:0 12px;font-size:12px}
-.btn-icon{width:32px;height:32px;padding:0;border-radius:var(--radius)}
+/* Chat area */
+.chat{flex:1;min-height:0;overflow-y:auto;padding:12px 12px 80px}
+.chat-stream{display:flex;flex-direction:column;gap:8px}
 
-/* Task cards */
-.tasks{display:flex;flex-direction:column;gap:8px;padding:12px 0}
-.task{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px 14px;box-shadow:var(--shadow)}
-.task-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px}
-.task-name{font-size:13px;font-weight:600}
-.task-badge{font-size:11px;font-weight:500;padding:2px 8px;border-radius:999px}
-.task-badge.running{background:var(--accent);color:var(--accent-fg)}
-.task-badge.completed{background:#DCFCE7;color:var(--success)}
-.task-badge.failed{background:#FEE2E2;color:var(--destructive)}
-.task-badge.pending{background:var(--muted);color:var(--bg)}
-.task-msg{font-size:12px;color:var(--muted);margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.task-bar{height:3px;background:var(--border);border-radius:999px;margin-top:8px;overflow:hidden}
+/* Task card */
+.task{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:10px 12px;box-shadow:var(--shadow);max-width:100%}
+.task-head{display:flex;align-items:center;gap:6px;margin-bottom:4px}
+.task-name{font-size:13px;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.task-badge{font-size:10px;font-weight:500;padding:2px 8px;border-radius:999px;flex-shrink:0}
+.badge-running{background:var(--accent);color:var(--accent-fg)}
+.badge-completed{background:#DCFCE7;color:var(--success)}
+.badge-failed{background:#FEE2E2;color:var(--destructive)}
+.badge-warning{background:#FEF3C7;color:var(--warning)}
+.badge-pending{background:var(--muted);color:var(--bg)}
+.task-msg{font-size:11px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.task-bar{height:3px;background:var(--border);border-radius:999px;margin-top:6px;overflow:hidden}
 .task-bar-fill{height:100%;background:var(--primary);border-radius:999px;transition:width 300ms}
 .task-bar-fill.done{background:var(--success)}
 .task-bar-fill.error{background:var(--destructive)}
-.task-actions{display:flex;gap:6px;margin-top:8px;justify-content:flex-end}
-
-/* Tags */
-.tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px}
-.tag{font-size:10px;padding:2px 6px;border-radius:999px;background:var(--accent);color:var(--accent-fg)}
+.task-actions{display:flex;gap:6px;margin-top:6px}
+.task-tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px}
+.tag{font-size:10px;padding:1px 6px;border-radius:999px;color:var(--muted-foreground);background:var(--accent);color:var(--accent-fg)}
 .tag-original{background:#DCFCE7;color:var(--success)}
 
-/* Composer */
-.composer{position:sticky;bottom:0;background:var(--card);border-top:1px solid var(--border);padding:12px 16px}
-.composer-row{display:flex;gap:8px;align-items:flex-end}
+/* Empty state */
+.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--muted);gap:8px;padding:32px}
+.empty-icon{font-size:32px;opacity:0.4}
 
-/* Empty */
-.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:48px 16px;color:var(--muted);gap:8px}
-.empty-icon{font-size:32px;opacity:0.5}
+/* Input bar */
+.input-bar{position:sticky;bottom:0;left:0;right:0;background:var(--card);border-top:1px solid var(--border);padding:8px 12px;z-index:10;flex-shrink:0}
+.input-row{display:flex;gap:8px;align-items:flex-end}
+.input-field{flex:1;min-height:36px;max-height:120px;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--bg);color:var(--text);font-size:14px;font-family:inherit;line-height:1.4;resize:none;outline:none}
+.input-field:focus{border-color:var(--primary);box-shadow:0 0 0 3px color-mix(in srgb,var(--primary) 15%,transparent)}
+.input-field::placeholder{color:var(--muted)}
+.send-btn{width:36px;height:36px;border-radius:var(--radius);background:var(--primary);color:var(--primary-fg);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:background 120ms}
+.send-btn:hover{background:var(--primary-hover)}
+.send-btn:disabled{opacity:0.5;cursor:not-allowed}
+.chips{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}
+.chip{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 8px;border-radius:999px;font-size:11px;background:var(--muted);color:var(--text);cursor:pointer;transition:background 120ms}
+.chip:hover{background:var(--border)}
+.chip.active{background:var(--accent);color:var(--accent-fg)}
 
-/* Toast */
-.toast{position:fixed;top:16px;left:50%;transform:translateX(-50%);background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:8px 16px;font-size:13px;box-shadow:var(--shadow);z-index:100;animation:fadeIn 200ms}
-@keyframes fadeIn{from{opacity:0;transform:translateX(-50%) translateY(-8px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+/* Subtitle page */
+.page{display:none;flex:1;overflow-y:auto;padding:12px}
+.page.active{display:block}
+.form-group{margin-bottom:16px}
+.form-label{font-size:12px;color:var(--muted);margin-bottom:4px;display:block}
+.form-input{width:100%;height:40px;padding:0 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:14px;font-family:inherit}
+.form-input:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px color-mix(in srgb,var(--primary) 15%,transparent)}
+.form-row{display:flex;gap:12px}
+.form-row .form-group{flex:1}
+.btn{display:inline-flex;align-items:center;justify-content:center;height:40px;padding:0 16px;border-radius:var(--radius);font-size:14px;font-weight:500;border:none;cursor:pointer;transition:all 120ms}
+.btn-primary{background:var(--primary);color:var(--primary-fg)}
+.btn-primary:hover{background:var(--primary-hover)}
+.btn-ghost{background:transparent;border:1px solid var(--border);color:var(--text)}
+.btn-block{width:100%}
+.color-input{width:48px;height:32px;border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;padding:2px}
+
+/* Remote page */
+.section-title{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;margin-top:16px}
+
+/* Dialog */
+.dialog-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:100;align-items:center;justify-content:center}
+.dialog-overlay.show{display:flex}
+.dialog{background:var(--card);border-radius:var(--radius-lg);padding:20px;max-width:320px;width:90%;box-shadow:var(--shadow)}
+.dialog-title{font-size:16px;font-weight:600;margin-bottom:8px}
+.dialog-text{font-size:13px;color:var(--muted);margin-bottom:16px}
+.dialog-actions{display:flex;gap:8px;justify-content:flex-end}
 </style>
 </head>
 <body>
-<div id="app"></div>
+<div class="app" id="app">
+  <!-- Header -->
+  <div class="header">
+    <button class="nav-item" id="sidebar-toggle" style="width:auto;padding:6px;flex-shrink:0">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" x2="21" y1="6" y2="6"/><line x1="3" x2="21" y1="12" y2="12"/><line x1="3" x2="21" y1="18" y2="18"/></svg>
+    </button>
+    <span class="header-title" id="header-title">主控</span>
+    <span class="header-user" id="header-user">-</span>
+  </div>
+
+  <!-- Sidebar overlay -->
+  <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+  <!-- Sidebar -->
+  <div class="sidebar" id="sidebar">
+    <div class="sidebar-header">🐜 搬运蚁</div>
+    <nav class="sidebar-nav">
+      <button class="nav-item active" data-page="main" type="button">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        主控
+      </button>
+      <button class="nav-item" data-page="subtitle" type="button">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+        字幕
+      </button>
+      <button class="nav-item" data-page="remote" type="button">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+        远程
+      </button>
+    </nav>
+  </div>
+
+  <!-- Main content -->
+  <div class="content" id="content">
+    <!-- Main page (chat) -->
+    <div class="page active" id="page-main">
+      <div class="chat" id="chat">
+        <div class="chat-stream" id="chat-stream">
+          <div class="empty" id="empty-state"><div class="empty-icon">📋</div><div>粘贴视频链接开始下载</div><div style="font-size:12px;color:var(--muted)">支持 YouTube、抖音、TikTok、B站</div></div>
+        </div>
+      </div>
+      <div class="input-bar">
+        <div class="input-row">
+          <textarea class="input-field" id="task-input" placeholder="粘贴视频链接..." rows="1"></textarea>
+          <button class="send-btn" id="send-btn" type="button">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+          </button>
+        </div>
+        <div class="chips" id="chips"></div>
+      </div>
+    </div>
+
+    <!-- Subtitle page -->
+    <div class="page" id="page-subtitle">
+      <div class="form-group">
+        <label class="form-label">字幕颜色</label>
+        <input class="color-input" id="sub-color" type="color" value="#FFA100" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">描边颜色</label>
+        <input class="color-input" id="sub-stroke" type="color" value="#000000" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">字幕位置 (0-100)</label>
+        <input class="form-input" id="sub-position" type="number" min="0" max="100" value="12" />
+      </div>
+      <button class="btn btn-primary btn-block" id="sub-save-btn" type="button">保存设置</button>
+    </div>
+
+    <!-- Remote page -->
+    <div class="page" id="page-remote">
+      <div class="section-title">远程设置</div>
+      <div class="form-group">
+        <label class="form-label">用户名</label>
+        <input class="form-input" id="remote-user" type="text" placeholder="admin" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">密码</label>
+        <input class="form-input" id="remote-pass" type="password" placeholder="设置密码" />
+      </div>
+      <button class="btn btn-primary btn-block" id="remote-save-btn" type="button">保存并重新登录</button>
+    </div>
+  </div>
+
+  <!-- Logout dialog -->
+  <div class="dialog-overlay" id="logout-dialog">
+    <div class="dialog">
+      <div class="dialog-title">退出登录</div>
+      <div class="dialog-text">确认退出当前账号？</div>
+      <div class="dialog-actions">
+        <button class="btn btn-ghost" id="logout-cancel" type="button">取消</button>
+        <button class="btn btn-primary" id="logout-confirm" type="button">确认退出</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 const API = window.location.origin;
 let token = localStorage.getItem('antbot-token');
 let tasks = [];
 let sseSource = null;
+let currentPage = 'main';
+let currentUser = localStorage.getItem('antbot-user') || '';
 
-// Auth
+// === Auth ===
 async function login(username, password) {
   const res = await fetch(API + '/remote/login', {
     method: 'POST',
@@ -176,9 +302,10 @@ async function login(username, password) {
   const data = await res.json();
   if (data.ok) {
     token = data.token;
+    currentUser = username;
     localStorage.setItem('antbot-token', token);
-    renderApp();
-    connectSSE();
+    localStorage.setItem('antbot-user', username);
+    initApp();
   } else {
     showToast(data.error || '登录失败');
   }
@@ -186,12 +313,14 @@ async function login(username, password) {
 
 function logout() {
   token = null;
+  currentUser = '';
   localStorage.removeItem('antbot-token');
+  localStorage.removeItem('antbot-user');
   if (sseSource) sseSource.close();
-  renderApp();
+  renderLogin();
 }
 
-// API calls
+// === API ===
 async function api(method, path, body) {
   const opts = {
     method,
@@ -203,7 +332,7 @@ async function api(method, path, body) {
   return res.json();
 }
 
-// SSE
+// === SSE ===
 function connectSSE() {
   if (sseSource) sseSource.close();
   sseSource = new EventSource(API + '/remote/events?token=' + token);
@@ -219,144 +348,210 @@ function connectSSE() {
     tasks = status.tasks || [];
     renderTasks();
   });
-  sseSource.onerror = () => {
-    document.querySelector('.status-dot')?.classList.add('offline');
-  };
-  sseSource.onopen = () => {
-    document.querySelector('.status-dot')?.classList.remove('offline');
-  };
 }
 
-// Toast
+// === Toast ===
 function showToast(msg, duration = 3000) {
   const existing = document.querySelector('.toast');
   if (existing) existing.remove();
-  const toast = document.createElement('div');
-  toast.className = 'toast';
-  toast.textContent = msg;
-  document.body.appendChild(toast);
-  setTimeout(() => toast.remove(), duration);
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.textContent = msg;
+  el.style.cssText = 'position:fixed;top:56px;left:50%;transform:translateX(-50%);background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:8px 16px;font-size:13px;box-shadow:var(--shadow);z-index:200;animation:fadeIn 200ms';
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), duration);
 }
 
-// Render
-function renderApp() {
-  const app = document.getElementById('app');
-  if (!token) {
-    app.innerHTML = renderLogin();
-    document.getElementById('login-form')?.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const u = document.getElementById('login-user').value;
-      const p = document.getElementById('login-pass').value;
-      login(u, p);
-    });
-  } else {
-    app.innerHTML = renderMain();
-    bindMainEvents();
-    api('GET', '/status').then(data => {
-      if (data) { tasks = data.tasks || []; renderTasks(); }
-    });
-    connectSSE();
-  }
-}
+// === Render ===
+function esc(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 function renderLogin() {
-  return '<div class="login"><div class="login-box">' +
-    '<div class="login-logo">🐜</div>' +
-    '<div class="login-title">搬运蚁远程控制</div>' +
-    '<div class="login-sub">输入账号密码连接到你的电脑</div>' +
+  document.getElementById('app').innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;padding:24px">' +
+    '<div style="width:100%;max-width:360px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:32px 24px;box-shadow:var(--shadow)">' +
+    '<div style="text-align:center;font-size:32px;margin-bottom:16px">🐜</div>' +
+    '<div style="text-align:center;font-size:18px;font-weight:700;margin-bottom:4px">搬运蚁远程控制</div>' +
+    '<div style="text-align:center;font-size:13px;color:var(--muted);margin-bottom:24px">输入账号密码连接到你的电脑</div>' +
     '<form id="login-form">' +
-    '<div style="margin-bottom:12px"><input class="input" id="login-user" type="text" placeholder="用户名" autocomplete="username"></div>' +
-    '<div style="margin-bottom:16px"><input class="input" id="login-pass" type="password" placeholder="密码" autocomplete="current-password"></div>' +
-    '<button class="btn btn-primary" style="width:100%" type="submit">登录</button>' +
+    '<div style="margin-bottom:12px"><input class="form-input" id="login-user" type="text" placeholder="用户名" autocomplete="username" style="width:100%"></div>' +
+    '<div style="margin-bottom:16px"><input class="form-input" id="login-pass" type="password" placeholder="密码" autocomplete="current-password" style="width:100%"></div>' +
+    '<button class="btn btn-primary btn-block" type="submit">登录</button>' +
     '</form></div></div>';
+  document.getElementById('login-form')?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    login(document.getElementById('login-user').value, document.getElementById('login-pass').value);
+  });
 }
 
-function renderMain() {
+function initApp() {
+  document.getElementById('app').innerHTML = renderAppShell();
+  bindEvents();
+  loadSettings();
+  loadTasks();
+  connectSSE();
+}
+
+function renderAppShell() {
   return '<div class="header">' +
-    '<span style="font-size:20px">🐜</span>' +
-    '<span class="header-title">搬运蚁</span>' +
-    '<span class="status-dot" title="连接状态"></span>' +
-    '<button class="btn btn-ghost btn-sm" onclick="logout()">退出</button>' +
+    '<button class="nav-item" id="sidebar-toggle" style="width:auto;padding:6px;flex-shrink:0">' +
+    '<svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" x2="21" y1="6" y2="6"/><line x1="3" x2="21" y1="12" y2="12"/><line x1="3" x2="21" y1="18" y2="18"/></svg>' +
+    '</button>' +
+    '<span class="header-title" id="header-title">主控</span>' +
+    '<span class="header-user" id="header-user">' + esc(currentUser) + '</span>' +
     '</div>' +
-    '<div class="container"><div class="tasks" id="tasks"><div class="empty"><div class="empty-icon">📋</div><div>粘贴链接开始下载</div></div></div></div>' +
-    '<div class="composer"><div class="container"><div class="composer-row">' +
-    '<textarea class="input textarea" id="task-input" placeholder="粘贴视频链接，多个用逗号或换行隔开" rows="1"></textarea>' +
-    '<button class="btn btn-primary btn-icon" id="send-btn" type="button">↑</button>' +
-    '</div></div></div>';
+    '<div class="sidebar-overlay" id="sidebar-overlay"></div>' +
+    '<div class="sidebar" id="sidebar">' +
+    '<div class="sidebar-header">🐜 搬运蚁</div>' +
+    '<nav class="sidebar-nav">' +
+    '<button class="nav-item active" data-page="main"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>主控</button>' +
+    '<button class="nav-item" data-page="subtitle"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>字幕</button>' +
+    '<button class="nav-item" data-page="remote"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>远程</button>' +
+    '</nav></div>' +
+    '<div class="content" id="content">' +
+    '<div class="page active" id="page-main">' +
+    '<div class="chat" id="chat"><div class="chat-stream" id="chat-stream"><div class="empty" id="empty-state"><div class="empty-icon">📋</div><div>粘贴视频链接开始下载</div></div></div></div>' +
+    '<div class="input-bar"><div class="input-row">' +
+    '<textarea class="input-field" id="task-input" placeholder="粘贴视频链接..." rows="1"></textarea>' +
+    '<button class="send-btn" id="send-btn" type="button"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg></button>' +
+    '</div><div class="chips" id="chips"></div></div>' +
+    '</div>' +
+    '<div class="page" id="page-subtitle">' +
+    '<div class="form-group"><label class="form-label">字幕颜色</label><input class="color-input" id="sub-color" type="color" value="#FFA100" /></div>' +
+    '<div class="form-group"><label class="form-label">描边颜色</label><input class="color-input" id="sub-stroke" type="color" value="#000000" /></div>' +
+    '<div class="form-group"><label class="form-label">字幕位置 (0-100)</label><input class="form-input" id="sub-position" type="number" min="0" max="100" value="12" /></div>' +
+    '<button class="btn btn-primary btn-block" id="sub-save-btn" type="button">保存设置</button>' +
+    '</div>' +
+    '<div class="page" id="page-remote">' +
+    '<div class="section-title">远程设置</div>' +
+    '<div class="form-group"><label class="form-label">用户名</label><input class="form-input" id="remote-user" type="text" /></div>' +
+    '<div class="form-group"><label class="form-label">密码</label><input class="form-input" id="remote-pass" type="password" /></div>' +
+    '<button class="btn btn-primary btn-block" id="remote-save-btn" type="button">保存并重新登录</button>' +
+    '</div>' +
+    '</div>' +
+    '<div class="dialog-overlay" id="logout-dialog"><div class="dialog"><div class="dialog-title">退出登录</div><div class="dialog-text">确认退出当前账号？</div><div class="dialog-actions"><button class="btn btn-ghost" id="logout-cancel">取消</button><button class="btn btn-primary" id="logout-confirm">确认退出</button></div></div></div>';
 }
 
-function renderTasks() {
-  const el = document.getElementById('tasks');
-  if (!el) return;
-  if (!tasks.length) {
-    el.innerHTML = '<div class="empty"><div class="empty-icon">📋</div><div>粘贴链接开始下载</div></div>';
-    return;
-  }
-
-  const sorted = [...tasks].sort((a, b) => {
-    const ai = a.index || a.queueIndex || 0;
-    const bi = b.index || b.queueIndex || 0;
-    return ai - bi;
+function bindEvents() {
+  // Sidebar toggle
+  document.getElementById('sidebar-toggle')?.addEventListener('click', () => {
+    document.getElementById('sidebar')?.classList.toggle('open');
+    document.getElementById('sidebar-overlay')?.classList.toggle('show');
+  });
+  document.getElementById('sidebar-overlay')?.addEventListener('click', () => {
+    document.getElementById('sidebar')?.classList.remove('open');
+    document.getElementById('sidebar-overlay')?.classList.remove('show');
   });
 
-  el.innerHTML = sorted.map(t => {
-    const st = t.status || 'pending';
-    const pg = Math.max(0, Math.min(100, Number(t.progress || 0)));
-    const idx = t.index || t.queueIndex || 0;
-    const name = idx ? '任务' + idx : (t.isOriginal ? '原创' : (t.taskName || '任务'));
-    const badge = { pending: '等待', queued: '等待', running: '执行中', completed: '成功', warning: '部分完成', failed: '失败', stopped: '已停止' }[st] || st;
-    const badgeClass = { running: 'running', completed: 'completed', warning: 'running', failed: 'failed' }[st] || 'pending';
-    const barClass = st === 'completed' ? 'done' : st === 'failed' ? 'error' : '';
-    const msg = t.message || '';
-    const isOriginal = t.isOriginal;
+  // Navigation
+  document.querySelectorAll('.nav-item[data-page]').forEach(btn => {
+    btn.addEventListener('click', () => switchPage(btn.dataset.page));
+  });
 
-    let actions = '';
-    if (st === 'failed') actions += '<button class="btn btn-ghost btn-sm" data-action="retry" data-id="' + t.id + '">重试</button>';
-    if (['pending', 'queued', 'running'].includes(st)) actions += '<button class="btn btn-ghost btn-sm" data-action="stop" data-id="' + t.id + '">停止</button>';
+  // Username click -> logout dialog
+  document.getElementById('header-user')?.addEventListener('click', () => {
+    document.getElementById('logout-dialog')?.classList.add('show');
+  });
+  document.getElementById('logout-cancel')?.addEventListener('click', () => {
+    document.getElementById('logout-dialog')?.classList.remove('show');
+  });
+  document.getElementById('logout-confirm')?.addEventListener('click', () => {
+    document.getElementById('logout-dialog')?.classList.remove('show');
+    logout();
+  });
 
-    return '<div class="task">' +
-      '<div class="task-head"><span class="task-name">' + esc(name) + '</span><span class="task-badge ' + badgeClass + '">' + badge + '</span></div>' +
-      (isOriginal ? '<div class="tags"><span class="tag tag-original">原创</span></div>' : '') +
-      (msg ? '<div class="task-msg">' + esc(msg) + '</div>' : '') +
-      '<div class="task-bar"><div class="task-bar-fill ' + barClass + '" style="width:' + pg + '%"></div></div>' +
-      (actions ? '<div class="task-actions">' + actions + '</div>' : '') +
-      '</div>';
-  }).join('');
-}
-
-function esc(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-
-function bindMainEvents() {
+  // Task input
   const input = document.getElementById('task-input');
-  const btn = document.getElementById('send-btn');
-
   if (input) {
     input.addEventListener('input', () => {
       input.style.height = 'auto';
       input.style.height = Math.min(input.scrollHeight, 120) + 'px';
     });
     input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        sendTask();
-      }
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendTask(); }
     });
   }
-  if (btn) btn.addEventListener('click', sendTask);
+  document.getElementById('send-btn')?.addEventListener('click', sendTask);
 
-  document.getElementById('tasks')?.addEventListener('click', async (e) => {
-    const actionBtn = e.target.closest('[data-action]');
-    if (!actionBtn) return;
-    const action = actionBtn.dataset.action;
-    const id = actionBtn.dataset.id;
-    if (action === 'stop') {
-      await api('POST', '/tasks/' + id + '/stop');
-      showToast('已停止');
-    } else if (action === 'retry') {
-      await api('POST', '/tasks/' + id + '/retry');
-      showToast('已重试');
-    }
+  // Task actions (event delegation)
+  document.getElementById('chat-stream')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    const id = btn.dataset.id;
+    const action = btn.dataset.action;
+    if (action === 'stop') api('POST', '/tasks/' + id + '/stop').then(() => showToast('已停止'));
+    if (action === 'retry') api('POST', '/tasks/' + id + '/retry').then(() => showToast('已重试'));
   });
+
+  // Subtitle save
+  document.getElementById('sub-save-btn')?.addEventListener('click', async () => {
+    const color = document.getElementById('sub-color')?.value;
+    const stroke = document.getElementById('sub-stroke')?.value;
+    const position = document.getElementById('sub-position')?.value;
+    await api('POST', '/remote/settings', {
+      style: { subtitleTextColor: color, subtitleStrokeColor: stroke, subtitlePositionPercent: parseInt(position) || 12 }
+    });
+    showToast('字幕设置已保存');
+  });
+
+  // Remote save
+  document.getElementById('remote-save-btn')?.addEventListener('click', async () => {
+    const user = document.getElementById('remote-user')?.value?.trim();
+    const pass = document.getElementById('remote-pass')?.value?.trim();
+    if (!pass) { showToast('请设置密码'); return; }
+    await api('POST', '/remote/settings', { remote: { username: user, password: pass } });
+    showToast('已保存，需要重新登录');
+    setTimeout(() => logout(), 1000);
+  });
+}
+
+function switchPage(page) {
+  currentPage = page;
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-' + page)?.classList.add('active');
+  document.querySelectorAll('.nav-item[data-page]').forEach(n => n.classList.toggle('active', n.dataset.page === page));
+  document.getElementById('header-title').textContent = { main: '主控', subtitle: '字幕', remote: '远程' }[page] || '主控';
+  document.getElementById('sidebar')?.classList.remove('open');
+  document.getElementById('sidebar-overlay')?.classList.remove('show');
+  if (page === 'subtitle') loadSubtitleSettings();
+  if (page === 'remote') loadRemoteSettings();
+}
+
+async function loadSettings() {
+  const data = await api('GET', '/remote/settings');
+  if (!data) return;
+  renderChips(data);
+}
+
+function renderChips(settings) {
+  const chips = document.getElementById('chips');
+  if (!chips) return;
+  const style = settings?.editDefaults?.style || '未设置';
+  const voice = settings?.voiceClone?.profileName || '未设置';
+  const retry = settings?.retry?.failedTaskRetries ?? 0;
+  chips.innerHTML =
+    '<span class="chip" title="风格">' + esc(style) + '</span>' +
+    '<span class="chip" title="音色">' + esc(voice) + '</span>' +
+    '<span class="chip" title="重试次数">重试' + retry + '次</span>';
+}
+
+async function loadSubtitleSettings() {
+  const data = await api('GET', '/remote/settings');
+  if (!data) return;
+  const s = data?.style || {};
+  if (document.getElementById('sub-color')) document.getElementById('sub-color').value = s.subtitleTextColor || '#FFA100';
+  if (document.getElementById('sub-stroke')) document.getElementById('sub-stroke').value = s.subtitleStrokeColor || '#000000';
+  if (document.getElementById('sub-position')) document.getElementById('sub-position').value = s.subtitlePositionPercent ?? 12;
+}
+
+async function loadRemoteSettings() {
+  const creds = await api('GET', '/remote/credentials');
+  if (!creds) return;
+  if (document.getElementById('remote-user')) document.getElementById('remote-user').value = creds.username || '';
+  if (document.getElementById('remote-pass')) document.getElementById('remote-pass').value = creds.password || '';
+}
+
+async function loadTasks() {
+  const data = await api('GET', '/tasks');
+  if (data?.tasks) { tasks = data.tasks; renderTasks(); }
 }
 
 async function sendTask() {
@@ -365,9 +560,7 @@ async function sendTask() {
   const text = input.value.trim();
   if (!text) return;
   input.disabled = true;
-  const btn = document.getElementById('send-btn');
-  if (btn) btn.disabled = true;
-
+  document.getElementById('send-btn').disabled = true;
   try {
     const data = await api('POST', '/tasks', { text });
     if (data?.ok) {
@@ -377,17 +570,55 @@ async function sendTask() {
     } else {
       showToast(data?.error || '发送失败');
     }
-  } catch (e) {
-    showToast('网络错误');
-  }
-
+  } catch { showToast('网络错误'); }
   input.disabled = false;
-  if (btn) btn.disabled = false;
+  document.getElementById('send-btn').disabled = false;
   input.focus();
 }
 
-// Init
-renderApp();
+function renderTasks() {
+  const stream = document.getElementById('chat-stream');
+  const empty = document.getElementById('empty-state');
+  if (!stream) return;
+  if (!tasks.length) {
+    if (empty) empty.style.display = '';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+
+  const sorted = [...tasks].sort((a, b) => (a.index || a.queueIndex || 0) - (b.index || b.queueIndex || 0));
+
+  stream.innerHTML = sorted.map(t => {
+    const st = t.status || 'pending';
+    const pg = Math.max(0, Math.min(100, Number(t.progress || 0)));
+    const idx = t.index || t.queueIndex || 0;
+    const name = idx ? '任务' + idx : (t.isOriginal ? '原创' : (t.taskName || '任务'));
+    const badgeClass = { running: 'badge-running', completed: 'badge-completed', warning: 'badge-warning', failed: 'badge-failed' }[st] || 'badge-pending';
+    const badgeText = { pending: '等待', queued: '等待', running: '执行中', completed: '成功', warning: '部分完成', failed: '失败', stopped: '已停止' }[st] || st;
+    const barClass = st === 'completed' ? 'done' : st === 'failed' ? 'error' : '';
+    const msg = t.message || '';
+    const isOriginal = t.isOriginal;
+
+    let actions = '';
+    if (st === 'failed') actions += '<button class="btn btn-ghost" style="height:28px;padding:0 10px;font-size:11px" data-action="retry" data-id="' + t.id + '">重试</button>';
+    if (['pending', 'queued', 'running'].includes(st)) actions += '<button class="btn btn-ghost" style="height:28px;padding:0 10px;font-size:11px" data-action="stop" data-id="' + t.id + '">停止</button>';
+
+    return '<div class="task">' +
+      '<div class="task-head"><span class="task-name">' + esc(name) + '</span><span class="task-badge ' + badgeClass + '">' + badgeText + '</span></div>' +
+      (isOriginal ? '<div class="tasks"><span class="tag tag-original">原创</span></div>' : '') +
+      (msg ? '<div class="task-msg">' + esc(msg) + '</div>' : '') +
+      '<div class="task-bar"><div class="task-bar-fill ' + barClass + '" style="width:' + pg + '%"></div></div>' +
+      (actions ? '<div class="task-actions">' + actions + '</div>' : '') +
+      '</div>';
+  }).join('');
+
+  // Auto scroll to bottom
+  const chat = document.getElementById('chat');
+  if (chat) chat.scrollTop = chat.scrollHeight;
+}
+
+// === Init ===
+if (token) initApp(); else renderLogin();
 </script>
 </body>
 </html>`;
@@ -537,6 +768,29 @@ function startRemoteServer({ store, taskRunner, mainWindowRef, appLog }) {
       if (method === 'GET' && pathname === '/remote/tasks') {
         const status = await getStatus();
         return sendJson(res, 200, { ok: true, tasks: status.tasks });
+      }
+
+      // GET /remote/credentials — 读取用户名密码（不经过 getSettings 清空）
+      if (method === 'GET' && pathname === '/remote/credentials') {
+        try {
+          const storePath = path.join(os.homedir(), 'AntBot', 'antbot-store.json');
+          const data = JSON.parse(await fs.readFile(storePath, 'utf-8'));
+          const remote = data.users?.[0]?.settings?.remote || {};
+          return sendJson(res, 200, { ok: true, username: remote.username || '', password: remote.password || '' });
+        } catch { return sendJson(res, 200, { ok: true, username: '', password: '' }); }
+      }
+
+      // GET /remote/settings — 读取设置（字幕等）
+      if (method === 'GET' && pathname === '/remote/settings') {
+        const settings = await _store.getSettings();
+        return sendJson(res, 200, { ok: true, ...settings });
+      }
+
+      // POST /remote/settings — 更新设置
+      if (method === 'POST' && pathname === '/remote/settings') {
+        const body = await readBody(req);
+        await _store.updateSettings(body);
+        return sendJson(res, 200, { ok: true });
       }
 
       // 404
