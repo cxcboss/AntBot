@@ -362,12 +362,14 @@ body:not([data-platform="darwin"]) .app{padding-top:0}
 
 /* ── Task cards ── */
 .task-stack{display:flex;flex-direction:column;gap:4px}
-.task{position:relative;overflow:hidden;border-radius:var(--radius-lg);background:var(--card);margin-bottom:1px;box-shadow:var(--shadow-xs)}
+.task{position:relative;overflow:hidden;border-radius:var(--radius-lg);background:var(--card);margin-bottom:1px;box-shadow:var(--shadow-xs);max-width:520px}
 .task-head{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 12px 4px}
 .task-title{font-size:12px;font-weight:600}
 .task-badge{font-size:10px;font-weight:500;color:var(--muted-foreground);white-space:nowrap}
 .task.warning .task-badge{color:var(--warning)}
 .task.failed .task-badge{color:var(--destructive)}
+.task-tags{display:flex;gap:4px;padding:0 12px 4px}
+.task-tag{font-size:10px;font-weight:500;padding:2px 8px;border-radius:var(--radius-full);background:var(--accent);color:var(--accent-foreground)}
 .task-msg{font-size:10px;color:var(--muted-foreground);padding:0 12px 4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .task.failed .task-msg{color:var(--destructive)}
 .task.warning .task-msg{color:var(--warning)}

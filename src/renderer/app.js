@@ -118,12 +118,14 @@ function initDialogClose(){document.querySelectorAll('dialog.dlg').forEach(dlg=>
 /* ── Format bubble text ── */
 function formatBubbleText(raw){
   if(!raw)return'';const lines=raw.split(/\r?\n/).filter(l=>l.trim());
-  return lines.map((line,i)=>{const num=`${i+1}、`;const f=line.replace(/https?:\/\/[^\s,，]+/g,url=>{try{const u=new URL(url);const path=u.pathname.length>15?u.pathname.slice(0,15)+'...':'';return u.hostname+path}catch{return url.slice(0,30)+'...'}});return num+esc(f)}).join('\n');
+  const showNum=lines.length>=3;
+  return lines.map((line,i)=>{const num=showNum?`${i+1}、`:'';const f=line.replace(/https?:\/\/[^\s,，]+/g,url=>{try{const u=new URL(url);const p=u.pathname.length>15?u.pathname.slice(0,15)+'...':'';return u.hostname+p}catch{return url.slice(0,30)+'...'}});return num+esc(f)}).join('\n');
 }
 function makeBubbleHtml(raw){
   const formatted=formatBubbleText(raw);
   const rawLines=raw.split(/\r?\n/).filter(l=>l.trim());
-  const numbered=rawLines.map((l,i)=>`${i+1}、${l}`).join('\n');
+  const showNum=rawLines.length>=3;
+  const numbered=rawLines.map((l,i)=>(showNum?`${i+1}、`:``)+l).join('\n');
   return`<div class="msg-content">${formatted}</div><button class="msg-raw-toggle" type="button" onclick="this.nextElementSibling.classList.toggle('show');this.textContent=this.nextElementSibling.classList.contains('show')?'隐藏原文':'显示原文'">显示原文</button><div class="msg-raw">${esc(numbered)}</div>`;
 }
 
@@ -225,11 +227,16 @@ function taskCard(t,live=false){
   const canCancel=live&&['queued','pending','running'].includes(st);
   const canRetry=live&&['failed'].includes(st);
   const msg=t.message?`<div class="task-msg">${esc(t.message)}</div>`:'';
+  // 额外信息标签
+  const tags=[];
+  if(t.isOriginal)tags.push('<span class="task-tag">原创</span>');
+  if(t.publishAt){const d=new Date(t.publishAt);if(!isNaN(d))tags.push(`<span class="task-tag">定时 ${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}</span>`)}
+  const tagsHtml=tags.length?`<div class="task-tags">${tags.join('')}</div>`:'';
   const acts=[];
   if(canSkip)acts.push(`<button class="task-btn skip" data-skip="${esc(t.id)}">跳过</button>`);
   if(canCancel)acts.push(`<button class="task-btn cancel" data-stop="${esc(t.id)}">取消</button>`);
   if(canRetry)acts.push(`<button class="task-btn skip" data-retry="${esc(t.id)}">重试</button>`);
-  return`<div class="task ${esc(st)}"><div class="task-head"><div class="task-title">${esc(title)}</div><div class="task-badge">${esc(statusLabel)}</div></div><div class="task-bar"><div class="task-bar-in" style="width:${pg}%"></div></div>${msg}${acts.length?`<div class="task-acts">${acts.join('')}</div>`:''}</div>`;
+  return`<div class="task ${esc(st)}"><div class="task-head"><div class="task-title">${esc(title)}</div><div class="task-badge">${esc(statusLabel)}</div></div>${tagsHtml}<div class="task-bar"><div class="task-bar-in" style="width:${pg}%"></div></div>${msg}${acts.length?`<div class="task-acts">${acts.join('')}</div>`:''}</div>`;
 }
 function renderChat(opts={}){
   if(!el.stream)return;const stick=opts.stick,vis=(S.history||[]).slice(0,S.chatCount).reverse(),lg=liveGroups();
