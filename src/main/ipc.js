@@ -948,14 +948,22 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
   })(taskRunner.onProgress);
 
   ipcMain.handle('remote:start', async (_event, { username, password } = {}) => {
-    // 如果传了用户名密码，先保存到设置
-    if (username !== undefined || password !== undefined) {
-      await store.updateSettings({ remote: { username: username || 'admin', password: password || '' } });
-    }
-    const settings = await store.getSettings();
-    const remoteCfg = settings.remote || {};
-    if (!remoteCfg.password) {
-      return { ok: false, error: '请先设置远程访问密码' };
+    // 保存用户名密码到设置（直接写文件，因为 getSettings 会清空密码）
+    if (password) {
+      const dataDir = path.join(os.homedir(), 'AntBot');
+      const storePath = path.join(dataDir, 'antbot-store.json');
+      try {
+        const raw = await fs.readFile(storePath, 'utf-8');
+        const data = JSON.parse(raw);
+        const user = data.users?.[0];
+        if (user?.settings) {
+          if (!user.settings.remote) user.settings.remote = {};
+          user.settings.remote.username = username || 'admin';
+          user.settings.remote.password = password;
+          user.settings.remote.enabled = true;
+          await fs.writeFile(storePath, JSON.stringify(data, null, 2));
+        }
+      } catch {}
     }
     if (!remoteServerStarted) {
       startRemoteServer({ store, taskRunner, mainWindowRef, appLog });
@@ -1006,6 +1014,16 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
   ipcMain.handle('remote:check-cloudflared', async () => {
     const bin = tunnelManager.findCloudflared();
     return { available: !!bin, path: bin || '' };
+  });
+
+  ipcMain.handle('remote:get-credentials', async () => {
+    // 直接从文件读取（getSettings 会清空密码）
+    try {
+      const storePath = path.join(os.homedir(), 'AntBot', 'antbot-store.json');
+      const data = JSON.parse(await fs.readFile(storePath, 'utf-8'));
+      const remote = data.users?.[0]?.settings?.remote || {};
+      return { username: remote.username || '', password: remote.password || '', autoStart: !!remote.autoStart };
+    } catch { return { username: '', password: '', autoStart: false }; }
   });
 
   ipcMain.handle('remote:generate-qr', async (_event, text) => {

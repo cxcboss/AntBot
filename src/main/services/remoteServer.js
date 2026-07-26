@@ -420,9 +420,15 @@ function startRemoteServer({ store, taskRunner, mainWindowRef, appLog }) {
       // Login
       if (method === 'POST' && pathname === '/remote/login') {
         const body = await readBody(req);
-        const settings = await store.getSettings();
-        const remoteUser = settings.remote?.username || 'admin';
-        const remotePass = settings.remote?.password || '';
+        // 直接从文件读取密码（store.getSettings 会清空密码字段）
+        let remoteUser = 'admin';
+        let remotePass = '';
+        try {
+          const storePath = path.join(os.homedir(), 'AntBot', 'antbot-store.json');
+          const data = JSON.parse(await fs.readFile(storePath, 'utf-8'));
+          remoteUser = data.users?.[0]?.settings?.remote?.username || 'admin';
+          remotePass = data.users?.[0]?.settings?.remote?.password || '';
+        } catch {}
 
         if (!remotePass) {
           return sendJson(res, 400, { ok: false, error: '请先在 App 中设置远程访问密码' });

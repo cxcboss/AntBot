@@ -2629,11 +2629,10 @@ async function initRemotePage() {
 
   // 加载当前设置
   try {
-    const settings = await window.antbot.getInitialState?.() || {};
-    const remote = settings.settings?.remote || {};
-    if (usernameEl) usernameEl.value = remote.username || '';
-    if (passwordEl) passwordEl.value = remote.password || '';
-    if (autoToggle && remote.autoStart) autoToggle.classList.add('on');
+    const creds = await window.antbot.remoteGetCredentials();
+    if (usernameEl) usernameEl.value = creds.username || '';
+    if (passwordEl) passwordEl.value = creds.password || '';
+    if (autoToggle && creds.autoStart) autoToggle.classList.add('on');
   } catch {}
 
   // 检查当前状态
@@ -2829,10 +2828,9 @@ async function init(){
 
   // 自动启动远程访问（如果开启）
   try {
-    const initState = await window.antbot.getInitialState?.();
-    const remote = initState?.settings?.remote;
-    if (remote?.autoStart && remote?.password) {
-      const r = await window.antbot.remoteStart({ username: remote.username || 'admin', password: remote.password });
+    const creds = await window.antbot.remoteGetCredentials();
+    if (creds.autoStart && creds.password) {
+      const r = await window.antbot.remoteStart({ username: creds.username || 'admin', password: creds.password });
       if (r.ok) {
         const t = await window.antbot.remoteStartTunnel().catch(() => ({}));
         if (t?.ok) console.log('[远程] 自动启动成功:', t.url);
