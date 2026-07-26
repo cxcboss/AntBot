@@ -37,6 +37,16 @@ contextBridge.exposeInMainWorld('antbot', {
   downloadCleanTask: (taskId) => ipcRenderer.invoke('download:clean-task', taskId),
   downloadLoginYoutube: () => ipcRenderer.invoke('download:login-youtube'),
   downloadCheckYoutubeCookies: () => ipcRenderer.invoke('download:check-youtube-cookies'),
+
+  // Remote control
+  remoteStart: () => ipcRenderer.invoke('remote:start'),
+  remoteStop: () => ipcRenderer.invoke('remote:stop'),
+  remoteStartTunnel: () => ipcRenderer.invoke('remote:start-tunnel'),
+  remoteStopTunnel: () => ipcRenderer.invoke('remote:stop-tunnel'),
+  remoteStatus: () => ipcRenderer.invoke('remote:status'),
+  remoteCheckCloudflared: () => ipcRenderer.invoke('remote:check-cloudflared'),
+  onRemoteTunnelUrl: (cb) => on('remote:tunnel-url', cb),
+  onRemoteTunnelStatus: (cb) => on('remote:tunnel-status', cb),
   onDownloadTaskUpdate: (callback) => on('download:task-update', callback),
   parseTasks: (input) => ipcRenderer.invoke('task:parse', input),
   startTasks: (input) => ipcRenderer.invoke('task:start', input),

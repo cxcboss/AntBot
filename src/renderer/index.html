@@ -31,6 +31,7 @@
         <button class="sb-btn sb-feat" data-feat="edit" type="button"><span class="icon" data-icon="scissors"></span><span>剪辑</span></button>
         <button class="sb-btn sb-feat" data-feat="publish" type="button"><span class="icon" data-icon="send"></span><span>发布</span></button>
         <button class="sb-btn sb-feat" data-feat="download" type="button"><span class="icon" data-icon="download"></span><span>下载</span></button>
+        <button class="sb-btn sb-feat" data-feat="remote" type="button"><span class="icon" data-icon="globe"></span><span>远程</span></button>
         <button class="sb-btn sb-feat" data-feat="style-ref" type="button"><span class="icon" data-icon="sparkle"></span><span>风格参考</span></button>
         <button class="sb-btn sb-feat" data-feat="subtitle-voice" type="button"><span class="icon" data-icon="mic"></span><span>字幕与音色</span></button>
       </div>
@@ -222,6 +223,44 @@
             <!-- 底部输入框 -->
             <div class="dl-composer">
               <textarea id="dl-input" rows="1" placeholder="粘贴视频链接，多个用逗号或换行隔开"></textarea>
+            </div>
+          </div>
+        </div>
+        <!-- 远程控制页 -->
+        <div class="feat-view" id="view-remote">
+          <div class="sv-scroll">
+            <div class="sv-block">
+              <h3 class="sv-title">远程访问</h3>
+              <p class="sv-desc">通过手机浏览器远程操控主控任务，需配合 Cloudflare Tunnel 使用</p>
+
+              <div class="sv-card">
+                <div class="sv-card-row">
+                  <span class="sv-card-label">状态</span>
+                  <span class="sv-card-value" id="remote-status-text">未启动</span>
+                </div>
+                <div class="sv-card-row">
+                  <span class="sv-card-label">访问地址</span>
+                  <span class="sv-card-value" id="remote-url" style="font-size:11px;word-break:break-all;color:var(--muted-foreground)">-</span>
+                </div>
+              </div>
+
+              <div class="sv-form">
+                <div class="s-row">
+                  <span class="s-label">启用远程</span>
+                  <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                    <span class="ps-toggle" id="remote-toggle"></span>
+                    <span id="remote-toggle-text" style="font-size:12px;color:var(--muted-foreground)">关闭</span>
+                  </label>
+                </div>
+                <label>用户名
+                  <input id="remote-username" type="text" placeholder="admin" />
+                </label>
+                <label>密码
+                  <input id="remote-password" type="password" placeholder="设置远程访问密码" />
+                </label>
+              </div>
+
+              <div class="sv-note" id="remote-note">设置用户名和密码后，点击启用开关即可。手机访问地址会显示在上方。</div>
             </div>
           </div>
         </div>

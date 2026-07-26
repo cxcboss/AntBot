@@ -931,6 +931,79 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
     startApiServer({ store, taskRunner, editScheduler, mainWindowRef, appLog });
   }
 
+  // 远程控制服务（延迟启动，按需开启）
+  let remoteServerStarted = false;
+  const { startRemoteServer, stopRemoteServer, getRemotePort, broadcastTaskUpdate } = require('./services/remoteServer');
+  const tunnelManager = require('./services/tunnelManager');
+
+  // 主控任务进度推送到远程 SSE
+  taskRunner.onProgress = ((originalOnProgress) => (payload) => {
+    if (originalOnProgress) originalOnProgress(payload);
+    // 推送到远程 SSE 客户端
+    if (remoteServerStarted) {
+      for (const task of (payload.tasks || [])) {
+        broadcastTaskUpdate(task);
+      }
+    }
+  })(taskRunner.onProgress);
+
+  ipcMain.handle('remote:start', async () => {
+    const settings = await store.getSettings();
+    const remoteCfg = settings.remote || {};
+    if (!remoteCfg.password) {
+      return { ok: false, error: '请先设置远程访问密码' };
+    }
+    if (!remoteServerStarted) {
+      startRemoteServer({ store, taskRunner, mainWindowRef, appLog });
+      remoteServerStarted = true;
+    }
+    return { ok: true, port: getRemotePort() };
+  });
+
+  ipcMain.handle('remote:stop', async () => {
+    stopRemoteServer();
+    remoteServerStarted = false;
+    tunnelManager.stopTunnel();
+    return { ok: true };
+  });
+
+  ipcMain.handle('remote:start-tunnel', async () => {
+    try {
+      const result = await tunnelManager.startTunnel(getRemotePort(), {
+        onUrl: (url) => {
+          const win = mainWindowRef();
+          if (win && !win.isDestroyed()) win.webContents.send('remote:tunnel-url', url);
+        },
+        onStatus: (status) => {
+          const win = mainWindowRef();
+          if (win && !win.isDestroyed()) win.webContents.send('remote:tunnel-status', status);
+        },
+        log: appLog,
+      });
+      return { ok: true, url: result.url };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('remote:stop-tunnel', async () => {
+    tunnelManager.stopTunnel();
+    return { ok: true };
+  });
+
+  ipcMain.handle('remote:status', async () => {
+    return {
+      serverRunning: remoteServerStarted,
+      tunnel: tunnelManager.getStatus(),
+      port: getRemotePort(),
+    };
+  });
+
+  ipcMain.handle('remote:check-cloudflared', async () => {
+    const bin = tunnelManager.findCloudflared();
+    return { available: !!bin, path: bin || '' };
+  });
+
   async function getModelsDir() {
     const settings = await store.getSettings();
     const dataDir = settings.dataDir || path.join(os.homedir(), 'AntBot');

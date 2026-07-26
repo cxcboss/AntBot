@@ -86,11 +86,12 @@ function switchFeature(feat){
   const btn=$(`.sb-feat[data-feat="${feat}"]`);
   if(view)view.classList.add('active');
   if(btn)btn.classList.add('active');
-  const titles={main:'主控',edit:'剪辑',publish:'发布',download:'下载','style-ref':'风格参考','subtitle-voice':'字幕与音色'};
+  const titles={main:'主控',edit:'剪辑',publish:'发布',download:'下载',remote:'远程','style-ref':'风格参考','subtitle-voice':'字幕与音色'};
   if(el.pageTitle)el.pageTitle.textContent=titles[feat]||feat;
   renderStatus();
   if(feat==='subtitle-voice') loadPresetVoices();
   if(feat==='download') initDownloadPage();
+  if(feat==='remote') initRemotePage();
   // 清理下载页定时器
   if(feat!=='download' && _dlDotsTimer){clearInterval(_dlDotsTimer);_dlDotsTimer=null;}
   if(isMobile())closeSidebar();
@@ -2607,6 +2608,99 @@ function bindDownloadPage() {
       }
     });
   }
+}
+
+/* ── Remote Control page ── */
+async function initRemotePage() {
+  const statusText = document.getElementById('remote-status-text');
+  const urlEl = document.getElementById('remote-url');
+  const toggle = document.getElementById('remote-toggle');
+  const toggleText = document.getElementById('remote-toggle-text');
+  const usernameEl = document.getElementById('remote-username');
+  const passwordEl = document.getElementById('remote-password');
+
+  // 加载当前设置
+  try {
+    const settings = await window.antbot.getInitialState?.() || {};
+    const remote = settings.settings?.remote || {};
+    if (usernameEl) usernameEl.value = remote.username || 'admin';
+    if (passwordEl) passwordEl.value = remote.password || '';
+  } catch {}
+
+  // 检查当前状态
+  try {
+    const status = await window.antbot.remoteStatus();
+    if (status.serverRunning) {
+      toggle?.classList.add('on');
+      toggleText.textContent = '已启用';
+      statusText.textContent = status.tunnel?.running ? '已连接' : '服务已启动';
+      if (status.tunnel?.url) urlEl.textContent = status.tunnel.url;
+    }
+  } catch {}
+
+  // 检查 cloudflared
+  try {
+    const cf = await window.antbot.remoteCheckCloudflared();
+    if (!cf.available) {
+      document.getElementById('remote-note').textContent = '未检测到 cloudflared，请先安装: brew install cloudflared';
+    }
+  } catch {}
+
+  // 开关切换
+  toggle?.addEventListener('click', async () => {
+    const isOn = toggle.classList.contains('on');
+    if (isOn) {
+      // 关闭
+      await window.antbot.remoteStop();
+      toggle.classList.remove('on');
+      toggleText.textContent = '关闭';
+      statusText.textContent = '未启动';
+      urlEl.textContent = '-';
+      toast('远程访问已关闭', 'info');
+    } else {
+      // 开启：先保存设置，再启动服务
+      const username = usernameEl?.value?.trim() || 'admin';
+      const password = passwordEl?.value?.trim();
+      if (!password) {
+        toast('请先设置密码', 'error');
+        return;
+      }
+      // 保存远程设置
+      await window.antbot.updateSettings({
+        remote: { username, password, enabled: true }
+      });
+      // 启动远程服务
+      toggleText.textContent = '启动中...';
+      try {
+        const r = await window.antbot.remoteStart();
+        if (!r.ok) { toast(r.error, 'error'); toggleText.textContent = '关闭'; return; }
+        // 启动 tunnel
+        statusText.textContent = '正在连接 Cloudflare...';
+        const t = await window.antbot.remoteStartTunnel();
+        if (t.ok) {
+          toggle.classList.add('on');
+          toggleText.textContent = '已启用';
+          statusText.textContent = '已连接';
+          urlEl.textContent = t.url;
+          toast('远程访问已启动', 'success');
+        } else {
+          statusText.textContent = '服务已启动（隧道连接失败）';
+          toast('Tunnel 启动失败: ' + t.error, 'error');
+        }
+      } catch (e) {
+        toggleText.textContent = '关闭';
+        toast('启动失败: ' + e.message, 'error');
+      }
+    }
+  });
+
+  // 监听 tunnel URL 更新
+  window.antbot.onRemoteTunnelUrl?.((url) => {
+    if (urlEl) urlEl.textContent = url;
+  });
+  window.antbot.onRemoteTunnelStatus?.((s) => {
+    if (statusText) statusText.textContent = s.status === 'running' ? '已连接' : s.status === 'starting' ? '连接中...' : '未连接';
+  });
 }
 
 /* ── Batch Clone Voices ── */
