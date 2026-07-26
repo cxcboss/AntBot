@@ -256,13 +256,23 @@
                     <span id="remote-toggle-text" style="font-size:12px;color:var(--muted-foreground)">关闭</span>
                   </label>
                 </div>
+                <div class="s-row">
+                  <span class="s-label">自动启动</span>
+                  <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                    <span class="ps-toggle" id="remote-auto-toggle"></span>
+                    <span style="font-size:12px;color:var(--muted-foreground)">打开App时自动开启远程</span>
+                  </label>
+                </div>
                 <label>用户名
                   <input id="remote-username" type="text" placeholder="admin" />
                 </label>
                 <label>密码
-                  <input id="remote-password" type="password" placeholder="设置远程访问密码" />
+                  <div style="display:flex;gap:6px;align-items:center">
+                    <input id="remote-password" type="password" placeholder="设置远程访问密码" style="flex:1" />
+                    <button class="btn btn-sm btn-ghost" id="remote-pass-toggle" type="button" title="显示/隐藏密码"><span class="icon" data-icon="eye"></span></button>
+                  </div>
                 </label>
-                <button class="btn btn-primary btn-block" id="remote-save-btn" type="button">保存设置</button>
+                <button class="btn btn-primary btn-block" id="remote-save-btn" type="button">保存并启用</button>
               </div>
 
               <div class="sv-note" id="remote-note">设置用户名和密码后点击保存，再开启远程开关。扫描二维码或复制链接在手机浏览器打开。</div>

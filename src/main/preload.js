@@ -39,7 +39,7 @@ contextBridge.exposeInMainWorld('antbot', {
   downloadCheckYoutubeCookies: () => ipcRenderer.invoke('download:check-youtube-cookies'),
 
   // Remote control
-  remoteStart: () => ipcRenderer.invoke('remote:start'),
+  remoteStart: (opts) => ipcRenderer.invoke('remote:start', opts),
   remoteStop: () => ipcRenderer.invoke('remote:stop'),
   remoteStartTunnel: () => ipcRenderer.invoke('remote:start-tunnel'),
   remoteStopTunnel: () => ipcRenderer.invoke('remote:stop-tunnel'),

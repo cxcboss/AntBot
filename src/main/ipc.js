@@ -947,7 +947,11 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
     }
   })(taskRunner.onProgress);
 
-  ipcMain.handle('remote:start', async () => {
+  ipcMain.handle('remote:start', async (_event, { username, password } = {}) => {
+    // 如果传了用户名密码，先保存到设置
+    if (username !== undefined || password !== undefined) {
+      await store.updateSettings({ remote: { username: username || 'admin', password: password || '' } });
+    }
     const settings = await store.getSettings();
     const remoteCfg = settings.remote || {};
     if (!remoteCfg.password) {

@@ -2622,6 +2622,8 @@ async function initRemotePage() {
   const saveBtn = document.getElementById('remote-save-btn');
   const qrRow = document.getElementById('remote-qr-row');
   const qrCode = document.getElementById('remote-qr-code');
+  const passToggle = document.getElementById('remote-pass-toggle');
+  const autoToggle = document.getElementById('remote-auto-toggle');
 
   let currentUrl = '';
 
@@ -2629,8 +2631,9 @@ async function initRemotePage() {
   try {
     const settings = await window.antbot.getInitialState?.() || {};
     const remote = settings.settings?.remote || {};
-    if (usernameEl) usernameEl.value = remote.username || 'admin';
+    if (usernameEl) usernameEl.value = remote.username || '';
     if (passwordEl) passwordEl.value = remote.password || '';
+    if (autoToggle && remote.autoStart) autoToggle.classList.add('on');
   } catch {}
 
   // 检查当前状态
@@ -2657,13 +2660,58 @@ async function initRemotePage() {
     }
   } catch {}
 
-  // 保存按钮
+  // 密码显示/隐藏
+  passToggle?.addEventListener('click', () => {
+    const isPassword = passwordEl.type === 'password';
+    passwordEl.type = isPassword ? 'text' : 'password';
+    passToggle.querySelector('.icon').dataset.icon = isPassword ? 'eyeOff' : 'eye';
+    injectIcons();
+  });
+
+  // 自动启动开关
+  autoToggle?.addEventListener('click', async () => {
+    const isOn = autoToggle.classList.toggle('on');
+    await window.antbot.updateSettings({ remote: { autoStart: isOn } });
+    toast(isOn ? '已开启自动启动' : '已关闭自动启动', 'info');
+  });
+
+  // 保存并启用按钮
   saveBtn?.addEventListener('click', async () => {
     const username = usernameEl?.value?.trim() || 'admin';
     const password = passwordEl?.value?.trim();
     if (!password) { toast('请设置密码', 'error'); return; }
-    await window.antbot.updateSettings({ remote: { username, password } });
-    toast('设置已保存', 'success');
+
+    saveBtn.disabled = true;
+    saveBtn.textContent = '启动中...';
+    toggleText.textContent = '启动中...';
+
+    try {
+      // 直接传入用户名密码启动（IPC 内部会保存）
+      const r = await window.antbot.remoteStart({ username, password });
+      if (!r.ok) { toast(r.error, 'error'); toggleText.textContent = '关闭'; saveBtn.disabled = false; saveBtn.textContent = '保存并启用'; return; }
+
+      // 启动 tunnel
+      statusText.textContent = '正在连接 Cloudflare...';
+      const t = await window.antbot.remoteStartTunnel();
+      if (t.ok) {
+        toggle.classList.add('on');
+        toggleText.textContent = '已启用';
+        statusText.textContent = '已连接';
+        currentUrl = t.url;
+        urlEl.textContent = currentUrl;
+        copyBtn.style.display = '';
+        showQrCode(currentUrl);
+        toast('远程访问已启动', 'success');
+      } else {
+        statusText.textContent = '服务已启动（隧道连接失败）';
+        toast('Tunnel 启动失败: ' + t.error, 'error');
+      }
+    } catch (e) {
+      toggleText.textContent = '关闭';
+      toast('启动失败: ' + e.message, 'error');
+    }
+    saveBtn.disabled = false;
+    saveBtn.textContent = '保存并启用';
   });
 
   // 复制链接
@@ -2676,49 +2724,18 @@ async function initRemotePage() {
     }
   });
 
-  // 开关切换
+  // 开关切换（仅关闭）
   toggle?.addEventListener('click', async () => {
-    const isOn = toggle.classList.contains('on');
-    if (isOn) {
-      await window.antbot.remoteStop();
-      toggle.classList.remove('on');
-      toggleText.textContent = '关闭';
-      statusText.textContent = '未启动';
-      urlEl.textContent = '-';
-      currentUrl = '';
-      copyBtn.style.display = 'none';
-      qrRow.style.display = 'none';
-      toast('远程访问已关闭', 'info');
-    } else {
-      const username = usernameEl?.value?.trim() || 'admin';
-      const password = passwordEl?.value?.trim();
-      if (!password) { toast('请先设置密码并保存', 'error'); return; }
-      // 保存设置
-      await window.antbot.updateSettings({ remote: { username, password, enabled: true } });
-      toggleText.textContent = '启动中...';
-      try {
-        const r = await window.antbot.remoteStart();
-        if (!r.ok) { toast(r.error, 'error'); toggleText.textContent = '关闭'; return; }
-        statusText.textContent = '正在连接 Cloudflare...';
-        const t = await window.antbot.remoteStartTunnel();
-        if (t.ok) {
-          toggle.classList.add('on');
-          toggleText.textContent = '已启用';
-          statusText.textContent = '已连接';
-          currentUrl = t.url;
-          urlEl.textContent = currentUrl;
-          copyBtn.style.display = '';
-          showQrCode(currentUrl);
-          toast('远程访问已启动', 'success');
-        } else {
-          statusText.textContent = '服务已启动（隧道连接失败）';
-          toast('Tunnel 启动失败: ' + t.error, 'error');
-        }
-      } catch (e) {
-        toggleText.textContent = '关闭';
-        toast('启动失败: ' + e.message, 'error');
-      }
-    }
+    if (!toggle.classList.contains('on')) return; // 开启通过保存按钮
+    await window.antbot.remoteStop();
+    toggle.classList.remove('on');
+    toggleText.textContent = '关闭';
+    statusText.textContent = '未启动';
+    urlEl.textContent = '-';
+    currentUrl = '';
+    copyBtn.style.display = 'none';
+    qrRow.style.display = 'none';
+    toast('远程访问已关闭', 'info');
   });
 
   // 生成二维码
@@ -2809,5 +2826,18 @@ async function init(){
   await loadData();
   await loadModels();
   loadEditTasks();
+
+  // 自动启动远程访问（如果开启）
+  try {
+    const initState = await window.antbot.getInitialState?.();
+    const remote = initState?.settings?.remote;
+    if (remote?.autoStart && remote?.password) {
+      const r = await window.antbot.remoteStart({ username: remote.username || 'admin', password: remote.password });
+      if (r.ok) {
+        const t = await window.antbot.remoteStartTunnel().catch(() => ({}));
+        if (t?.ok) console.log('[远程] 自动启动成功:', t.url);
+      }
+    }
+  } catch {}
 }
 init();
