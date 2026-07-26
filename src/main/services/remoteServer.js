@@ -166,8 +166,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","PingFang SC"
 .chip.active{background:var(--accent);color:var(--accent-fg)}
 
 /* Subtitle page */
-.page{display:none;flex:1;overflow-y:auto;padding:12px}
-.page.active{display:block}
+.page{display:none;flex:1;min-height:0;overflow-y:auto;padding:12px}
+.page.active{display:flex;flex-direction:column}
 .form-group{margin-bottom:16px}
 .form-label{font-size:12px;color:var(--muted);margin-bottom:4px;display:block}
 .form-input{width:100%;height:40px;padding:0 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:14px;font-family:inherit}
@@ -539,10 +539,6 @@ function renderAppShell() {
     '<div class="content" id="content">' +
     '<div class="page active" id="page-main">' +
     '<div class="chat" id="chat"><div class="chat-stream" id="chat-stream"><div class="empty" id="empty-state"><div class="empty-icon">📋</div><div>粘贴视频链接开始下载</div></div></div></div>' +
-    '<div class="input-bar"><div class="input-row">' +
-    '<textarea class="input-field" id="task-input" placeholder="粘贴视频链接..." rows="1"></textarea>' +
-    '<button class="send-btn" id="send-btn" type="button"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg></button>' +
-    '</div><div class="chips" id="chips"></div></div>' +
     '</div>' +
     '<div class="page" id="page-subtitle">' +
     '<div class="form-group"><label class="form-label">字幕颜色</label>' +
@@ -569,6 +565,10 @@ function renderAppShell() {
     '<button class="btn btn-primary btn-block" id="remote-save-btn" type="button">保存并重新登录</button>' +
     '</div>' +
     '</div>' +
+    '<div class="input-bar" id="input-bar"><div class="input-row">' +
+    '<textarea class="input-field" id="task-input" placeholder="粘贴视频链接..." rows="1"></textarea>' +
+    '<button class="send-btn" id="send-btn" type="button"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg></button>' +
+    '</div><div class="chips" id="chips"></div></div>' +
     '<div class="dialog-overlay" id="logout-dialog"><div class="dialog"><div class="dialog-title">退出登录</div><div class="dialog-text">确认退出当前账号？</div><div class="dialog-actions"><button class="btn btn-ghost" id="logout-cancel">取消</button><button class="btn btn-primary" id="logout-confirm">确认退出</button></div></div></div>';
 }
 
@@ -661,6 +661,9 @@ function switchPage(page) {
   document.getElementById('header-title').textContent = { main: '主控', subtitle: '字幕', remote: '远程' }[page] || '主控';
   document.getElementById('sidebar')?.classList.remove('open');
   document.getElementById('sidebar-overlay')?.classList.remove('show');
+  // 输入栏只在主控页显示
+  const inputBar = document.getElementById('input-bar');
+  if (inputBar) inputBar.style.display = page === 'main' ? '' : 'none';
   if (page === 'subtitle') loadSubtitleSettings();
   if (page === 'remote') loadRemoteSettings();
 }
