@@ -365,12 +365,16 @@ body:not([data-platform="darwin"]) .app{padding-top:0}
 
 /* ── Task cards ── */
 .task-stack{display:flex;flex-direction:column;gap:4px}
-.task{position:relative;overflow:hidden;border-radius:var(--radius-lg);background:var(--card);margin-bottom:1px;box-shadow:var(--shadow-xs);max-width:620px}
+.task{position:relative;overflow:hidden;border-radius:var(--radius-lg);background:var(--card);margin-bottom:1px;box-shadow:var(--shadow-xs);max-width:720px}
 .task-head{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 12px 4px}
 .task-title{font-size:12px;font-weight:600}
 .task-badge{font-size:10px;font-weight:500;color:var(--muted-foreground);white-space:nowrap}
 .task.warning .task-badge{color:var(--warning)}
 .task.failed .task-badge{color:var(--destructive)}
+.task.cancelling{border-color:var(--warning)}
+.task.cancelling .task-inner{opacity:0;pointer-events:none}
+.task-cancelling{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;color:var(--warning);animation:cancelBlink 1.2s ease-in-out infinite}
+@keyframes cancelBlink{0%,100%{opacity:1}50%{opacity:.3}}
 .task-tags{display:flex;gap:4px;padding:0 12px 4px}
 .task-tag{font-size:10px;font-weight:500;color:var(--muted-foreground)}
 .task-tag-accent{padding:2px 8px;border-radius:var(--radius-full);background:var(--accent);color:var(--accent-foreground)}
