@@ -55,8 +55,10 @@ function createBrowserPublishBridge({ baseUrl = 'http://127.0.0.1:18321', pollIn
     const id = accepted.command?.id || requestId;
     const startedAt = Date.now();
     let cursor = 0;
+    let pollCount = 0;
 
     while (Date.now() - startedAt < timeoutMs) {
+      pollCount++;
       const result = await call('GET', `/api/bridge/commands/${encodeURIComponent(id)}`);
       for (const event of result.events || []) {
         if (event.sequence > cursor) {

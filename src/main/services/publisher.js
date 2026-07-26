@@ -3471,12 +3471,13 @@ async function publishVideo(taskContext) {
         // 逐个平台发布
         for (const platform of platforms) {
           const platformLabel = platform === 'videoChannel' ? '视频号' : '抖音';
-          log(`通过搬运蚁发布助手发布到${platformLabel}...`);
+          const videoStat = await fs.stat(outputPath);
+          log(`发布到${platformLabel}: ${path.basename(outputPath)} (${(videoStat.size/1024/1024).toFixed(1)}MB), platform=${platform === 'videoChannel' ? 'weixin' : platform}`);
           const bridgeResult = await bridge.publish({
             videos: [{
               name: path.basename(outputPath),
               path: outputPath,
-              size: (await fs.stat(outputPath)).size
+              size: videoStat.size
             }],
             settings: {
               isOriginal: Boolean(task.isOriginal),
@@ -3490,10 +3491,10 @@ async function publishVideo(taskContext) {
             },
             videoPath: path.dirname(outputPath),
             platform: platform === 'videoChannel' ? 'weixin' : platform,
-            onProgress: event => log(`[浏览器发布-${platformLabel}] ${event.step || event.detail || event.status || ''}`)
+            onProgress: event => log(`[${platformLabel}] ${event.step || event.detail || event.status || ''}`)
           });
+          log(`${platformLabel}发布成功`);
           allResults.push(...(bridgeResult.results || bridgeResult.records || []));
-          log(`${platformLabel}发布完成`);
         }
         return {
           mode: 'browser-extension',

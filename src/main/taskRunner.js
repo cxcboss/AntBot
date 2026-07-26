@@ -916,33 +916,25 @@ class TaskRunner {
                 this.log(task.id, '桥接服务已启动');
               }
 
-              // 2. 创建桥接客户端 + 唤醒浏览器插件
-              const bridge = createBrowserPublishBridge({
-                baseUrl: extensionConfig.baseUrl,
-                timeoutMs: Number(extensionConfig.timeoutMs) || 30 * 60 * 1000
-              });
-              this.setTaskState(task.id, { step: '等待插件', message: '唤醒浏览器插件...' });
-              this.log(task.id, '唤醒浏览器插件...');
-              for (let w = 0; w < 3; w++) {
-                try { await bridge.getStatus(); } catch {}
-                await new Promise(r => setTimeout(r, 500));
-              }
-
-              // 3. 等待插件开始轮询（最多 15 秒）
-              let extensionReady = false;
+              // 2. 等待桥接服务就绪（确保端口开放）
+              this.setTaskState(task.id, { step: '发布准备', message: '等待桥接服务就绪...' });
+              this.log(task.id, '等待桥接服务就绪...');
+              let bridgeReady = false;
               for (let i = 0; i < 15; i++) {
                 try {
-                  const bridgeStatus = await bridge.getStatus();
-                  if (bridgeStatus.extensionConnected) {
-                    extensionReady = true;
-                    this.log(task.id, '浏览器插件已连接');
+                  const { createBrowserPublishBridge } = require('./services/browserPublishBridge');
+                  const bridgeCheck = createBrowserPublishBridge({ baseUrl: extensionConfig.baseUrl, timeoutMs: 5000 });
+                  const s = await bridgeCheck.getStatus();
+                  if (s.status === 'ready' || s.status === 'busy') {
+                    bridgeReady = true;
+                    this.log(task.id, '桥接服务就绪');
                     break;
                   }
                 } catch {}
                 await new Promise(r => setTimeout(r, 1000));
               }
-              if (!extensionReady) {
-                throw new Error('浏览器插件未响应，请打开 Chrome 确认插件已启用，然后重试');
+              if (!bridgeReady) {
+                throw new Error('桥接服务未就绪，请在发布页面手动启动服务后重试');
               }
             }
 
