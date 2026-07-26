@@ -333,10 +333,8 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
     const settings = await store.getSettings();
     const config = settings.publish?.browserExtension || {};
     const baseUrl = config.baseUrl || 'http://127.0.0.1:18321';
-    appLog('info', `[publish] 检测桥接服务状态, baseUrl: ${baseUrl}`);
     try {
       const result = await createBrowserPublishBridge({ baseUrl }).getStatus();
-      appLog('info', `[publish] 桥接服务状态: ${result.status}`);
       return result;
     }
     catch (error) {

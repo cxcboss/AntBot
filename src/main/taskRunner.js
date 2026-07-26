@@ -899,11 +899,14 @@ class TaskRunner {
 
           let publishResult = null;
           if (publishEnabled) {
-            // 自动启动桥接服务（如果未运行）
             const extensionConfig = settings?.publish?.browserExtension;
+            this.log(task.id, `发布配置: enabled=${extensionConfig?.enabled}, baseUrl=${extensionConfig?.baseUrl}, platforms=${JSON.stringify(task.platforms)}`);
+
             if (extensionConfig?.enabled) {
+              // 自动启动桥接服务（如果未运行）
               const { bridgeServiceManager } = require('./services/bridgeServiceManager');
               const status = bridgeServiceManager.getStatus();
+              this.log(task.id, `桥接服务状态: running=${status.running}`);
               if (!status.running) {
                 this.log(task.id, '桥接服务未启动，正在自动启动...');
                 this.setTaskState(task.id, { step: '发布准备', message: '正在启动发布桥接服务...' });
@@ -911,15 +914,17 @@ class TaskRunner {
                 if (!started) {
                   throw new Error('桥接服务启动失败，请在发布页面手动启动服务后重试');
                 }
-                // 等待服务就绪
                 await new Promise(r => setTimeout(r, 1500));
                 this.log(task.id, '桥接服务已启动');
               }
             }
+
+            this.log(task.id, '开始调用 publishVideo...');
             publishResult = await this.runStep(task, 'publish', () => publishVideo({
               task, settings, outputPath: outPath,
               log: (msg) => this.log(task.id, msg)
             }), 95);
+            this.log(task.id, `发布完成: mode=${publishResult?.mode}, platforms=${JSON.stringify(publishResult?.platforms)}`);
           } else {
             this.setTaskState(task.id, { step: STEP_NAMES.publish, progress: 95, message: '自动发布已关闭，输出视频即视为完成' });
             this.log(task.id, '自动发布已关闭，输出视频已视为任务完成。');

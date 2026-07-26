@@ -3453,8 +3453,11 @@ async function publishVideo(taskContext) {
   await ensureOutputVideoExists(outputPath);
   const scheduleAt = task.publishAt ? dayjs(task.publishAt).format('YYYY-MM-DD HH:mm') : '';
   const platforms = resolveTaskPlatforms(task, settings);
+  log(`发布平台: ${platforms.join(', ')}`);
 
   const extensionConfig = settings?.publish?.browserExtension;
+  log(`桥接配置: enabled=${extensionConfig?.enabled}, baseUrl=${extensionConfig?.baseUrl}`);
+
   if (extensionConfig?.enabled) {
     const bridge = createBrowserPublishBridge({
       baseUrl: extensionConfig.baseUrl,
@@ -3462,6 +3465,7 @@ async function publishVideo(taskContext) {
     });
     try {
       const bridgeStatus = await bridge.getStatus();
+      log(`桥接状态: ${bridgeStatus.status}`);
       if (bridgeStatus.status === 'ready' || bridgeStatus.status === 'busy') {
         const allResults = [];
         // 逐个平台发布

@@ -206,6 +206,18 @@ async function bootstrap() {
       }
     },
     onLog: (payload) => {
+      // 写入 app 日志
+      try {
+        const logLine = `[${payload.timestamp}] [${payload.level}] [task:${payload.taskId || 'system'}] ${payload.message}\n`;
+        const logDir = require('node:path').join(require('node:os').homedir(), 'AntBot', 'logs');
+        const fsSync = require('node:fs');
+        const files = fsSync.readdirSync(logDir).filter(f => f.startsWith('app-') && f.endsWith('.log'));
+        if (files.length) {
+          const latest = files.sort().pop();
+          fsSync.appendFileSync(require('node:path').join(logDir, latest), logLine);
+        }
+      } catch {}
+      // 推送到渲染进程
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('task:log', payload);
       }
