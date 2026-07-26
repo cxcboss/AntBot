@@ -1,5 +1,6 @@
 const path = require('node:path');
 const fs = require('node:fs/promises');
+const os = require('node:os');
 const { runCommand, runCommandArgs } = require('./commandRunner');
 const { ensureWindowsDependency, getManagedBinDir } = require('./dependencyManager');
 
@@ -49,23 +50,34 @@ function buildYtDlpArgs(task, outputPath, options = {}) {
   const {
     forceIpv4 = false,
     noCheckCertificates = false,
-    urlOverride = ''
+    urlOverride = '',
+    ffmpegLocation = '',
+    cookiesArgs = [],
+    formatString = 'bestvideo+bestaudio/best',
+    extraArgs = []
   } = options;
 
   const args = [];
   args.push(
     '--newline',
+    '--continue',
     '--retries', '6',
     '--fragment-retries', '6',
     '--extractor-retries', '6',
     '--retry-sleep', '2',
-    '--socket-timeout', '30'
+    '--socket-timeout', '30',
+    '--no-warnings',
+    '--no-check-certificates'
   );
+  args.push('-f', formatString);
+  args.push('--merge-output-format', 'mp4');
+  if (ffmpegLocation) {
+    args.push('--ffmpeg-location', ffmpegLocation);
+  }
+  args.push(...cookiesArgs);
+  args.push(...extraArgs);
   if (forceIpv4) {
     args.push('--force-ipv4');
-  }
-  if (noCheckCertificates) {
-    args.push('--no-check-certificates');
   }
   if (task.timeRange) {
     args.push('--download-sections', `*${task.timeRange}`);
@@ -384,6 +396,78 @@ async function resolveYtDlpLauncher({ settings, log }) {
   );
 }
 
+function resolveFfmpegDir() {
+  for (const dir of ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin']) {
+    try { require('node:fs').accessSync(path.join(dir, 'ffmpeg')); return dir; } catch {}
+  }
+  return '';
+}
+
+function detectPlatform(url) {
+  if (/youtu\.?be|youtube\.com/i.test(url)) return 'youtube';
+  if (/douyin\.com/i.test(url)) return 'douyin';
+  if (/tiktok\.com/i.test(url)) return 'tiktok';
+  if (/bilibili\.com|b23\.tv/i.test(url)) return 'bilibili';
+  return 'unknown';
+}
+
+async function getCookiesArgs(platform, log) {
+  const cookiesDir = path.join(os.homedir(), 'AntBot', 'cookies');
+  const fsSync = require('node:fs');
+
+  if (platform === 'youtube') {
+    const cookieFile = path.join(cookiesDir, 'youtube.txt');
+    if (fsSync.existsSync(cookieFile)) {
+      log('使用 YouTube cookies 文件');
+      return ['--cookies', cookieFile];
+    }
+    return [];
+  }
+
+  if (platform === 'douyin') {
+    const cookieFile = path.join(cookiesDir, 'douyin.txt');
+    // 检查 cookies 是否有效（24小时内）
+    try {
+      const stat = fsSync.statSync(cookieFile);
+      if (Date.now() - stat.mtimeMs < 24 * 60 * 60 * 1000) {
+        return ['--cookies', cookieFile];
+      }
+    } catch {}
+    // 自动获取抖音 cookies
+    log('自动获取抖音 cookies...');
+    try {
+      const { chromium } = require('playwright');
+      const browser = await chromium.launch({ headless: true });
+      const context = await browser.newContext({
+        userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+      });
+      const page = await context.newPage();
+      await page.goto('https://www.douyin.com/', { waitUntil: 'domcontentloaded', timeout: 20000 });
+      await page.waitForTimeout(3000);
+      const cookies = await context.cookies();
+      await browser.close();
+      if (cookies.length) {
+        const lines = ['# Netscape HTTP Cookie File'];
+        for (const c of cookies) {
+          const secure = c.secure ? 'TRUE' : 'FALSE';
+          const expiry = c.expires > 0 ? Math.floor(c.expires) : '0';
+          const domain = c.domain.startsWith('.') ? c.domain : '.' + c.domain;
+          lines.push(`${domain}\tTRUE\t${c.path || '/'}\t${secure}\t${expiry}\t${c.name}\t${c.value}`);
+        }
+        await fs.mkdir(cookiesDir, { recursive: true });
+        await fs.writeFile(cookieFile, lines.join('\n'));
+        log('抖音 cookies 已获取');
+        return ['--cookies', cookieFile];
+      }
+    } catch (e) {
+      log(`获取抖音 cookies 失败: ${e.message}`);
+    }
+    return [];
+  }
+
+  return [];
+}
+
 async function downloadVideo(taskContext) {
   const {
     task,
@@ -445,28 +529,34 @@ async function downloadVideo(taskContext) {
 
   const launcher = await resolveYtDlpLauncher({ settings, log });
   const normalizedUrl = normalizeVideoUrl(task.videoUrl);
+
+  // 解析 ffmpeg 路径
+  const ffmpegDir = resolveFfmpegDir();
+
+  // 平台检测 + cookies
+  const platform = detectPlatform(task.videoUrl);
+  const cookiesArgs = await getCookiesArgs(platform, log);
+
+  // YouTube 优先 H.264 + AAC，其他平台用默认最高画质
+  const formatString = platform === 'youtube'
+    ? 'bestvideo[vcodec^=avc1]+bestaudio[acodec^=mp4a]/bestvideo[vcodec^=avc1]+bestaudio/bestvideo+bestaudio/best'
+    : 'bestvideo+bestaudio/best';
+
+  // YouTube 需要 remote-components
+  const extraArgs = platform === 'youtube' ? ['--remote-components', 'ejs:github'] : [];
+
+  const baseOptions = {
+    urlOverride: normalizedUrl || task.videoUrl,
+    ffmpegLocation: ffmpegDir,
+    cookiesArgs,
+    formatString,
+    extraArgs
+  };
+
   const attempts = [
-    {
-      name: '默认参数',
-      args: buildYtDlpArgs(task, outputPath, {
-        urlOverride: normalizedUrl || task.videoUrl
-      })
-    },
-    {
-      name: 'IPv4 加强重试',
-      args: buildYtDlpArgs(task, outputPath, {
-        forceIpv4: true,
-        urlOverride: normalizedUrl || task.videoUrl
-      })
-    },
-    {
-      name: 'IPv4 + 跳过证书校验',
-      args: buildYtDlpArgs(task, outputPath, {
-        forceIpv4: true,
-        noCheckCertificates: true,
-        urlOverride: normalizedUrl || task.videoUrl
-      })
-    }
+    { name: '默认参数', args: buildYtDlpArgs(task, outputPath, baseOptions) },
+    { name: 'IPv4 加强重试', args: buildYtDlpArgs(task, outputPath, { ...baseOptions, forceIpv4: true }) },
+    { name: 'IPv4 + 跳过证书校验', args: buildYtDlpArgs(task, outputPath, { ...baseOptions, forceIpv4: true, noCheckCertificates: true }) }
   ];
 
   let result = null;
