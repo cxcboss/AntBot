@@ -982,7 +982,8 @@ class TaskRunner {
           // #3: 修复 — 只要视频已生成就算完成，不受 publishEnabled 限制
           const outputReady = editCompleted && await this.fileExists(outPath);
           if (outputReady) {
-            this.setTaskState(task.id, { status: 'warning', progress: 100, step: '部分完成', message: publishEnabled ? '发布失败，但视频已生成' : '成品视频已输出', attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit, outputPath: outPath });
+            this.log(task.id, `发布失败但视频已生成: ${error.message}`, 'warn');
+            this.setTaskState(task.id, { status: 'warning', progress: 100, step: '部分完成', message: publishEnabled ? `发布失败: ${error.message}` : '成品视频已输出', attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit, outputPath: outPath });
             runRecord.items.push(this.buildRunItem(job, task, row, 'completed', { outputPath: outPath, publishAt: task.publishAt ? task.publishAt.toISOString() : '', publishedPlatforms: [], publishMode: publishEnabled ? 'failed' : 'disabled', finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, message: publishEnabled ? '发布失败，但视频已生成' : '成品视频已输出' }));
             return { status: 'completed', retryable: false };
           }
