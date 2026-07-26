@@ -5,8 +5,7 @@ const { app } = require('electron');
 const { STEP_NAMES } = require('./services/config');
 const { ensureDir, getDaySequence, buildTaskBaseName, buildOutputPath, buildPreciseTimestamp } = require('./services/fileUtil');
 const { downloadVideo } = require('./services/downloader');
-const { generateSubtitle } = require('./services/gemini');
-const { editVideo } = require('./services/editor');
+const { prepareEditVideo, composeEditVideo } = require('./services/smartEditor');
 const { publishVideo } = require('./services/publisher');
 
 function nowIso() {
@@ -689,6 +688,27 @@ class TaskRunner {
       settings.paths._mainControlCacheDir = mainControlCacheDir;
       settings.paths._mainControlOutputDir = mainControlOutputDir;
 
+      // 加载 UI 设置（获取选中的风格名称）
+      let selectedStyleName = '';
+      try {
+        const uiPath = path.join(os.homedir(), 'AntBot', 'ui-settings.json');
+        const uiData = JSON.parse(await fs.readFile(uiPath, 'utf-8'));
+        selectedStyleName = uiData?.editDefaults?.style || uiData?.selectedStyle || '';
+      } catch {}
+
+      // 加载风格参考库（获取风格提示词）
+      let styleRefs = [];
+      try {
+        const srPath = path.join(os.homedir(), 'AntBot', 'style-refs.json');
+        styleRefs = JSON.parse(await fs.readFile(srPath, 'utf-8'));
+      } catch {}
+      settings._styleRefs = styleRefs;
+
+      // 为每个任务附加风格名称
+      for (const task of tasks) {
+        task._styleName = task._styleName || selectedStyleName;
+      }
+
       // #6: 启动时清理残留缓存
       await this.cleanupStaleCache(mainControlCacheDir);
 
@@ -732,7 +752,7 @@ class TaskRunner {
               }
               const downloadResult = await downloadVideo({ task, tempDir: mainControlCacheDir, baseName, settings, log: (msg) => this.log(task.id, msg) });
               downloadResults.set(task.id, downloadResult);
-              taskTempFiles.set(task.id, { downloadPath: downloadResult.outputPath, subtitlePath: '' });
+              taskTempFiles.set(task.id, { downloadPath: downloadResult.outputPath, tmpDir: '' });
               this.setTaskState(task.id, { progress: 25, step: '下载完成', message: '视频下载完成，等待剪辑...' });
             } catch (err) {
               downloadResults.set(task.id, { error: err });
@@ -795,43 +815,85 @@ class TaskRunner {
         let editCompleted = false;
 
         try {
+          // ── 新剪辑流程: prepareEditVideo + composeEditVideo ──
           const voiceoverEnabled = settings?.style?.voiceoverEnabled !== false;
           const subtitleEnabled = voiceoverEnabled && settings?.style?.subtitleEnabled !== false;
-          const needsSubtitleFile = voiceoverEnabled || subtitleEnabled;
 
-          let subtitleResult = { subtitlePath: '' };
-          if (needsSubtitleFile) {
-            // 重试时清理旧字幕文件
-            const ttf = taskTempFiles.get(task.id);
-            if (ttf?.subtitlePath) {
-              try { await fs.rm(ttf.subtitlePath, { force: true }); } catch {}
-            }
-            subtitleResult = await this.runStep(task, 'subtitle', () => generateSubtitle({
-              task, tempDir: mainControlCacheDir, baseName, settings,
-              inputVideoPath: dlResult.outputPath,
-              log: (msg) => this.log(task.id, msg)
-            }), 50);
-            // #1: 记录字幕文件路径
-            if (ttf) ttf.subtitlePath = subtitleResult.subtitlePath;
-          } else {
-            this.setTaskState(task.id, { step: STEP_NAMES.subtitle, progress: 50, message: '字幕与旁白已关闭，跳过字幕生成' });
-            this.log(task.id, '字幕生成已跳过（旁白语音关闭）。');
+          // 构建 apiConfig（与剪辑页面一致）
+          const apiCfg = settings?.api || {};
+          const apiConfig = {
+            baseUrl: apiCfg.baseUrl,
+            apiKey: apiCfg.apiKey,
+            apiKeys: apiCfg.apiKeys || [apiCfg.apiKey].filter(Boolean),
+            modelId: apiCfg.modelId
+          };
+
+          // 获取风格提示词
+          let stylePrompt = '';
+          if (task._styleName && settings?._styleRefs) {
+            const found = settings._styleRefs.find(s => s.name === task._styleName);
+            if (found?.prompt) stylePrompt = found.prompt;
           }
 
-          // 输出到 主控输出/{YYYYMMDD}/
+          // 重试时清理旧临时目录
+          const ttf = taskTempFiles.get(task.id);
+          if (ttf?.tmpDir) {
+            try { await fs.rm(ttf.tmpDir, { recursive: true, force: true }); } catch {}
+          }
+
+          // 3a. prepareEditVideo: 抽帧 → AI识别 → 生成SRT
+          const prepareResult = await this.runStep(task, 'prepare', () => prepareEditVideo({
+            taskId: task.id,
+            videoPath: dlResult.outputPath,
+            stylePrompt,
+            apiConfig,
+            language: settings?.language || 'zh',
+            frameRate: settings?.edit?.frameRate || 1,
+            dataDir: path.join(os.homedir(), 'AntBot'),
+            log: (msg) => this.log(task.id, msg),
+            progress: (p) => this.setTaskState(task.id, {
+              progress: 25 + Math.round((p.percent || 0) * 0.25),
+              step: p.step || '准备中',
+              message: p.message || ''
+            })
+          }), 50);
+
+          // 记录临时文件路径用于清理
+          if (ttf) ttf.tmpDir = prepareResult.tmpDir;
+
+          // 输出路径
           const dayDir = new Date().toISOString().slice(0, 10).replace(/-/g, '');
           outDir = path.join(mainControlOutputDir, dayDir);
           await ensureDir(outDir);
-          const videoName = task._baseName || `task_${Date.now()}`;
-          const ts = buildPreciseTimestamp(new Date());
-          outPath = path.join(outDir, `${videoName}_${ts}.mp4`);
+          outPath = path.join(outDir, `${prepareResult.videoName || task._baseName}.mp4`);
 
-          await this.runStep(task, 'edit', () => editVideo({
-            task, settings,
-            inputVideoPath: dlResult.outputPath,
-            subtitlePath: subtitleResult.subtitlePath,
+          // 3b. composeEditVideo: 合成视频 (配音+字幕+音频混合)
+          const voiceClone = settings?.voiceClone || {};
+          const subtitleStyle = {
+            textColor: settings?.style?.subtitleTextColor || '#0D9488',
+            strokeColor: settings?.style?.subtitleStrokeColor || '#000000',
+            positionPercent: settings?.style?.subtitlePositionPercent ?? 12,
+          };
+
+          await this.runStep(task, 'compose', () => composeEditVideo({
+            videoPath: dlResult.outputPath,
+            srtPath: prepareResult.srtPath,
             outputPath: outPath,
-            log: (msg) => this.log(task.id, msg)
+            voiceProfileId: voiceClone.voiceId || '',
+            voiceProfileName: voiceClone.profileName || '',
+            language: settings?.language || 'zh',
+            voiceSpeed: settings?.style?.voiceSpeed || 1.1,
+            subtitleStyle,
+            voiceoverEnabled,
+            subtitleEnabled,
+            videoWidth: prepareResult.videoWidth || 0,
+            videoHeight: prepareResult.videoHeight || 0,
+            log: (msg) => this.log(task.id, msg),
+            progress: (p) => this.setTaskState(task.id, {
+              progress: 50 + Math.round((p.percent || 0) * 0.25),
+              step: p.step || '合成中',
+              message: p.message || ''
+            })
           }), 75);
           editCompleted = true;
 
@@ -1171,7 +1233,7 @@ class TaskRunner {
     } catch {}
   }
 
-  async cleanupMainControlCache(downloadPath, subtitlePath) {
+  async cleanupMainControlCache(downloadPath, tmpDir) {
     // 清理下载文件
     if (downloadPath) {
       try { await fs.rm(downloadPath, { force: true }); } catch {}
@@ -1187,9 +1249,9 @@ class TaskRunner {
         }
       } catch {}
     }
-    // 清理字幕文件
-    if (subtitlePath) {
-      try { await fs.rm(subtitlePath, { force: true }); } catch {}
+    // 清理 prepareEditVideo 产生的临时目录（帧、SRT 等）
+    if (tmpDir) {
+      try { await fs.rm(tmpDir, { recursive: true, force: true }); } catch {}
     }
   }
 }

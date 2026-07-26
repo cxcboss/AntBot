@@ -3499,8 +3499,7 @@ async function publishVideo(taskContext) {
         };
       }
     } catch (error) {
-      if (!extensionConfig.fallbackToPlaywright) throw error;
-      log(`浏览器插件发布不可用，回退 Playwright：${error.message}`);
+      throw error;
     }
   }
 
@@ -3527,25 +3526,7 @@ async function publishVideo(taskContext) {
     };
   }
 
-  const results = [];
-  for (const platform of platforms) {
-    log(`开始发布到${PLATFORM_CONFIG[platform].label}...`);
-    const result = await publishByPlaywright({
-      platformKey: platform,
-      outputPath,
-      task,
-      settings,
-      log
-    });
-    results.push(result);
-  }
-
-  return {
-    mode: 'playwright',
-    scheduleAt,
-    platforms,
-    results
-  };
+  throw new Error('发布桥接服务未运行，请在发布页面启动服务后重试');
 }
 
 module.exports = {
