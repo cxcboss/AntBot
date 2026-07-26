@@ -117,7 +117,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","PingFang SC"
 .content{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}
 
 /* Chat area */
-.chat{flex:1;min-height:0;overflow-y:auto;padding:12px 12px 80px}
+.chat{flex:1;min-height:0;overflow-y:auto;padding:12px}
 .chat-stream{display:flex;flex-direction:column;gap:8px}
 
 /* Task card */
@@ -145,14 +145,14 @@ body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","PingFang SC"
 .empty-icon{font-size:32px;opacity:0.4}
 
 /* Input bar */
-.input-bar{position:sticky;bottom:0;left:0;right:0;background:var(--card);border-top:1px solid var(--border);padding:8px 12px;z-index:10;flex-shrink:0}
+.input-bar{background:var(--card);border-top:1px solid var(--border);padding:8px 12px;flex-shrink:0}
 .input-row{display:flex;gap:8px;align-items:flex-end}
-.input-field{flex:1;min-height:36px;max-height:120px;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--bg);color:var(--text);font-size:14px;font-family:inherit;line-height:1.4;resize:none;outline:none}
-.input-field:focus{border-color:var(--primary);box-shadow:0 0 0 3px color-mix(in srgb,var(--primary) 15%,transparent)}
+.input-field{flex:1;min-height:36px;max-height:120px;padding:8px 12px;border:1px solid var(--border);border-radius:18px;background:var(--bg);color:var(--text);font-size:14px;font-family:inherit;line-height:1.4;resize:none;outline:none}
+.input-field:focus{border-color:var(--border)}
 .input-field::placeholder{color:var(--muted)}
-.send-btn{width:36px;height:36px;border-radius:var(--radius);background:var(--primary);color:var(--primary-fg);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:background 120ms}
+.send-btn{width:36px;height:36px;border-radius:50%;background:var(--primary);color:var(--primary-fg);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all 120ms}
 .send-btn:hover{background:var(--primary-hover)}
-.send-btn:disabled{opacity:0.5;cursor:not-allowed}
+.send-btn:disabled{background:var(--border);color:var(--muted);cursor:not-allowed;opacity:0.6}
 .chips{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}
 .chip{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 8px;border-radius:999px;font-size:11px;background:var(--muted);color:var(--text);cursor:pointer;transition:background 120ms}
 .chip:hover{background:var(--border)}
@@ -360,12 +360,19 @@ function connectSSE() {
   sseSource.addEventListener('settings-update', (e) => {
     try {
       const data = JSON.parse(e.data);
-      if (data?.style) {
-        if (data.style.subtitleTextColor) setColorFromHex('color', data.style.subtitleTextColor);
-        if (data.style.subtitleStrokeColor) setColorFromHex('stroke', data.style.subtitleStrokeColor);
-        if (data.style.subtitlePositionPercent !== undefined) {
-          const el = document.getElementById('sub-position');
-          if (el) el.value = data.style.subtitlePositionPercent;
+      if (data) {
+        // 更新字幕设置
+        if (data.style) {
+          if (data.style.subtitleTextColor) setColorFromHex('color', data.style.subtitleTextColor);
+          if (data.style.subtitleStrokeColor) setColorFromHex('stroke', data.style.subtitleStrokeColor);
+          if (data.style.subtitlePositionPercent !== undefined) {
+            const el = document.getElementById('sub-position');
+            if (el) el.value = data.style.subtitlePositionPercent;
+          }
+        }
+        // 更新芯片设置
+        if (data.editDefaults || data.voiceClone || data.retry) {
+          loadSettings();
         }
         showToast('设置已同步');
       }
@@ -495,10 +502,14 @@ function bindEvents() {
 
   // Task input
   const input = document.getElementById('task-input');
+  const sendBtn = document.getElementById('send-btn');
   if (input) {
+    // 初始状态：空内容时禁用发送按钮
+    if (sendBtn) sendBtn.disabled = !input.value.trim();
     input.addEventListener('input', () => {
       input.style.height = 'auto';
       input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+      if (sendBtn) sendBtn.disabled = !input.value.trim();
     });
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendTask(); }
@@ -653,8 +664,26 @@ async function loadRemoteSettings() {
 }
 
 async function loadTasks() {
-  const data = await api('GET', '/tasks');
-  if (data?.tasks) { tasks = data.tasks; renderTasks(); }
+  // 加载当前运行任务
+  const data = await api('GET', '/remote/tasks');
+  if (data?.tasks) { tasks = data.tasks; }
+  // 加载历史记录
+  try {
+    const hist = await api('GET', '/remote/history');
+    if (hist?.history) {
+      // 从历史中提取任务项，合并到 tasks
+      for (const run of hist.history) {
+        if (run.items) {
+          for (const item of run.items) {
+            if (!tasks.find(t => t.id === item.id)) {
+              tasks.push({ ...item, _fromHistory: true });
+            }
+          }
+        }
+      }
+    }
+  } catch {}
+  renderTasks();
 }
 
 async function sendTask() {
@@ -873,6 +902,16 @@ function startRemoteServer({ store, taskRunner, mainWindowRef, appLog }) {
         return sendJson(res, 200, { ok: true, tasks: status.tasks });
       }
 
+      // GET /remote/history — 主控历史记录
+      if (method === 'GET' && pathname === '/remote/history') {
+        try {
+          const historyPath = path.join(os.homedir(), 'AntBot', 'antbot-store.json');
+          const data = JSON.parse(await fs.readFile(historyPath, 'utf-8'));
+          const history = data.users?.[0]?.history || [];
+          return sendJson(res, 200, { ok: true, history });
+        } catch { return sendJson(res, 200, { ok: true, history: [] }); }
+      }
+
       // GET /remote/credentials — 读取用户名密码（不经过 getSettings 清空）
       if (method === 'GET' && pathname === '/remote/credentials') {
         try {
@@ -883,10 +922,16 @@ function startRemoteServer({ store, taskRunner, mainWindowRef, appLog }) {
         } catch { return sendJson(res, 200, { ok: true, username: '', password: '' }); }
       }
 
-      // GET /remote/settings — 读取设置（字幕等）
+      // GET /remote/settings — 读取设置（字幕/风格/音色等）
       if (method === 'GET' && pathname === '/remote/settings') {
         const settings = await _store.getSettings();
-        return sendJson(res, 200, { ok: true, ...settings });
+        // 读取 UI 设置（editDefaults 等）
+        let uiSettings = {};
+        try {
+          const uiPath = path.join(os.homedir(), 'AntBot', 'ui-settings.json');
+          uiSettings = JSON.parse(await fs.readFile(uiPath, 'utf-8'));
+        } catch {}
+        return sendJson(res, 200, { ok: true, ...settings, editDefaults: uiSettings.editDefaults || {} });
       }
 
       // POST /remote/settings — 更新设置
