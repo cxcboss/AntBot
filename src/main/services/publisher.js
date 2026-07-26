@@ -3461,7 +3461,7 @@ async function publishVideo(taskContext) {
   if (extensionConfig?.enabled) {
     const bridge = createBrowserPublishBridge({
       baseUrl: extensionConfig.baseUrl,
-      timeoutMs: Number(extensionConfig.timeoutMs) || 30 * 60 * 1000
+      timeoutMs: 60 * 1000
     });
     try {
       const bridgeStatus = await bridge.getStatus();
