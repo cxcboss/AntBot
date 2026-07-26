@@ -25,10 +25,14 @@ function createBridgeQueue({ maxHistory = 100, maxEvents = 200 } = {}) {
   const history = [];
   const events = [];
   let state = { status: 'idle', updatedAt: nowIso() };
+  let lastExtensionPoll = 0;
 
   const trim = (list, max) => {
     while (list.length > max) list.shift();
   };
+
+  const markExtensionPoll = () => { lastExtensionPoll = Date.now(); };
+  const isExtensionConnected = () => lastExtensionPoll > 0 && (Date.now() - lastExtensionPoll) < 10000;
 
   const enqueue = (input) => {
     const command = normalizeCommand(input);
@@ -95,7 +99,7 @@ function createBridgeQueue({ maxHistory = 100, maxEvents = 200 } = {}) {
     events: events.map(item => ({ ...item }))
   });
 
-  return { enqueue, claim, resolve, cancel, get, updateState, addEvent, snapshot };
+  return { enqueue, claim, resolve, cancel, get, updateState, addEvent, snapshot, markExtensionPoll, isExtensionConnected };
 }
 
 module.exports = { createBridgeQueue, TERMINAL_STATUSES };

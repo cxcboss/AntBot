@@ -43,6 +43,7 @@ app.get('/api/bridge/status', (req, res) => {
     name: '搬运蚁发布助手',
     protocolVersion: 1,
     status: snapshot.pending.length ? 'busy' : 'ready',
+    extensionConnected: bridgeQueue.isExtensionConnected(),
     queued: snapshot.queued.length,
     pending: snapshot.pending.length,
     lastCommand: snapshot.history[0] || null
@@ -64,6 +65,7 @@ app.post('/api/bridge/commands', (req, res) => {
 });
 
 app.get('/api/bridge/commands/next', (req, res) => {
+  bridgeQueue.markExtensionPoll();
   const command = bridgeQueue.claim();
   if (!command) return res.status(204).end();
   bridgeEvent(command.id, { type: 'started', action: command.action, status: 'running' });

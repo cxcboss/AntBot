@@ -900,26 +900,47 @@ class TaskRunner {
           let publishResult = null;
           if (publishEnabled) {
             const extensionConfig = settings?.publish?.browserExtension;
-            this.log(task.id, `发布配置: enabled=${extensionConfig?.enabled}, baseUrl=${extensionConfig?.baseUrl}, platforms=${JSON.stringify(task.platforms)}`);
 
             if (extensionConfig?.enabled) {
-              // 自动启动桥接服务（如果未运行）
               const { bridgeServiceManager } = require('./services/bridgeServiceManager');
+              const { createBrowserPublishBridge } = require('./services/browserPublishBridge');
+
+              // 1. 确保桥接服务运行
               const status = bridgeServiceManager.getStatus();
-              this.log(task.id, `桥接服务状态: running=${status.running}`);
               if (!status.running) {
                 this.log(task.id, '桥接服务未启动，正在自动启动...');
-                this.setTaskState(task.id, { step: '发布准备', message: '正在启动发布桥接服务...' });
+                this.setTaskState(task.id, { step: '发布准备', message: '正在启动桥接服务...' });
                 const started = await bridgeServiceManager.start();
-                if (!started) {
-                  throw new Error('桥接服务启动失败，请在发布页面手动启动服务后重试');
-                }
+                if (!started) throw new Error('桥接服务启动失败，请在发布页面手动启动服务后重试');
                 await new Promise(r => setTimeout(r, 1500));
                 this.log(task.id, '桥接服务已启动');
               }
+
+              // 2. 等待浏览器插件连接（最多 30 秒）
+              const bridge = createBrowserPublishBridge({
+                baseUrl: extensionConfig.baseUrl,
+                timeoutMs: Number(extensionConfig.timeoutMs) || 30 * 60 * 1000
+              });
+              this.setTaskState(task.id, { step: '等待插件', message: '等待浏览器插件连接...' });
+              this.log(task.id, '等待浏览器插件连接...');
+              let extensionReady = false;
+              for (let i = 0; i < 30; i++) {
+                try {
+                  const bridgeStatus = await bridge.getStatus();
+                  if (bridgeStatus.extensionConnected) {
+                    extensionReady = true;
+                    this.log(task.id, '浏览器插件已连接');
+                    break;
+                  }
+                } catch {}
+                await new Promise(r => setTimeout(r, 1000));
+              }
+              if (!extensionReady) {
+                throw new Error('浏览器插件未连接，请打开浏览器并确认插件已启用，然后重试');
+              }
             }
 
-            this.log(task.id, '开始调用 publishVideo...');
+            this.log(task.id, '开始发布...');
             publishResult = await this.runStep(task, 'publish', () => publishVideo({
               task, settings, outputPath: outPath,
               log: (msg) => this.log(task.id, msg)
