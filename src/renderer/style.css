@@ -356,20 +356,24 @@ body:not([data-platform="darwin"]) .app{padding-top:0}
 .msg-content{white-space:pre-wrap;word-break:break-word}
 .msg-raw-toggle{display:block;margin-top:4px;font-size:10px;color:var(--muted-foreground);cursor:pointer;border:0;background:none;padding:0;text-align:right;width:100%}
 .msg-raw-toggle:hover{color:var(--foreground)}
+.msg-raw-actions{display:flex;gap:6px;justify-content:flex-end;margin-top:4px}
+.msg-copy-btn{font-size:10px;color:var(--muted-foreground);cursor:pointer;border:1px solid var(--border);background:var(--card);padding:2px 8px;border-radius:var(--radius);transition:all var(--transition-fast)}
+.msg-copy-btn:hover{color:var(--foreground);border-color:var(--foreground)}
 .msg-raw{display:none;white-space:pre-wrap;word-break:break-word;font-size:11px;color:var(--muted-foreground);margin-top:4px;padding-top:4px;border-top:1px solid var(--border)}
 .msg-raw.show{display:block}
 .chat-empty{margin:auto;max-width:280px;padding:24px 12px;color:var(--muted-foreground);text-align:center;font-size:13px}
 
 /* ── Task cards ── */
 .task-stack{display:flex;flex-direction:column;gap:4px}
-.task{position:relative;overflow:hidden;border-radius:var(--radius-lg);background:var(--card);margin-bottom:1px;box-shadow:var(--shadow-xs);max-width:520px}
+.task{position:relative;overflow:hidden;border-radius:var(--radius-lg);background:var(--card);margin-bottom:1px;box-shadow:var(--shadow-xs);max-width:620px}
 .task-head{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 12px 4px}
 .task-title{font-size:12px;font-weight:600}
 .task-badge{font-size:10px;font-weight:500;color:var(--muted-foreground);white-space:nowrap}
 .task.warning .task-badge{color:var(--warning)}
 .task.failed .task-badge{color:var(--destructive)}
 .task-tags{display:flex;gap:4px;padding:0 12px 4px}
-.task-tag{font-size:10px;font-weight:500;padding:2px 8px;border-radius:var(--radius-full);background:var(--accent);color:var(--accent-foreground)}
+.task-tag{font-size:10px;font-weight:500;color:var(--muted-foreground)}
+.task-tag-accent{padding:2px 8px;border-radius:var(--radius-full);background:var(--accent);color:var(--accent-foreground)}
 .task-msg{font-size:10px;color:var(--muted-foreground);padding:0 12px 4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .task.failed .task-msg{color:var(--destructive)}
 .task.warning .task-msg{color:var(--warning)}

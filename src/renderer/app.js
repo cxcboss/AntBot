@@ -46,7 +46,7 @@ let previewTimer=null,previewSeq=0,setQueue=Promise.resolve(),startupSeq=0;
 /* ── Utils ── */
 const esc=(s)=>String(s||'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
 const compact=(s,n=160)=>String(s||'').replace(/\s+/g,' ').slice(0,n);
-const fmtDate=(v)=>{if(!v)return'--';const d=new Date(v);if(+isNaN(d))return String(v);return`${d.getMonth()+1}月${d.getDate()}日 ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;};
+const fmtDate=(v)=>{if(!v)return'--';const d=new Date(v);if(isNaN(d))return String(v);const now=new Date();const pad=n=>String(n).padStart(2,'0');const time=`${pad(d.getHours())}:${pad(d.getMinutes())}`;if(d.toDateString()===now.toDateString())return time;const yesterday=new Date(now);yesterday.setDate(now.getDate()-1);if(d.toDateString()===yesterday.toDateString())return`昨天 ${time}`;if(d.getFullYear()===now.getFullYear())return`${d.getMonth()+1}月${d.getDate()}日 ${time}`;return`${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())} ${time}`;};
 const fmtDay=(v)=>{if(!v)return'';const d=new Date(v);if(+isNaN(d))return'';return`${d.getMonth()+1}月${d.getDate()}日`;};
 const merge=(t,s)=>{if(!s||typeof s!=='object')return t;for(const[k,v] of Object.entries(s)){if(Array.isArray(v))t[k]=v.slice();else if(v&&typeof v==='object'){if(!t[k]||typeof t[k]!=='object')t[k]={};merge(t[k],v);}else t[k]=v;}return t;};
 const statusMap={queued:'等待',pending:'等待',running:'执行中',completed:'成功',warning:'部分完成',failed:'失败',stopped:'已停止',partial_failed:'部分失败'};
@@ -126,7 +126,8 @@ function makeBubbleHtml(raw){
   const rawLines=raw.split(/\r?\n/).filter(l=>l.trim());
   const showNum=rawLines.length>=3;
   const numbered=rawLines.map((l,i)=>(showNum?`${i+1}、`:``)+l).join('\n');
-  return`<div class="msg-content">${formatted}</div><button class="msg-raw-toggle" type="button" onclick="this.nextElementSibling.classList.toggle('show');this.textContent=this.nextElementSibling.classList.contains('show')?'隐藏原文':'显示原文'">显示原文</button><div class="msg-raw">${esc(numbered)}</div>`;
+  const escapedRaw=esc(numbered).replace(/`/g,'\\`').replace(/\$/g,'\\$');
+  return`<div class="msg-content">${formatted}</div><div class="msg-raw-actions"><button class="msg-raw-toggle" type="button" onclick="const raw=this.parentElement.nextElementSibling;const shown=raw.classList.toggle('show');this.textContent=shown?'隐藏原文':'显示原文';this.nextElementSibling.style.display=shown?'inline-flex':'none'">显示原文</button><button class="msg-copy-btn" type="button" style="display:none" onclick="navigator.clipboard.writeText('${escapedRaw.replace(/'/g,"\\'")}');this.textContent='已复制';setTimeout(()=>this.textContent='复制',1500)">复制</button></div><div class="msg-raw">${esc(numbered)}</div>`;
 }
 
 /* ── Statistics ── */
@@ -226,17 +227,27 @@ function taskCard(t,live=false){
   const canSkip=live&&['queued','pending'].includes(st);
   const canCancel=live&&['queued','pending','running'].includes(st);
   const canRetry=live&&['failed'].includes(st);
+  const isCompleted=st==='completed'||st==='warning';
   const msg=t.message?`<div class="task-msg">${esc(t.message)}</div>`:'';
-  // 额外信息标签
+
+  // 标签：原创、定时（无背景框，普通颜色）
   const tags=[];
-  if(t.isOriginal)tags.push('<span class="task-tag">原创</span>');
-  if(t.publishAt){const d=new Date(t.publishAt);if(!isNaN(d))tags.push(`<span class="task-tag">定时 ${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}</span>`)}
+  if(t.isOriginal)tags.push('<span class="task-tag task-tag-accent">原创</span>');
+  if(t.publishAt){const d=new Date(t.publishAt);if(!isNaN(d)){const pad=n=>String(n).padStart(2,'0');tags.push(`<span class="task-tag">定时 ${d.getMonth()+1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}</span>`)}}
   const tagsHtml=tags.length?`<div class="task-tags">${tags.join('')}</div>`:'';
+
+  // 进度条：完成/失败/停止不显示
+  const showProgress=st==='running'||st==='preparing'||st==='pending'||st==='queued';
+  const progressHtml=showProgress?`<div class="task-bar"><div class="task-bar-in" style="width:${pg}%"></div></div>`:'';
+
+  // 操作按钮
   const acts=[];
   if(canSkip)acts.push(`<button class="task-btn skip" data-skip="${esc(t.id)}">跳过</button>`);
   if(canCancel)acts.push(`<button class="task-btn cancel" data-stop="${esc(t.id)}">取消</button>`);
-  if(canRetry)acts.push(`<button class="task-btn skip" data-retry="${esc(t.id)}">重试</button>`);
-  return`<div class="task ${esc(st)}"><div class="task-head"><div class="task-title">${esc(title)}</div><div class="task-badge">${esc(statusLabel)}</div></div>${tagsHtml}<div class="task-bar"><div class="task-bar-in" style="width:${pg}%"></div></div>${msg}${acts.length?`<div class="task-acts">${acts.join('')}</div>`:''}</div>`;
+  if(canRetry)acts.push(`<button class="task-btn" data-retry-task="${esc(t.id)}">重试</button>`);
+  if(isCompleted&&t.outputPath)acts.push(`<button class="task-btn" data-open-output="${esc(t.id)}">打开目录</button>`);
+
+  return`<div class="task ${esc(st)}"><div class="task-head"><div class="task-title">${esc(title)}</div><div class="task-badge">${esc(statusLabel)}</div></div>${tagsHtml}${progressHtml}${msg}${acts.length?`<div class="task-acts">${acts.join('')}</div>`:''}</div>`;
 }
 function renderChat(opts={}){
   if(!el.stream)return;const stick=opts.stick,vis=(S.history||[]).slice(0,S.chatCount).reverse(),lg=liveGroups();
@@ -2070,13 +2081,26 @@ function bind(){
     const stopBtn=e.target.closest('[data-stop]');
     const skipBtn=e.target.closest('[data-skip]');
     const retryBtn=e.target.closest('[data-retry]');
+    const retryTaskBtn=e.target.closest('[data-retry-task]');
+    const openOutputBtn=e.target.closest('[data-open-output]');
     if(stopBtn){void window.antbot.stopTask(stopBtn.dataset.stop).then(()=>toast('已停止','success')).catch(err=>toast(err.message,'error'))}
     if(skipBtn){void window.antbot.stopTask(skipBtn.dataset.skip).then(()=>toast('已跳过','success')).catch(err=>toast(err.message,'error'))}
     if(retryBtn){
       const taskId=retryBtn.dataset.retry;
-      // 从当前进度中找到任务信息进行重试
       const task=S.progress?.tasks?.find(t=>t.id===taskId);
       if(task){void window.antbot.resumeTask({taskId,rawLine:task.rawLine||''}).then(()=>toast('已重试','success')).catch(err=>toast(err.message,'error'))}
+    }
+    if(retryTaskBtn){
+      const taskId=retryTaskBtn.dataset.retryTask;
+      const task=S.progress?.tasks?.find(t=>t.id===taskId)||S.history?.flatMap(h=>h.items||[]).find(t=>t.id===taskId);
+      const rawLine=task?.rawLine||'';
+      if(rawLine){void window.antbot.startTasks(rawLine).then(r=>{toast('已重新提交','success');appendPending({runId:r.runId,inputText:rawLine});renderChat({stick:true})}).catch(err=>toast(err.message,'error'))}
+      else{toast('无法重试：缺少原始输入','error')}
+    }
+    if(openOutputBtn){
+      const taskId=openOutputBtn.dataset.openOutput;
+      const task=S.progress?.tasks?.find(t=>t.id===taskId);
+      if(task?.outputPath){void window.antbot.revealInFolder(task.outputPath).catch(()=>{})}
     }
   });
   // Chips
