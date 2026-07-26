@@ -400,15 +400,21 @@ class TaskRunner {
         }
       }
       if (row.status === 'stopped' || row.status === 'failed') {
-        this.setTaskState(targetId, {
-          status: 'pending',
-          step: '等待执行',
-          message: '已恢复，等待执行'
-        });
-        // 如果 runner 空闲，触发执行
-        if (!this.running) {
-          this._tick?.();
+        // 重新入队为新任务
+        const rawLine = row.rawLine || '';
+        if (rawLine) {
+          const { parseTaskInput } = require('./services/parser');
+          try {
+            const tasks = parseTaskInput(rawLine);
+            if (tasks.length) {
+              const scheduled = this.enqueueTasks(tasks, { id: requestUserId || row.userId || 'user-1', name: requestUserName || '' }, rawLine);
+              return { resumed: true, taskId: targetId, queued: scheduled.queued, runId: scheduled.runId };
+            }
+          } catch (e) {
+            throw new Error(`重试失败: ${e.message}`);
+          }
         }
+        throw new Error('无法重试：缺少原始输入');
       }
       return { resumed: true, taskId: targetId };
     }
