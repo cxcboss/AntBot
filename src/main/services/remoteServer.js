@@ -853,14 +853,7 @@ function renderTasks() {
 }
 
 // === Init ===
-// 处理 Hub 跳转的 ?auth= 参数
-const urlParams = new URLSearchParams(window.location.search);
-const authParam = urlParams.get('auth');
-if (authParam && !token) {
-  const [u, p] = decodeURIComponent(authParam).split(':');
-  if (u && p) { login(u, p); }
-  window.history.replaceState({}, '', window.location.pathname);
-} else if (token) {
+if (token) {
   initApp();
 } else {
   renderLogin();
