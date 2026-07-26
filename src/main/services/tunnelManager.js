@@ -200,12 +200,33 @@ function startTunnel(port, { onUrl, onStatus, log, username, password } = {}) {
     _tunnelProcess.stderr?.on('data', parseOutput);
     _tunnelProcess.stdout?.on('data', parseOutput);
 
-    _tunnelProcess.on('close', (code) => {
+    _autoRestart = true;
+
+    _tunnelProcess.on('close', async (code) => {
       _log('info', `cloudflared 进程退出 (code=${code})`);
       _tunnelProcess = null;
       _tunnelUrl = null;
       _onStatusChange({ status: 'stopped' });
       _onUrlChange(null);
+
+      // 自动重启（非手动停止时）
+      if (_autoRestart && code !== 0) {
+        _log('info', '隧道意外断开，5秒后自动重连...');
+        _onStatusChange({ status: 'reconnecting' });
+        await new Promise(r => setTimeout(r, 5000));
+        try {
+          const result = await startTunnel(port, { onUrl, onStatus, log, username, password });
+          _log('info', `自动重连成功: ${result.url}`);
+          // 重新注册到 Hub
+          if (username && password && result.url) {
+            await registerWithHub(username, password, result.url);
+            _log('info', '已重新注册到 Hub');
+          }
+        } catch (e) {
+          _log('error', `自动重连失败: ${e.message}`);
+          _onStatusChange({ status: 'error', error: '重连失败: ' + e.message });
+        }
+      }
     });
 
     _tunnelProcess.on('error', (err) => {
@@ -243,8 +264,11 @@ function startTunnel(port, { onUrl, onStatus, log, username, password } = {}) {
   });
 }
 
+let _autoRestart = true;
+
 function stopTunnel() {
   if (_tunnelProcess) {
+    _autoRestart = false; // 手动停止不自动重启
     _log('info', '停止 Cloudflare Tunnel');
     _tunnelProcess.kill('SIGTERM');
     _tunnelProcess = null;

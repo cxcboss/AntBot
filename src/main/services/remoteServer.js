@@ -99,6 +99,13 @@ body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","PingFang SC"
 .header-title{flex:1;font-size:16px;font-weight:700}
 .header-user{font-size:12px;color:var(--muted);cursor:pointer;display:flex;align-items:center;gap:4px}
 .header-user:hover{color:var(--text)}
+.conn-banner{display:none;align-items:center;gap:8px;padding:6px 12px;font-size:12px;font-weight:500;flex-shrink:0}
+.conn-banner.checking,.conn-banner.retry{background:#FEF3C7;color:#92400E}
+.conn-banner.newurl{background:#DBEAFE;color:#1E40AF}
+.conn-banner.offline{background:#FEE2E2;color:#991B1B}
+.conn-banner.ok{background:#DCFCE7;color:#166534}
+.conn-spinner{width:14px;height:14px;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;animation:spin 600ms linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
 
 /* Sidebar */
 .sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.3);z-index:30}
@@ -294,11 +301,15 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;
 
 <script>
 const API = window.location.origin;
+const HUB_URL = 'https://hub.onebugmanai.online';
 let token = localStorage.getItem('antbot-token');
 let tasks = [];
 let sseSource = null;
 let currentPage = 'main';
 let currentUser = localStorage.getItem('antbot-user') || '';
+let userPassword = localStorage.getItem('antbot-pass') || '';
+let consecutiveErrors = 0;
+let reconnectTimer = null;
 
 // === Auth ===
 async function login(username, password) {
@@ -311,8 +322,10 @@ async function login(username, password) {
   if (data.ok) {
     token = data.token;
     currentUser = username;
+    userPassword = password;
     localStorage.setItem('antbot-token', token);
     localStorage.setItem('antbot-user', username);
+    localStorage.setItem('antbot-pass', password);
     initApp();
   } else {
     showToast(data.error || '登录失败');
@@ -322,8 +335,12 @@ async function login(username, password) {
 function logout() {
   token = null;
   currentUser = '';
+  userPassword = '';
+  consecutiveErrors = 0;
+  if (reconnectTimer) clearTimeout(reconnectTimer);
   localStorage.removeItem('antbot-token');
   localStorage.removeItem('antbot-user');
+  localStorage.removeItem('antbot-pass');
   if (sseSource) sseSource.close();
   renderLogin();
 }
@@ -342,8 +359,14 @@ async function api(method, path, body) {
 
 // === SSE ===
 function connectSSE() {
-  if (sseSource) sseSource.close();
+  if (sseSource) { sseSource.close(); sseSource = null; }
   sseSource = new EventSource(API + '/remote/events?token=' + token);
+
+  sseSource.onopen = () => {
+    consecutiveErrors = 0;
+    hideReconnectBanner();
+  };
+
   sseSource.addEventListener('task-update', (e) => {
     const task = JSON.parse(e.data);
     const idx = tasks.findIndex(t => t.id === task.id);
@@ -356,12 +379,10 @@ function connectSSE() {
     tasks = status.tasks || [];
     renderTasks();
   });
-  // 设置变更同步（App 端修改时自动更新网页）
   sseSource.addEventListener('settings-update', (e) => {
     try {
       const data = JSON.parse(e.data);
       if (data) {
-        // 更新字幕设置
         if (data.style) {
           if (data.style.subtitleTextColor) setColorFromHex('color', data.style.subtitleTextColor);
           if (data.style.subtitleStrokeColor) setColorFromHex('stroke', data.style.subtitleStrokeColor);
@@ -370,7 +391,6 @@ function connectSSE() {
             if (el) el.value = data.style.subtitlePositionPercent;
           }
         }
-        // 更新芯片设置
         if (data.editDefaults || data.voiceClone || data.retry) {
           loadSettings();
         }
@@ -378,6 +398,85 @@ function connectSSE() {
       }
     } catch {}
   });
+
+  sseSource.onerror = () => {
+    consecutiveErrors++;
+    sseSource.close();
+    sseSource = null;
+    if (consecutiveErrors >= 3) {
+      showReconnectBanner('checking');
+      reconnectViaHub();
+    } else {
+      showReconnectBanner('retry');
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(() => connectSSE(), Math.min(consecutiveErrors * 2000, 10000));
+    }
+  };
+}
+
+// 自动重连：通过 Hub 获取最新隧道地址
+async function reconnectViaHub() {
+  try {
+    const res = await fetch(HUB_URL + '/api/tunnel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: currentUser, password: userPassword })
+    });
+    const data = await res.json();
+    if (data.ok && data.tunnelUrl) {
+      const newApi = data.tunnelUrl.replace(/\/$/, '');
+      if (newApi !== API) {
+        // 隧道地址变了，重新登录
+        showReconnectBanner('newurl');
+        const loginRes = await fetch(newApi + '/remote/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: currentUser, password: userPassword })
+        });
+        const loginData = await loginRes.json();
+        if (loginData.ok) {
+          token = loginData.token;
+          localStorage.setItem('antbot-token', token);
+          // 跳转到新地址
+          window.location.href = newApi + '?auth=' + encodeURIComponent(currentUser + ':' + userPassword);
+          return;
+        }
+      }
+      // 同一地址，重试连接
+      showReconnectBanner('retry');
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(() => connectSSE(), 3000);
+    } else {
+      // Hub 无法访问或用户不存在
+      showReconnectBanner('offline');
+    }
+  } catch {
+    showReconnectBanner('offline');
+  }
+}
+
+function showReconnectBanner(state) {
+  const banner = document.getElementById('conn-banner');
+  const text = document.getElementById('conn-text');
+  if (!banner) return;
+  banner.style.display = 'flex';
+  banner.className = 'conn-banner ' + state;
+  const msgs = {
+    checking: '连接中断，正在检查服务器...',
+    retry: '连接中断，正在重连...',
+    newurl: '服务器地址已更新，正在跳转...',
+    offline: '电脑可能已离线',
+    ok: '已重新连接'
+  };
+  text.textContent = msgs[state] || '正在连接...';
+}
+
+function hideReconnectBanner() {
+  const banner = document.getElementById('conn-banner');
+  if (!banner) return;
+  banner.className = 'conn-banner ok';
+  document.getElementById('conn-text').textContent = '已重新连接';
+  setTimeout(() => { banner.style.display = 'none'; }, 2000);
 }
 
 // === Toast ===
@@ -428,6 +527,7 @@ function renderAppShell() {
     '<span class="header-title" id="header-title">主控</span>' +
     '<span class="header-user" id="header-user">' + esc(currentUser) + '</span>' +
     '</div>' +
+    '<div class="conn-banner" id="conn-banner"><span class="conn-spinner"></span><span id="conn-text"></span></div>' +
     '<div class="sidebar-overlay" id="sidebar-overlay"></div>' +
     '<div class="sidebar" id="sidebar">' +
     '<div class="sidebar-header">🐜 搬运蚁</div>' +
@@ -750,7 +850,18 @@ function renderTasks() {
 }
 
 // === Init ===
-if (token) initApp(); else renderLogin();
+// 处理 Hub 跳转的 ?auth= 参数
+const urlParams = new URLSearchParams(window.location.search);
+const authParam = urlParams.get('auth');
+if (authParam && !token) {
+  const [u, p] = decodeURIComponent(authParam).split(':');
+  if (u && p) { login(u, p); }
+  window.history.replaceState({}, '', window.location.pathname);
+} else if (token) {
+  initApp();
+} else {
+  renderLogin();
+}
 </script>
 </body>
 </html>`;
