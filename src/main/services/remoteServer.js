@@ -173,6 +173,14 @@ body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","PingFang SC"
 .btn-ghost{background:transparent;border:1px solid var(--border);color:var(--text)}
 .btn-block{width:100%}
 .color-input{width:48px;height:32px;border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;padding:2px}
+.slider-row{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.slider-label{font-size:11px;color:var(--muted);width:28px;flex-shrink:0}
+.slider-val{font-size:11px;color:var(--muted);width:36px;text-align:right;flex-shrink:0}
+input[type=range]{flex:1;height:6px;-webkit-appearance:none;appearance:none;border-radius:3px;outline:none}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:16px;height:16px;border-radius:50%;background:var(--card);border:2px solid var(--border);cursor:pointer;box-shadow:var(--shadow)}
+.slider-h{background:linear-gradient(to right,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)}
+.slider-s{background:linear-gradient(to right,#888,var(--primary))}
+.slider-l{background:linear-gradient(to right,#000,#888,#fff)}
 
 /* Remote page */
 .section-title{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;margin-top:16px}
@@ -348,6 +356,21 @@ function connectSSE() {
     tasks = status.tasks || [];
     renderTasks();
   });
+  // 设置变更同步（App 端修改时自动更新网页）
+  sseSource.addEventListener('settings-update', (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      if (data?.style) {
+        if (data.style.subtitleTextColor) setColorFromHex('color', data.style.subtitleTextColor);
+        if (data.style.subtitleStrokeColor) setColorFromHex('stroke', data.style.subtitleStrokeColor);
+        if (data.style.subtitlePositionPercent !== undefined) {
+          const el = document.getElementById('sub-position');
+          if (el) el.value = data.style.subtitlePositionPercent;
+        }
+        showToast('设置已同步');
+      }
+    } catch {}
+  });
 }
 
 // === Toast ===
@@ -415,8 +438,20 @@ function renderAppShell() {
     '</div><div class="chips" id="chips"></div></div>' +
     '</div>' +
     '<div class="page" id="page-subtitle">' +
-    '<div class="form-group"><label class="form-label">字幕颜色</label><input class="color-input" id="sub-color" type="color" value="#FFA100" /></div>' +
-    '<div class="form-group"><label class="form-label">描边颜色</label><input class="color-input" id="sub-stroke" type="color" value="#000000" /></div>' +
+    '<div class="form-group"><label class="form-label">字幕颜色</label>' +
+    '<div class="color-picker" id="color-picker">' +
+    '<div class="color-preview" id="color-preview" style="width:100%;height:28px;border-radius:var(--radius);border:1px solid var(--border);margin-bottom:8px"></div>' +
+    '<div class="slider-row"><span class="slider-label">色相</span><input type="range" id="color-h" min="0" max="360" value="30" class="slider-h"><span class="slider-val" id="color-h-val">30°</span></div>' +
+    '<div class="slider-row"><span class="slider-label">饱和</span><input type="range" id="color-s" min="0" max="100" value="100" class="slider-s"><span class="slider-val" id="color-s-val">100%</span></div>' +
+    '<div class="slider-row"><span class="slider-label">亮度</span><input type="range" id="color-l" min="0" max="100" value="50" class="slider-l"><span class="slider-val" id="color-l-val">50%</span></div>' +
+    '</div></div>' +
+    '<div class="form-group"><label class="form-label">描边颜色</label>' +
+    '<div class="color-picker" id="stroke-picker">' +
+    '<div class="color-preview" id="stroke-preview" style="width:100%;height:28px;border-radius:var(--radius);border:1px solid var(--border);margin-bottom:8px"></div>' +
+    '<div class="slider-row"><span class="slider-label">色相</span><input type="range" id="stroke-h" min="0" max="360" value="0" class="slider-h"><span class="slider-val" id="stroke-h-val">0°</span></div>' +
+    '<div class="slider-row"><span class="slider-label">饱和</span><input type="range" id="stroke-s" min="0" max="100" value="0" class="slider-s"><span class="slider-val" id="stroke-s-val">0%</span></div>' +
+    '<div class="slider-row"><span class="slider-label">亮度</span><input type="range" id="stroke-l" min="0" max="100" value="0" class="slider-l"><span class="slider-val" id="stroke-l-val">0%</span></div>' +
+    '</div></div>' +
     '<div class="form-group"><label class="form-label">字幕位置 (0-100)</label><input class="form-input" id="sub-position" type="number" min="0" max="100" value="12" /></div>' +
     '<button class="btn btn-primary btn-block" id="sub-save-btn" type="button">保存设置</button>' +
     '</div>' +
@@ -481,15 +516,19 @@ function bindEvents() {
     if (action === 'retry') api('POST', '/tasks/' + id + '/retry').then(() => showToast('已重试'));
   });
 
-  // Subtitle save
+  // 颜色滑块交互
+  setupColorPicker('color', '#FFA100');
+  setupColorPicker('stroke', '#000000');
+
+  // Subtitle save（自动同步）
   document.getElementById('sub-save-btn')?.addEventListener('click', async () => {
-    const color = document.getElementById('sub-color')?.value;
-    const stroke = document.getElementById('sub-stroke')?.value;
+    const color = getColorHex('color');
+    const stroke = getColorHex('stroke');
     const position = document.getElementById('sub-position')?.value;
     await api('POST', '/remote/settings', {
       style: { subtitleTextColor: color, subtitleStrokeColor: stroke, subtitlePositionPercent: parseInt(position) || 12 }
     });
-    showToast('字幕设置已保存');
+    showToast('字幕设置已保存并同步');
   });
 
   // Remote save
@@ -537,9 +576,73 @@ async function loadSubtitleSettings() {
   const data = await api('GET', '/remote/settings');
   if (!data) return;
   const s = data?.style || {};
-  if (document.getElementById('sub-color')) document.getElementById('sub-color').value = s.subtitleTextColor || '#FFA100';
-  if (document.getElementById('sub-stroke')) document.getElementById('sub-stroke').value = s.subtitleStrokeColor || '#000000';
-  if (document.getElementById('sub-position')) document.getElementById('sub-position').value = s.subtitlePositionPercent ?? 12;
+  setColorFromHex('color', s.subtitleTextColor || '#FFA100');
+  setColorFromHex('stroke', s.subtitleStrokeColor || '#000000');
+  const posEl = document.getElementById('sub-position');
+  if (posEl) posEl.value = s.subtitlePositionPercent ?? 12;
+}
+
+// ── 颜色工具函数 ──
+function hslToHex(h, s, l) {
+  s /= 100; l /= 100;
+  const a = s * Math.min(l, 1 - l);
+  const f = n => { const k = (n + h / 30) % 12; const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1); return Math.round(255 * color).toString(16).padStart(2, '0'); };
+  return '#' + f(0) + f(8) + f(4);
+}
+
+function hexToHsl(hex) {
+  hex = hex.replace('#', '');
+  if (hex.length === 3) hex = hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+  const r = parseInt(hex.substring(0, 2), 16) / 255;
+  const g = parseInt(hex.substring(2, 4), 16) / 255;
+  const b = parseInt(hex.substring(4, 6), 16) / 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0, s = 0, l = (max + min) / 2;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+    else if (max === g) h = ((b - r) / d + 2) / 6;
+    else h = ((r - g) / d + 4) / 6;
+  }
+  return { h: Math.round(h * 360), s: Math.round(s * 100), l: Math.round(l * 100) };
+}
+
+function getColorHex(prefix) {
+  const h = parseInt(document.getElementById(prefix + '-h')?.value || 0);
+  const s = parseInt(document.getElementById(prefix + '-s')?.value || 0);
+  const l = parseInt(document.getElementById(prefix + '-l')?.value || 50);
+  return hslToHex(h, s, l);
+}
+
+function setColorFromHex(prefix, hex) {
+  const hsl = hexToHsl(hex);
+  const hEl = document.getElementById(prefix + '-h');
+  const sEl = document.getElementById(prefix + '-s');
+  const lEl = document.getElementById(prefix + '-l');
+  if (hEl) { hEl.value = hsl.h; document.getElementById(prefix + '-h-val').textContent = hsl.h + '°'; }
+  if (sEl) { sEl.value = hsl.s; document.getElementById(prefix + '-s-val').textContent = hsl.s + '%'; }
+  if (lEl) { lEl.value = hsl.l; document.getElementById(prefix + '-l-val').textContent = hsl.l + '%'; }
+  updateColorPreview(prefix);
+}
+
+function updateColorPreview(prefix) {
+  const hex = getColorHex(prefix);
+  const preview = document.getElementById(prefix + '-preview');
+  if (preview) preview.style.background = hex;
+}
+
+function setupColorPicker(prefix, defaultHex) {
+  setColorFromHex(prefix, defaultHex);
+  ['h', 's', 'l'].forEach(type => {
+    const el = document.getElementById(prefix + '-' + type);
+    if (!el) return;
+    el.addEventListener('input', () => {
+      document.getElementById(prefix + '-' + type + '-val').textContent =
+        el.value + (type === 'h' ? '°' : '%');
+      updateColorPreview(prefix);
+    });
+  });
 }
 
 async function loadRemoteSettings() {
@@ -790,6 +893,8 @@ function startRemoteServer({ store, taskRunner, mainWindowRef, appLog }) {
       if (method === 'POST' && pathname === '/remote/settings') {
         const body = await readBody(req);
         await _store.updateSettings(body);
+        // 广播设置变更到所有 SSE 客户端
+        broadcast('settings-update', body);
         return sendJson(res, 200, { ok: true });
       }
 
