@@ -1022,6 +1022,15 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
     return { available: !!bin, path: bin || '' };
   });
 
+  ipcMain.handle('remote:setup-tunnel', async (_event, { cfToken }) => {
+    try {
+      const result = await tunnelManager.setupNamedTunnel(cfToken, getRemotePort());
+      return { ok: true, ...result };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
+
   ipcMain.handle('remote:get-credentials', async () => {
     return await readRemoteCreds();
   });

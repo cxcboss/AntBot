@@ -231,7 +231,16 @@
           <div class="sv-scroll">
             <div class="sv-block">
               <h3 class="sv-title">远程访问</h3>
-              <p class="sv-desc">通过手机浏览器远程操控主控任务，需配合 Cloudflare Tunnel 使用</p>
+              <p class="sv-desc">通过手机浏览器远程操控主控任务</p>
+
+              <!-- 隧道配置（首次使用） -->
+              <div id="remote-tunnel-setup" style="display:none">
+                <div class="s-row" style="margin-bottom:8px"><span class="s-label">Cloudflare Token</span>
+                  <input id="remote-cf-token" type="password" placeholder="API Token" style="flex:1" />
+                </div>
+                <button class="btn btn-primary btn-block" id="remote-setup-btn" type="button">自动配置隧道</button>
+                <p class="sv-note">首次使用需要 Cloudflare API Token 来创建隧道。获取方式：Cloudflare Dashboard → 我的个人资料 → API 令牌 → 创建令牌（权限选"编辑区域 DNS"）</p>
+              </div>
 
               <div class="sv-card" id="remote-status-card">
                 <div class="sv-card-row">

@@ -2651,13 +2651,42 @@ async function initRemotePage() {
     }
   } catch {}
 
-  // 检查 cloudflared
+  // 检查 cloudflared 和隧道配置
+  const tunnelSetup = document.getElementById('remote-tunnel-setup');
   try {
     const cf = await window.antbot.remoteCheckCloudflared();
     if (!cf.available) {
       document.getElementById('remote-note').textContent = '未检测到 cloudflared，请先安装: brew install cloudflared';
+    } else {
+      // 检查是否有命名隧道配置
+      const status = await window.antbot.remoteStatus();
+      if (!status.tunnel?.running) {
+        // 显示隧道配置区域
+        if (tunnelSetup) tunnelSetup.style.display = '';
+      }
     }
   } catch {}
+
+  // 隧道配置按钮
+  document.getElementById('remote-setup-btn')?.addEventListener('click', async () => {
+    const tokenEl = document.getElementById('remote-cf-token');
+    const cfToken = tokenEl?.value?.trim();
+    if (!cfToken) { toast('请输入 Cloudflare API Token', 'error'); return; }
+    const btn = document.getElementById('remote-setup-btn');
+    btn.disabled = true; btn.textContent = '配置中...';
+    try {
+      const result = await window.antbot.remoteSetupTunnel(cfToken);
+      if (result.ok) {
+        toast('隧道配置成功: ' + result.fqdn, 'success');
+        if (tunnelSetup) tunnelSetup.style.display = 'none';
+        // 保存 token 到凭证
+        await window.antbot.remoteUpdateCredentials({ cfToken });
+      } else {
+        toast('配置失败: ' + result.error, 'error');
+      }
+    } catch (e) { toast('配置失败: ' + e.message, 'error'); }
+    btn.disabled = false; btn.textContent = '自动配置隧道';
+  });
 
   // 密码显示/隐藏
   passToggle?.addEventListener('click', () => {

@@ -45,6 +45,7 @@ contextBridge.exposeInMainWorld('antbot', {
   remoteStopTunnel: () => ipcRenderer.invoke('remote:stop-tunnel'),
   remoteStatus: () => ipcRenderer.invoke('remote:status'),
   remoteCheckCloudflared: () => ipcRenderer.invoke('remote:check-cloudflared'),
+  remoteSetupTunnel: (cfToken) => ipcRenderer.invoke('remote:setup-tunnel', { cfToken }),
   remoteGenerateQr: (text) => ipcRenderer.invoke('remote:generate-qr', text),
   remoteGetCredentials: () => ipcRenderer.invoke('remote:get-credentials'),
   remoteUpdateCredentials: (updates) => ipcRenderer.invoke('remote:update-credentials', updates),
