@@ -6,7 +6,7 @@ const el = {
   badge:$('#app-badge'), sidebar:$('#sidebar'), overlay:$('#sidebar-overlay'),
   sidebarToggle:$('#sidebar-toggle'), pageTitle:$('#page-title'),
   scroll:$('#chat-scroll'), stream:$('#chat-stream'),
-  input:$('#task-input'), runBtn:$('#run-btn'), pickVideoBtn:$('#pick-video-btn'),
+  input:$('#task-input'), runBtn:$('#run-btn'),
   chips:$('#setting-chips'),
   editAddBtn:$('#edit-add-btn'), editStartBtn:$('#edit-start-btn'),
   resizeHandle:$('#resize-handle'), composer:$('#composer'), chatArea:$('#chat-area'),
@@ -2068,8 +2068,6 @@ function bind(){
   el.dataOpenMain?.addEventListener('click',async()=>{try{const r=await window.antbot.openDataDir();toast(`已打开: ${r.path}`,'info')}catch(e){toast(e.message,'error')}});
   el.dataMigrate?.addEventListener('click',()=>void migrate());el.dataClose?.addEventListener('click',()=>closeDlg(el.dataDlg));
   document.getElementById('migrate-old-btn')?.addEventListener('click',()=>void migrate());
-  // Video picker
-  el.pickVideoBtn?.addEventListener('click',async()=>{try{const f=await window.antbot.pickVideoFile();if(f){const current=el.input.value.trim();el.input.value=current?current+'\n'+f:f;autoInput();queuePreview();renderBtns()}}catch(e){toast(e.message,'error')}});
   bindPublishPage();
   bindDownloadPage();
   // Task input

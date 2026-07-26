@@ -993,6 +993,14 @@ class TaskRunner {
 
           return { status, retryable };
         } finally {
+          // 取消/失败时清理相关服务
+          if (task.__stopped || row?.status === 'stopped') {
+            try {
+              const { shutdownVoicebox } = require('./services/autoDubClient');
+              await shutdownVoicebox(this.log).catch(() => {});
+              this.log(task.id, '已清理语音克隆服务');
+            } catch {}
+          }
           if (this.currentTaskId === task.id) {
             this.currentTaskId = '';
             this.stopRequested = false;
