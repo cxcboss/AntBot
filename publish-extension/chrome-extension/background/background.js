@@ -117,6 +117,39 @@ function startBridgePolling() {
   pollBridgeCommands().catch(() => {});
 }
 
+// ════════════════════════════════════════════
+// MV3 Service Worker 保活机制
+// ════════════════════════════════════════════
+
+// 1. 端口保活：每 25 秒自连一次，阻止 Chrome 30 秒超时终止
+function startKeepAlive() {
+  setInterval(() => {
+    try { chrome.runtime.connect({ name: 'keepalive' }); } catch {}
+  }, 25000);
+  chrome.runtime.onConnect.addListener((port) => {
+    if (port.name === 'keepalive') {
+      // 长连接建立，Chrome 不会终止此 Worker
+      port.onDisconnect.addListener(() => {});
+    }
+  });
+}
+
+// 2. Alarms 兜底：万一 Worker 还是被杀了，1 分钟内恢复轮询
+function startAlarmFallback() {
+  chrome.alarms.create('bridge-poll', { periodInMinutes: 1 });
+  chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name === 'bridge-poll') {
+      // 如果轮询已停止，重启
+      if (!bridgePollTimer) {
+        console.log('[BG] Alarm: restarting bridge polling');
+        startBridgePolling();
+      }
+      // 确保至少有一次轮询
+      pollBridgeCommands().catch(() => {});
+    }
+  });
+}
+
 // ========== 跳过管理 ==========
 
 async function getSkipNames() {
@@ -583,4 +616,6 @@ async function savePublishRecord(record) {
 }
 
 console.log('[BG] Service Worker started');
+startKeepAlive();
 startBridgePolling();
+startAlarmFallback();

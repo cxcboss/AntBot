@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "搬运蚁发布助手",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "搬运蚁默认浏览器视频发布助手，支持抖音和视频号",
   "permissions": [
     "activeTab",
@@ -11,7 +11,8 @@
     "nativeMessaging",
     "webRequest",
     "debugger",
-    "sidePanel"
+    "sidePanel",
+    "alarms"
   ],
   "host_permissions": [
     "https://creator.douyin.com/*",
