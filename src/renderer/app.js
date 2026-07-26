@@ -244,7 +244,7 @@ function taskCard(t,live=false){
   if(canSkip)acts.push(`<button class="task-btn skip" data-skip="${esc(t.id)}">跳过</button>`);
   if(canCancel)acts.push(`<button class="task-btn cancel" data-stop="${esc(t.id)}">取消</button>`);
   if(canRetry)acts.push(`<button class="task-btn" data-retry-task="${esc(t.id)}">重试</button>`);
-  if(isCompleted&&t.outputPath)acts.push(`<button class="task-btn" data-open-output="${esc(t.id)}">打开目录</button>`);
+  if(isCompleted&&t.outputPath)acts.push(`<button class="task-btn" data-open-output="${esc(t.outputPath)}">打开目录</button>`);
 
   const inner=`<div class="task-inner"><div class="task-head"><div class="task-title">${esc(title)}</div><div class="task-badge">${esc(statusLabel)}</div></div>${tagsHtml}${progressHtml}${msg}${acts.length?`<div class="task-acts">${acts.join('')}</div>`:''}</div>`;
   const overlay=isCancelling?'<div class="task-cancelling">取消中...</div>':'';
@@ -2109,9 +2109,8 @@ function bind(){
       else{toast('无法重试：缺少原始输入','error')}
     }
     if(openOutputBtn){
-      const taskId=openOutputBtn.dataset.openOutput;
-      const task=S.progress?.tasks?.find(t=>t.id===taskId);
-      if(task?.outputPath){void window.antbot.revealInFolder(task.outputPath).catch(()=>{})}
+      const outputPath=openOutputBtn.dataset.openOutput;
+      if(outputPath){void window.antbot.revealInFolder(outputPath).catch(()=>{})}
     }
   });
   // Chips
