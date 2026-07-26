@@ -947,23 +947,25 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
     }
   })(taskRunner.onProgress);
 
+  // 远程凭证独立存储（不经过 store.getSettings 清空）
+  const REMOTE_CREDS_PATH = path.join(os.homedir(), 'AntBot', 'remote-credentials.json');
+
+  async function readRemoteCreds() {
+    try {
+      return JSON.parse(await fs.readFile(REMOTE_CREDS_PATH, 'utf-8'));
+    } catch { return { username: '', password: '', autoStart: false }; }
+  }
+
+  async function writeRemoteCreds(creds) {
+    const dir = path.dirname(REMOTE_CREDS_PATH);
+    await fs.mkdir(dir, { recursive: true }).catch(() => {});
+    await fs.writeFile(REMOTE_CREDS_PATH, JSON.stringify(creds, null, 2));
+  }
+
   ipcMain.handle('remote:start', async (_event, { username, password } = {}) => {
-    // 保存用户名密码到设置（直接写文件，因为 getSettings 会清空密码）
+    // 保存凭证到独立文件
     if (password) {
-      const dataDir = path.join(os.homedir(), 'AntBot');
-      const storePath = path.join(dataDir, 'antbot-store.json');
-      try {
-        const raw = await fs.readFile(storePath, 'utf-8');
-        const data = JSON.parse(raw);
-        const user = data.users?.[0];
-        if (user?.settings) {
-          if (!user.settings.remote) user.settings.remote = {};
-          user.settings.remote.username = username || 'admin';
-          user.settings.remote.password = password;
-          user.settings.remote.enabled = true;
-          await fs.writeFile(storePath, JSON.stringify(data, null, 2));
-        }
-      } catch {}
+      await writeRemoteCreds({ username: username || 'admin', password, autoStart: true });
     }
     if (!remoteServerStarted) {
       startRemoteServer({ store, taskRunner, mainWindowRef, appLog });
@@ -982,14 +984,7 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
   ipcMain.handle('remote:start-tunnel', async () => {
     try {
       // 读取凭证用于注册到 Hub
-      let hubUser = '', hubPass = '';
-      try {
-        const storePath = path.join(os.homedir(), 'AntBot', 'antbot-store.json');
-        const data = JSON.parse(await fs.readFile(storePath, 'utf-8'));
-        hubUser = data.users?.[0]?.settings?.remote?.username || '';
-        hubPass = data.users?.[0]?.settings?.remote?.password || '';
-      } catch {}
-
+      const creds = await readRemoteCreds();
       const result = await tunnelManager.startTunnel(getRemotePort(), {
         onUrl: (url) => {
           const win = mainWindowRef();
@@ -1000,8 +995,8 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
           if (win && !win.isDestroyed()) win.webContents.send('remote:tunnel-status', status);
         },
         log: appLog,
-        username: hubUser,
-        password: hubPass,
+        username: creds.username,
+        password: creds.password,
       });
       return { ok: true, url: result.url };
     } catch (e) {
@@ -1028,13 +1023,14 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
   });
 
   ipcMain.handle('remote:get-credentials', async () => {
-    // 直接从文件读取（getSettings 会清空密码）
-    try {
-      const storePath = path.join(os.homedir(), 'AntBot', 'antbot-store.json');
-      const data = JSON.parse(await fs.readFile(storePath, 'utf-8'));
-      const remote = data.users?.[0]?.settings?.remote || {};
-      return { username: remote.username || '', password: remote.password || '', autoStart: !!remote.autoStart };
-    } catch { return { username: '', password: '', autoStart: false }; }
+    return await readRemoteCreds();
+  });
+
+  ipcMain.handle('remote:update-credentials', async (_event, updates) => {
+    const existing = await readRemoteCreds();
+    const merged = { ...existing, ...updates };
+    await writeRemoteCreds(merged);
+    return { ok: true };
   });
 
   ipcMain.handle('remote:generate-qr', async (_event, text) => {

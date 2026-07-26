@@ -651,14 +651,14 @@ function startRemoteServer({ store, taskRunner, mainWindowRef, appLog }) {
       // Login
       if (method === 'POST' && pathname === '/remote/login') {
         const body = await readBody(req);
-        // 直接从文件读取密码（store.getSettings 会清空密码字段）
+        // 从独立凭证文件读取
         let remoteUser = 'admin';
         let remotePass = '';
         try {
-          const storePath = path.join(os.homedir(), 'AntBot', 'antbot-store.json');
-          const data = JSON.parse(await fs.readFile(storePath, 'utf-8'));
-          remoteUser = data.users?.[0]?.settings?.remote?.username || 'admin';
-          remotePass = data.users?.[0]?.settings?.remote?.password || '';
+          const credsPath = path.join(os.homedir(), 'AntBot', 'remote-credentials.json');
+          const creds = JSON.parse(await fs.readFile(credsPath, 'utf-8'));
+          remoteUser = creds.username || 'admin';
+          remotePass = creds.password || '';
         } catch {}
 
         if (!remotePass) {

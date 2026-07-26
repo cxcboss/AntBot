@@ -2670,7 +2670,7 @@ async function initRemotePage() {
   // 自动启动开关
   autoToggle?.addEventListener('click', async () => {
     const isOn = autoToggle.classList.toggle('on');
-    await window.antbot.updateSettings({ remote: { autoStart: isOn } });
+    await window.antbot.remoteUpdateCredentials({ autoStart: isOn });
     toast(isOn ? '已开启自动启动' : '已关闭自动启动', 'info');
   });
 
