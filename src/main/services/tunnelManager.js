@@ -29,7 +29,7 @@ function findCloudflared() {
   return null;
 }
 
-const HUB_URL = 'https://remote.onebugmanai.online';
+const HUB_URL = 'https://hub.onebugmanai.online';
 
 async function registerWithHub(username, password, tunnelUrl) {
   try {
