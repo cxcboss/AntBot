@@ -981,6 +981,15 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
 
   ipcMain.handle('remote:start-tunnel', async () => {
     try {
+      // 读取凭证用于注册到 Hub
+      let hubUser = '', hubPass = '';
+      try {
+        const storePath = path.join(os.homedir(), 'AntBot', 'antbot-store.json');
+        const data = JSON.parse(await fs.readFile(storePath, 'utf-8'));
+        hubUser = data.users?.[0]?.settings?.remote?.username || '';
+        hubPass = data.users?.[0]?.settings?.remote?.password || '';
+      } catch {}
+
       const result = await tunnelManager.startTunnel(getRemotePort(), {
         onUrl: (url) => {
           const win = mainWindowRef();
@@ -991,6 +1000,8 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
           if (win && !win.isDestroyed()) win.webContents.send('remote:tunnel-status', status);
         },
         log: appLog,
+        username: hubUser,
+        password: hubPass,
       });
       return { ok: true, url: result.url };
     } catch (e) {

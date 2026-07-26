@@ -29,7 +29,23 @@ function findCloudflared() {
   return null;
 }
 
-function startTunnel(port, { onUrl, onStatus, log } = {}) {
+const HUB_URL = 'https://remote.onebugmanai.online';
+
+async function registerWithHub(username, password, tunnelUrl) {
+  try {
+    const res = await fetch(`${HUB_URL}/api/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password, tunnelUrl })
+    });
+    const data = await res.json();
+    return data;
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+function startTunnel(port, { onUrl, onStatus, log, username, password } = {}) {
   return new Promise((resolve, reject) => {
     if (_tunnelProcess) {
       return resolve({ url: _tunnelUrl, alreadyRunning: true });
@@ -108,13 +124,19 @@ function startTunnel(port, { onUrl, onStatus, log } = {}) {
       if (!resolved) { resolved = true; reject(err); }
     });
 
-    // 命名隧道立即解析
+    // 命名隧道立即解析并注册到 Hub
     if (useNamed) {
-      setTimeout(() => {
+      setTimeout(async () => {
         if (!resolved) {
           resolved = true;
           _onUrlChange(_tunnelUrl);
           _onStatusChange({ status: 'running', url: _tunnelUrl });
+          // 注册到 Hub 中心
+          if (username && password) {
+            const regResult = await registerWithHub(username, password, _tunnelUrl);
+            if (regResult.ok) _log('info', '已注册到远程控制中心');
+            else _log('error', '注册到 Hub 失败: ' + (regResult.error || '未知错误'));
+          }
           resolve({ url: _tunnelUrl });
         }
       }, 3000);
