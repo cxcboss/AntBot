@@ -1065,6 +1065,7 @@ async function composeEditVideo({
   videoPath, srtPath, outputPath,
   voiceProfileId, voiceProfileName, language = 'zh', voiceSpeed = 1.1,
   subtitleStyle = {},
+  voiceoverEnabled = true, subtitleEnabled = true,
   videoWidth = 0, videoHeight = 0,
   abortSignal,
   log = () => {}, progress = () => {}
@@ -1080,10 +1081,10 @@ async function composeEditVideo({
       task: { taskName: path.basename(videoPath) },
       settings: {
         style: {
-          voiceoverEnabled: true,
-          subtitleEnabled: true,
+          voiceoverEnabled: voiceoverEnabled,
+          subtitleEnabled: subtitleEnabled,
           voiceSpeed,
-          subtitleTextColor: subtitleStyle.textColor || '#FFA100',
+          subtitleTextColor: subtitleStyle.textColor || '#0D9488',
           subtitleStrokeColor: subtitleStyle.strokeColor || '#000000',
           subtitlePositionPercent: subtitleStyle.positionPercent ?? 12,
           subtitleFontSize: fontSize,

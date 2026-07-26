@@ -82,6 +82,7 @@ contextBridge.exposeInMainWorld('antbot', {
   modelsList: () => ipcRenderer.invoke('models:list'),
   modelsDownload: (modelKey) => ipcRenderer.invoke('models:download', modelKey),
   modelsDelete: (modelKey) => ipcRenderer.invoke('models:delete', modelKey),
+  onModelsProgress: (callback) => on('models:progress', callback),
   modelsOpenDir: () => ipcRenderer.invoke('models:open-dir'),
   modelsChangePath: (newPath) => ipcRenderer.invoke('models:change-path', newPath),
   onProgress: (callback) => on('task:progress', callback),

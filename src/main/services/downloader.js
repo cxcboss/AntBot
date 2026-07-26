@@ -204,7 +204,7 @@ async function resolveDownloadedOutputPath(tempDir, baseName, expectedPath, opti
 
   const dirs = uniq([tempDir, ...searchDirs].filter(Boolean));
   const skippedSuffixes = ['.part', '.ytdl', '.tmp'];
-  const skippedNameParts = ['.info.json', '.description', '.jpg', '.jpeg', '.png', '.webp', '.vtt', '.srt'];
+  const skippedNameParts = ['.info.json', '.description', '.jpg', '.jpeg', '.png', '.webp', '.vtt', '.srt', '.f1', '.f2', '.f3', '.f4', '.f5', '.f6', '.f7', '.f8', '.f9'];
   const candidates = [];
 
   for (const dir of dirs) {

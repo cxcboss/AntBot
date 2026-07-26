@@ -348,6 +348,8 @@ class DownloadManager {
       ...extraArgs,
       '--retries', '6',
       '--fragment-retries', '6',
+      '--extractor-retries', '6',
+      '--retry-sleep', '2',
       '--socket-timeout', '30',
       '--no-warnings',
       '--no-check-certificates',

@@ -54,7 +54,9 @@ class EditScheduler {
         this.log(`[调度] 启动清理剪辑缓存 ${reconciled.removed.length} 项`);
       }
       if (reconciled.changed) await this.saveState();
-    } catch {}
+    } catch (e) {
+      this.log(`[调度] 加载任务状态失败: ${e.message}`);
+    }
   }
 
   async saveState() {
@@ -426,13 +428,17 @@ class EditScheduler {
 
     // 从全局设置中读取字幕样式
     let subtitleStyle = {};
+    let voiceoverEnabled = true;
+    let subtitleEnabled = true;
     try {
       const settings = this._settingsGetter ? await this._settingsGetter() : null;
       subtitleStyle = {
-        textColor: settings?.style?.subtitleTextColor || '#FFA100',
+        textColor: settings?.style?.subtitleTextColor || '#0D9488',
         strokeColor: settings?.style?.subtitleStrokeColor || '#000000',
         positionPercent: settings?.style?.subtitlePositionPercent ?? 12,
       };
+      voiceoverEnabled = settings?.style?.voiceoverEnabled !== false;
+      subtitleEnabled = voiceoverEnabled && settings?.style?.subtitleEnabled !== false;
     } catch {}
 
     try {
@@ -441,6 +447,7 @@ class EditScheduler {
         voiceProfileId: t.voiceProfileId, voiceProfileName: t.voiceProfileName || '',
         language: t.language,
         voiceSpeed: t.voiceSpeed, subtitleStyle,
+        voiceoverEnabled, subtitleEnabled,
         videoWidth: t.videoWidth || 0, videoHeight: t.videoHeight || 0,
         abortSignal: composeCtrl.signal,
         log: (msg) => this.log(`[${t.name}] ${msg}`), progress: sendProgress
