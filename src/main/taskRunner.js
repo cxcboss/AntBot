@@ -676,7 +676,7 @@ class TaskRunner {
 
     const publishedRecords = [];
     // #1: 按任务收集临时文件，整批结束后统一清理
-    const taskTempFiles = new Map(); // taskId → {downloadPath, subtitlePath}
+    const taskTempFiles = new Map(); // taskId → {downloadPath, tmpDir}
 
     try {
       const settings = await this.store.getSettingsForUser(job.userId);
