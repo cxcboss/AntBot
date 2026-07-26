@@ -840,17 +840,18 @@ class TaskRunner {
             // 自动启动桥接服务（如果未运行）
             const extensionConfig = settings?.publish?.browserExtension;
             if (extensionConfig?.enabled) {
-              try {
-                const { bridgeServiceManager } = require('./services/bridgeServiceManager');
-                const status = bridgeServiceManager.getStatus();
-                if (!status.running) {
-                  this.log(task.id, '桥接服务未启动，正在自动启动...');
-                  this.setTaskState(task.id, { step: '发布准备', message: '正在启动发布桥接服务...' });
-                  await bridgeServiceManager.start();
-                  this.log(task.id, '桥接服务已启动');
+              const { bridgeServiceManager } = require('./services/bridgeServiceManager');
+              const status = bridgeServiceManager.getStatus();
+              if (!status.running) {
+                this.log(task.id, '桥接服务未启动，正在自动启动...');
+                this.setTaskState(task.id, { step: '发布准备', message: '正在启动发布桥接服务...' });
+                const started = await bridgeServiceManager.start();
+                if (!started) {
+                  throw new Error('桥接服务启动失败，请在发布页面手动启动服务后重试');
                 }
-              } catch (e) {
-                this.log(task.id, `桥接服务启动失败: ${e.message}`, 'error');
+                // 等待服务就绪
+                await new Promise(r => setTimeout(r, 1500));
+                this.log(task.id, '桥接服务已启动');
               }
             }
             publishResult = await this.runStep(task, 'publish', () => publishVideo({
