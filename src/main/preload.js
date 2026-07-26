@@ -45,6 +45,7 @@ contextBridge.exposeInMainWorld('antbot', {
   remoteStopTunnel: () => ipcRenderer.invoke('remote:stop-tunnel'),
   remoteStatus: () => ipcRenderer.invoke('remote:status'),
   remoteCheckCloudflared: () => ipcRenderer.invoke('remote:check-cloudflared'),
+  remoteGenerateQr: (text) => ipcRenderer.invoke('remote:generate-qr', text),
   onRemoteTunnelUrl: (cb) => on('remote:tunnel-url', cb),
   onRemoteTunnelStatus: (cb) => on('remote:tunnel-status', cb),
   onDownloadTaskUpdate: (callback) => on('download:task-update', callback),

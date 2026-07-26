@@ -233,14 +233,18 @@
               <h3 class="sv-title">远程访问</h3>
               <p class="sv-desc">通过手机浏览器远程操控主控任务，需配合 Cloudflare Tunnel 使用</p>
 
-              <div class="sv-card">
+              <div class="sv-card" id="remote-status-card">
                 <div class="sv-card-row">
                   <span class="sv-card-label">状态</span>
                   <span class="sv-card-value" id="remote-status-text">未启动</span>
                 </div>
                 <div class="sv-card-row">
                   <span class="sv-card-label">访问地址</span>
-                  <span class="sv-card-value" id="remote-url" style="font-size:11px;word-break:break-all;color:var(--muted-foreground)">-</span>
+                  <span class="sv-card-value" id="remote-url" style="font-size:12px;word-break:break-all;color:var(--muted-foreground)">-</span>
+                  <button class="btn btn-sm btn-ghost" id="remote-copy-btn" type="button" style="display:none" title="复制链接">复制</button>
+                </div>
+                <div class="sv-card-row" id="remote-qr-row" style="display:none;justify-content:center;padding-top:12px">
+                  <div id="remote-qr-code"></div>
                 </div>
               </div>
 
@@ -258,9 +262,10 @@
                 <label>密码
                   <input id="remote-password" type="password" placeholder="设置远程访问密码" />
                 </label>
+                <button class="btn btn-primary btn-block" id="remote-save-btn" type="button">保存设置</button>
               </div>
 
-              <div class="sv-note" id="remote-note">设置用户名和密码后，点击启用开关即可。手机访问地址会显示在上方。</div>
+              <div class="sv-note" id="remote-note">设置用户名和密码后点击保存，再开启远程开关。扫描二维码或复制链接在手机浏览器打开。</div>
             </div>
           </div>
         </div>

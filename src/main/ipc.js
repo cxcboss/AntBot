@@ -1004,6 +1004,16 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
     return { available: !!bin, path: bin || '' };
   });
 
+  ipcMain.handle('remote:generate-qr', async (_event, text) => {
+    try {
+      const QRCode = require('qrcode');
+      const dataUrl = await QRCode.toDataURL(text, { width: 160, margin: 2, color: { dark: '#000000', light: '#FFFFFF' } });
+      return { ok: true, dataUrl };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
+
   async function getModelsDir() {
     const settings = await store.getSettings();
     const dataDir = settings.dataDir || path.join(os.homedir(), 'AntBot');

@@ -2618,6 +2618,12 @@ async function initRemotePage() {
   const toggleText = document.getElementById('remote-toggle-text');
   const usernameEl = document.getElementById('remote-username');
   const passwordEl = document.getElementById('remote-password');
+  const copyBtn = document.getElementById('remote-copy-btn');
+  const saveBtn = document.getElementById('remote-save-btn');
+  const qrRow = document.getElementById('remote-qr-row');
+  const qrCode = document.getElementById('remote-qr-code');
+
+  let currentUrl = '';
 
   // 加载当前设置
   try {
@@ -2634,7 +2640,12 @@ async function initRemotePage() {
       toggle?.classList.add('on');
       toggleText.textContent = '已启用';
       statusText.textContent = status.tunnel?.running ? '已连接' : '服务已启动';
-      if (status.tunnel?.url) urlEl.textContent = status.tunnel.url;
+      if (status.tunnel?.url) {
+        currentUrl = status.tunnel.url;
+        urlEl.textContent = currentUrl;
+        copyBtn.style.display = '';
+        showQrCode(currentUrl);
+      }
     }
   } catch {}
 
@@ -2646,42 +2657,58 @@ async function initRemotePage() {
     }
   } catch {}
 
+  // 保存按钮
+  saveBtn?.addEventListener('click', async () => {
+    const username = usernameEl?.value?.trim() || 'admin';
+    const password = passwordEl?.value?.trim();
+    if (!password) { toast('请设置密码', 'error'); return; }
+    await window.antbot.updateSettings({ remote: { username, password } });
+    toast('设置已保存', 'success');
+  });
+
+  // 复制链接
+  copyBtn?.addEventListener('click', () => {
+    if (currentUrl) {
+      navigator.clipboard.writeText(currentUrl).then(() => {
+        copyBtn.textContent = '已复制';
+        setTimeout(() => { copyBtn.textContent = '复制'; }, 1500);
+      }).catch(() => toast('复制失败', 'error'));
+    }
+  });
+
   // 开关切换
   toggle?.addEventListener('click', async () => {
     const isOn = toggle.classList.contains('on');
     if (isOn) {
-      // 关闭
       await window.antbot.remoteStop();
       toggle.classList.remove('on');
       toggleText.textContent = '关闭';
       statusText.textContent = '未启动';
       urlEl.textContent = '-';
+      currentUrl = '';
+      copyBtn.style.display = 'none';
+      qrRow.style.display = 'none';
       toast('远程访问已关闭', 'info');
     } else {
-      // 开启：先保存设置，再启动服务
       const username = usernameEl?.value?.trim() || 'admin';
       const password = passwordEl?.value?.trim();
-      if (!password) {
-        toast('请先设置密码', 'error');
-        return;
-      }
-      // 保存远程设置
-      await window.antbot.updateSettings({
-        remote: { username, password, enabled: true }
-      });
-      // 启动远程服务
+      if (!password) { toast('请先设置密码并保存', 'error'); return; }
+      // 保存设置
+      await window.antbot.updateSettings({ remote: { username, password, enabled: true } });
       toggleText.textContent = '启动中...';
       try {
         const r = await window.antbot.remoteStart();
         if (!r.ok) { toast(r.error, 'error'); toggleText.textContent = '关闭'; return; }
-        // 启动 tunnel
         statusText.textContent = '正在连接 Cloudflare...';
         const t = await window.antbot.remoteStartTunnel();
         if (t.ok) {
           toggle.classList.add('on');
           toggleText.textContent = '已启用';
           statusText.textContent = '已连接';
-          urlEl.textContent = t.url;
+          currentUrl = t.url;
+          urlEl.textContent = currentUrl;
+          copyBtn.style.display = '';
+          showQrCode(currentUrl);
           toast('远程访问已启动', 'success');
         } else {
           statusText.textContent = '服务已启动（隧道连接失败）';
@@ -2694,14 +2721,31 @@ async function initRemotePage() {
     }
   });
 
+  // 生成二维码
+  function showQrCode(url) {
+    if (!qrCode || !qrRow) return;
+    window.antbot.remoteGenerateQr(url).then(result => {
+      if (result.ok && result.dataUrl) {
+        qrCode.innerHTML = `<img src="${result.dataUrl}" style="width:140px;height:140px;border-radius:var(--radius)" alt="扫码访问" />`;
+        qrRow.style.display = '';
+      }
+    }).catch(() => {});
+  }
+
   // 监听 tunnel URL 更新
   window.antbot.onRemoteTunnelUrl?.((url) => {
-    if (urlEl) urlEl.textContent = url;
+    if (url) {
+      currentUrl = url;
+      urlEl.textContent = url;
+      copyBtn.style.display = '';
+      showQrCode(url);
+    }
   });
   window.antbot.onRemoteTunnelStatus?.((s) => {
     if (statusText) statusText.textContent = s.status === 'running' ? '已连接' : s.status === 'starting' ? '连接中...' : '未连接';
   });
 }
+
 
 /* ── Batch Clone Voices ── */
 window.batchCloneVoices = async function() {
