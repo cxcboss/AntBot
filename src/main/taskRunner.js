@@ -914,6 +914,15 @@ class TaskRunner {
                 if (!started) throw new Error('桥接服务启动失败，请在发布页面手动启动服务后重试');
                 await new Promise(r => setTimeout(r, 1500));
                 this.log(task.id, '桥接服务已启动');
+
+                // 尝试启动系统浏览器让插件连接
+                try {
+                  const { shell } = require('electron');
+                  this.log(task.id, '正在打开浏览器...');
+                  await shell.openExternal('https://channels.weixin.qq.com/platform');
+                } catch (e) {
+                  this.log(task.id, `打开浏览器失败: ${e.message}，请手动打开浏览器`);
+                }
               }
 
               // 2. 等待桥接服务就绪（确保端口开放）
@@ -983,9 +992,9 @@ class TaskRunner {
           const isStopped = task.__stopped || (this.stopRequested && this.currentTaskId === task.id);
           const status = isStopped ? 'stopped' : 'failed';
           const finalMessage = error.message;
-          const retryable = status === 'failed';
+          const retryable = true; // 所有失败/停止的任务都可以重试
 
-          this.setTaskState(task.id, { status, progress: row.progress, step: status === 'failed' ? '失败' : '停止', message: finalMessage, attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit });
+          this.setTaskState(task.id, { status, progress: row.progress, step: status === 'failed' ? '失败' : '已取消', message: finalMessage, attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit });
           this.log(task.id, finalMessage, 'error');
 
           if (status === 'stopped') runRecord.status = 'stopped';

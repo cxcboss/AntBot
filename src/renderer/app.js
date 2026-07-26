@@ -128,7 +128,7 @@ function makeBubbleHtml(raw){
   const showNum=rawLines.length>=3;
   const numbered=rawLines.map((l,i)=>(showNum?`${i+1}、`:``)+l).join('\n');
   const escapedRaw=esc(numbered).replace(/`/g,'\\`').replace(/\$/g,'\\$');
-  return`<div class="msg-content">${formatted}</div><div class="msg-raw-actions"><button class="msg-raw-toggle" type="button" onclick="const raw=this.parentElement.nextElementSibling;const shown=raw.classList.toggle('show');this.textContent=shown?'隐藏原文':'显示原文';this.nextElementSibling.style.display=shown?'inline-flex':'none'">显示原文</button><button class="msg-copy-btn" type="button" style="display:none" onclick="navigator.clipboard.writeText('${escapedRaw.replace(/'/g,"\\'")}');this.textContent='已复制';setTimeout(()=>this.textContent='复制',1500)">复制</button></div><div class="msg-raw">${esc(numbered)}</div>`;
+  return`<div class="msg-content">${formatted}</div><button class="msg-raw-toggle" type="button" onclick="const raw=this.nextElementSibling;const copy=this.nextElementSibling.nextElementSibling;const shown=raw.classList.toggle('show');this.textContent=shown?'隐藏原文':'显示原文';copy.style.display=shown?'block':'none'">显示原文</button><div class="msg-raw">${esc(numbered)}</div><div class="msg-raw-actions" style="display:none"><button class="msg-copy-btn" type="button" onclick="navigator.clipboard.writeText('${escapedRaw.replace(/'/g,"\\'")}');this.textContent='已复制';setTimeout(()=>this.textContent='复制',1500)">复制</button></div>`;
 }
 
 /* ── Statistics ── */
@@ -227,7 +227,7 @@ function taskCard(t,live=false){
   const statusLabel=retrying?`重试中 (${t.retryCount})`:statusText(st);
   const canSkip=live&&['queued','pending'].includes(st);
   const canCancel=live&&['queued','pending','running'].includes(st);
-  const canRetry=live&&['failed'].includes(st);
+  const canRetry=live&&['failed','stopped'].includes(st);
   const isCompleted=st==='completed'||st==='warning';
   const msg=t.message?`<div class="task-msg">${esc(t.message)}</div>`:'';
 
