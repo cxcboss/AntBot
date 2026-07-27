@@ -64,8 +64,13 @@ async function getLatestRelease() {
   if (_cache.app && now - _cache.app.ts < CACHE_TTL) {
     return _cache.app.data;
   }
-  const data = await curlGetJson(`${GITHUB_API}/latest`);
-  const result = { tag_name: data.tag_name, body: data.body, assets: data.assets || [] };
+  // 获取所有 release，过滤出 app release（tag 以 v 开头，排除 plugin-）
+  const releases = await curlGetJson(`${GITHUB_API}`);
+  const appReleases = (Array.isArray(releases) ? releases : [])
+    .filter(r => r.tag_name && r.tag_name.startsWith('v') && !r.tag_name.startsWith('plugin-'))
+    .sort((a, b) => new Date(b.published_at) - new Date(a.published_at));
+  const data = appReleases[0] || {};
+  const result = { tag_name: data.tag_name || '', body: data.body || '', assets: data.assets || [] };
   _cache.app = { ts: now, data: result };
   return result;
 }
