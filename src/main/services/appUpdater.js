@@ -11,7 +11,7 @@ const APP_VERSION_FILE = path.join(os.homedir(), 'AntBot', 'app-version.json');
 const PLUGIN_DIR = path.join(os.homedir(), 'AntBot', 'browser-plugin');
 const PLUGIN_VERSION_FILE = path.join(PLUGIN_DIR, 'version.json');
 const CACHE_TTL = 30 * 60 * 1000;
-const FIRST_INSTALL_GRACE = 24 * 60 * 60 * 1000;
+const DOWNLOAD_CACHE_DIR = path.join(os.homedir(), 'AntBot', 'cache');
 
 let _log = () => {};
 let _updating = false;
@@ -43,11 +43,89 @@ function curlGet(url) {
   });
 }
 
-function curlDownload(url, destPath) {
+const { parseSemver, compareSemver, formatBytes } = require('./versionUtils');
+
+// 持久化下载缓存（跨重启保留）
+const _downloadCache = {};
+
+function getCachedPath(url) {
+  if (_downloadCache[url]) {
+    try { require('node:fs').accessSync(_downloadCache[url]); return _downloadCache[url]; }
+    catch { delete _downloadCache[url]; }
+  }
+  // 检查磁盘缓存目录
+  const hash = require('node:crypto').createHash('md5').update(url).digest('hex').slice(0, 12);
+  const diskPath = path.join(DOWNLOAD_CACHE_DIR, hash + '.zip');
+  try { require('node:fs').accessSync(diskPath); _downloadCache[url] = diskPath; return diskPath; }
+  catch { return null; }
+}
+
+function curlDownload(url, destPath, onProgress) {
   return new Promise((resolve, reject) => {
-    execFile('curl', ['-sL', '-o', destPath, '--connect-timeout', '15', '-m', '300', url], { timeout: 310000 }, (err) => {
-      if (err) return reject(new Error(`curl 下载失败: ${err.message}`));
+    // 检查缓存
+    const cached = getCachedPath(url);
+    if (cached) {
+      if (onProgress) onProgress({ percent: 100, speedText: '缓存', downloadedText: '已缓存' });
+      return resolve(cached);
+    }
+
+    let totalBytes = 0;
+    const args = ['-L', '-o', destPath, '--connect-timeout', '30', '--max-time', '1800', '--retry', '5', '--retry-delay', '5', '--retry-max-time', '300', '--retry-all-errors', url];
+    const child = spawn('curl', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stderr = '';
+
+    // 从 stderr 解析 Content-Length
+    child.stderr.on('data', (chunk) => {
+      const text = chunk.toString();
+      stderr += text;
+      if (!totalBytes) {
+        const clMatch = text.match(/content-length:\s*(\d+)/i);
+        if (clMatch) totalBytes = parseInt(clMatch[1], 10);
+      }
+    });
+
+    // 每 300ms 轮询文件大小
+    let lastSize = 0;
+    let lastTime = Date.now();
+    const fsSync = require('node:fs');
+    const progressTimer = setInterval(() => {
+      try {
+        const stats = fsSync.statSync(destPath);
+        const now = Date.now();
+        const elapsed = Math.max(0.1, (now - lastTime) / 1000);
+        const speed = (stats.size - lastSize) / elapsed;
+        const pct = totalBytes > 0 ? (stats.size / totalBytes * 100) : 0;
+        if (onProgress) {
+          onProgress({
+            percent: Math.min(99, pct || 0),
+            downloaded: stats.size,
+            total: totalBytes,
+            speed,
+            speedText: formatBytes(speed) + '/s',
+            downloadedText: formatBytes(stats.size),
+            totalText: totalBytes > 0 ? formatBytes(totalBytes) : '',
+          });
+        }
+        lastSize = stats.size;
+        lastTime = now;
+      } catch {}
+    }, 300);
+
+    child.on('close', (code) => {
+      clearInterval(progressTimer);
+      if (code !== 0) return reject(new Error(`下载失败 (code ${code})`));
+      try {
+        const stats = fsSync.statSync(destPath);
+        if (stats.size < 1000) return reject(new Error('下载的文件太小，可能不是有效的更新包'));
+        _downloadCache[url] = destPath;
+        if (onProgress) onProgress({ percent: 100, downloaded: stats.size, total: stats.size, speed: 0, speedText: '完成', downloadedText: formatBytes(stats.size), totalText: formatBytes(stats.size) });
+      } catch {}
       resolve(destPath);
+    });
+
+    child.on('error', (err) => {
+      clearInterval(progressTimer);
+      reject(new Error(`curl 启动失败: ${err.message}`));
     });
   });
 }
@@ -94,35 +172,12 @@ async function getLatestPluginRelease() {
   return result;
 }
 
-// ─── 版本比较 ───
-
-function parseSemver(v) {
-  const parts = String(v || '0.0.0').replace(/^v/, '').split('.').map(Number);
-  return { major: parts[0] || 0, minor: parts[1] || 0, patch: parts[2] || 0 };
-}
-
-function compareSemver(a, b) {
-  const va = parseSemver(a);
-  const vb = parseSemver(b);
-  if (va.major !== vb.major) return va.major - vb.major;
-  if (va.minor !== vb.minor) return va.minor - vb.minor;
-  return va.patch - vb.patch;
-}
-
 // ─── 更新检查 ───
 
 async function checkAppUpdate() {
   try {
     const versionData = await getAppVersion();
     const currentVersion = versionData.version || '0.0.0';
-
-    // 首次安装宽限期
-    if (versionData.updatedAt) {
-      const installedAt = new Date(versionData.updatedAt).getTime();
-      if (Date.now() - installedAt < FIRST_INSTALL_GRACE) {
-        return { hasUpdate: false, gracePeriod: true, currentVersion };
-      }
-    }
 
     const release = await getLatestRelease();
     const latestVersion = release.tag_name.replace(/^v/, '');
@@ -154,13 +209,6 @@ async function checkPluginUpdate() {
   try {
     const versionData = await getPluginVersion();
     const currentVersion = versionData.version || '0.0.0';
-
-    if (versionData.updatedAt) {
-      const installedAt = new Date(versionData.updatedAt).getTime();
-      if (Date.now() - installedAt < FIRST_INSTALL_GRACE) {
-        return { hasUpdate: false, gracePeriod: true, currentVersion };
-      }
-    }
 
     const release = await getLatestPluginRelease();
     if (!release) {
@@ -197,14 +245,14 @@ async function checkAllUpdates() {
 
 // ─── App 更新流程 ───
 
-async function downloadAppUpdate(assetUrl) {
+async function downloadAppUpdate(assetUrl, onProgress) {
   if (!assetUrl) return { ok: false, error: '下载地址为空' };
 
-  await fs.mkdir(os.tmpdir(), { recursive: true });
-  const zipPath = path.join(os.tmpdir(), `antbot-update-${Date.now()}.zip`);
+  await fs.mkdir(DOWNLOAD_CACHE_DIR, { recursive: true });
+  const zipPath = path.join(DOWNLOAD_CACHE_DIR, `app-update.zip`);
 
   _log('info', `[更新] 开始下载 App 更新...`);
-  await curlDownload(assetUrl, zipPath);
+  await curlDownload(assetUrl, zipPath, onProgress);
   _log('info', `[更新] 下载完成: ${zipPath}`);
 
   return { ok: true, zipPath };
@@ -312,20 +360,20 @@ function executeUpdate(scriptPath, newAppPath) {
 
 // ─── 插件更新流程 ───
 
-async function downloadPluginUpdate(assetUrl) {
+async function downloadPluginUpdate(assetUrl, onProgress) {
   if (!assetUrl) return { ok: false, error: '下载地址为空' };
 
-  await fs.mkdir(os.tmpdir(), { recursive: true });
-  const zipPath = path.join(os.tmpdir(), `antbot-plugin-${Date.now()}.zip`);
+  await fs.mkdir(DOWNLOAD_CACHE_DIR, { recursive: true });
+  const zipPath = path.join(DOWNLOAD_CACHE_DIR, `plugin-update.zip`);
 
   _log('info', `[更新] 开始下载插件更新...`);
-  await curlDownload(assetUrl, zipPath);
+  await curlDownload(assetUrl, zipPath, onProgress);
   _log('info', `[更新] 插件下载完成: ${zipPath}`);
 
   return { ok: true, zipPath };
 }
 
-async function installPluginUpdate(zipPath) {
+async function installPluginUpdate(zipPath, newVersion) {
   if (_updating) return { ok: false, error: '更新进行中' };
   _updating = true;
 
@@ -342,15 +390,14 @@ async function installPluginUpdate(zipPath) {
       });
     });
 
-    // 写入安装时间
-    try {
-      const existing = await getPluginVersion();
-      existing.updatedAt = new Date().toISOString();
-      await fs.writeFile(PLUGIN_VERSION_FILE, JSON.stringify(existing, null, 2));
-    } catch { /* version.json 可能不存在，跳过 */ }
+    // 写入新版本号
+    await fs.writeFile(PLUGIN_VERSION_FILE, JSON.stringify({
+      version: newVersion || '1.0.0',
+      updatedAt: new Date().toISOString()
+    }, null, 2));
 
     _log('info', `[更新] 插件安装完成`);
-    return { ok: true };
+    return { ok: true, version: newVersion };
   } catch (e) {
     _log('error', `[更新] 插件安装失败: ${e.message}`);
     return { ok: false, error: e.message };

@@ -578,13 +578,13 @@ dialog.dlg.closing::backdrop{opacity:0}
 .sv-card-meta{font-size:11px;color:var(--muted-foreground);word-break:break-all}
 .sv-sep{height:1px;background:var(--border);margin:20px 0}
 /* ── Update page ── */
-.update-item{display:flex;flex-direction:column;gap:10px;margin-top:12px}
+.update-item{display:flex;flex-direction:column;gap:8px;margin-top:12px}
 .update-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .update-ver-label{font-size:11px;color:var(--muted-foreground)}
 .update-ver{font-size:13px;font-weight:600}
 .update-ver.accent{color:var(--primary)}
-.update-changelog{background:var(--muted);border-radius:var(--radius);padding:10px 12px;font-size:11px;color:var(--muted-foreground);max-height:120px;overflow-y:auto;white-space:pre-wrap;word-break:break-word;border:1px solid var(--border)}
-.update-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.update-changelog{background:var(--muted);border-radius:var(--radius);padding:8px 12px;font-size:11px;color:var(--muted-foreground);max-height:120px;overflow-y:auto;white-space:pre-wrap;word-break:break-word;border:1px solid var(--border)}
+.update-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .update-size{font-size:11px;color:var(--muted-foreground)}
 .update-progress{display:flex;align-items:center;gap:8px;width:100%}
 .update-progress-bar{flex:1;height:4px;background:var(--muted);border-radius:var(--radius-full);overflow:hidden}
@@ -594,6 +594,11 @@ dialog.dlg.closing::backdrop{opacity:0}
 .update-log .log-success{color:var(--success)}
 .update-log .log-error{color:var(--destructive)}
 .update-log .log-warn{color:var(--warning)}
+.update-restart-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(var(--blur,4px));z-index:1000;display:flex;align-items:center;justify-content:center}
+.update-restart-box{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-xl);padding:24px;max-width:360px;width:90%;box-shadow:var(--shadow-lg)}
+.update-restart-box h3{font-size:15px;font-weight:700;margin-bottom:8px}
+.update-restart-box p{font-size:13px;color:var(--muted-foreground);line-height:1.6}
+.update-restart-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
 .sv-form{display:flex;flex-direction:column;gap:12px;margin-bottom:12px}
 .sv-form label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted-foreground)}
 .sv-form input,.sv-form textarea,.sv-form select{height:32px;padding:0 10px;border:1px solid var(--input);border-radius:var(--radius);background:var(--background);color:var(--foreground);font-size:13px;transition:border-color var(--transition-fast),box-shadow var(--transition-fast)}

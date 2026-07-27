@@ -1113,7 +1113,12 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
   });
 
   ipcMain.handle('update:download-app', async (_event, downloadUrl) => {
-    try { return await updater.downloadAppUpdate(downloadUrl); } catch (e) { return { ok: false, error: e.message }; }
+    try {
+      const win = _event.sender;
+      return await updater.downloadAppUpdate(downloadUrl, (progress) => {
+        if (!win.isDestroyed()) win.send('update:progress', { key: 'app', ...progress });
+      });
+    } catch (e) { return { ok: false, error: e.message }; }
   });
 
   ipcMain.handle('update:install-app', async (_event, zipPath) => {
@@ -1125,11 +1130,16 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
   });
 
   ipcMain.handle('update:download-plugin', async (_event, downloadUrl) => {
-    try { return await updater.downloadPluginUpdate(downloadUrl); } catch (e) { return { ok: false, error: e.message }; }
+    try {
+      const win = _event.sender;
+      return await updater.downloadPluginUpdate(downloadUrl, (progress) => {
+        if (!win.isDestroyed()) win.send('update:progress', { key: 'plugin', ...progress });
+      });
+    } catch (e) { return { ok: false, error: e.message }; }
   });
 
-  ipcMain.handle('update:install-plugin', async (_event, zipPath) => {
-    try { return await updater.installPluginUpdate(zipPath); } catch (e) { return { ok: false, error: e.message }; }
+  ipcMain.handle('update:install-plugin', async (_event, zipPath, newVersion) => {
+    try { return await updater.installPluginUpdate(zipPath, newVersion); } catch (e) { return { ok: false, error: e.message }; }
   });
 
   ipcMain.handle('update:get-app-version', async () => {

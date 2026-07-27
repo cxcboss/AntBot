@@ -4,6 +4,7 @@ const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
 const { execFile } = require('node:child_process');
+const { parseSemver, compareSemver, formatBytes } = require('./versionUtils');
 
 const GITHUB_RAW = 'https://raw.githubusercontent.com/cxcboss/antbot-remote-ui/main';
 const VERSION_URL = `${GITHUB_RAW}/version.json`;
@@ -19,21 +20,6 @@ function setLogger(logger) { _log = logger; }
 async function ensureLocalDir() {
   await fs.mkdir(LOCAL_DIR, { recursive: true });
   await fs.mkdir(BACKUP_DIR, { recursive: true });
-}
-
-// ─── 语义化版本比较 ───
-
-function parseSemver(v) {
-  const parts = String(v || '0.0.0').split('.').map(Number);
-  return { major: parts[0] || 0, minor: parts[1] || 0, patch: parts[2] || 0 };
-}
-
-function compareSemver(a, b) {
-  const va = parseSemver(a);
-  const vb = parseSemver(b);
-  if (va.major !== vb.major) return va.major - vb.major;
-  if (va.minor !== vb.minor) return va.minor - vb.minor;
-  return va.patch - vb.patch;
 }
 
 // ─── 网络下载（curl，支持系统代理）───
