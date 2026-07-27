@@ -56,16 +56,23 @@ function createBrowserPublishBridge({ baseUrl = 'http://127.0.0.1:18321', pollIn
     const startedAt = Date.now();
     let cursor = 0;
     let pollCount = 0;
+    let lastActivityAt = Date.now();
+    const INACTIVITY_TIMEOUT = 90_000;  // 90 秒无事件 → 超时
+    const HARD_TIMEOUT = 10 * 60_000;   // 10 分钟硬上限
 
-    while (Date.now() - startedAt < timeoutMs) {
+    while (Date.now() - startedAt < HARD_TIMEOUT) {
       pollCount++;
       const result = await call('GET', `/api/bridge/commands/${encodeURIComponent(id)}`);
+      let gotNewEvent = false;
       for (const event of result.events || []) {
         if (event.sequence > cursor) {
           cursor = event.sequence;
+          gotNewEvent = true;
           onProgress(event);
         }
       }
+      if (gotNewEvent) lastActivityAt = Date.now();
+
       if (result.command?.status === 'completed' || result.command?.status === 'failed' || result.command?.status === 'cancelled') {
         const finalResult = result.command.result || {};
         if (finalResult.success === false || result.command.status !== 'completed') {
@@ -73,6 +80,13 @@ function createBrowserPublishBridge({ baseUrl = 'http://127.0.0.1:18321', pollIn
         }
         return finalResult;
       }
+
+      // 无事件活动超时
+      if (Date.now() - lastActivityAt > INACTIVITY_TIMEOUT) {
+        await call('POST', `/api/bridge/commands/${encodeURIComponent(id)}/cancel`, { reason: 'AntBot 等待插件结果超时' }).catch(() => {});
+        throw new Error('浏览器插件发布超时（无响应）');
+      }
+
       await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
     }
 

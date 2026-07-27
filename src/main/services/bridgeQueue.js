@@ -59,6 +59,12 @@ function createBridgeQueue({ maxEvents = 200, maxHistory = 100 } = {}) {
     command.finishedAt = nowIso();
     history.unshift({ ...command });
     if (history.length > maxHistory) history.length = maxHistory;
+    // 延迟清理已完成的命令和事件，给轮询端口时间读取最终状态
+    const cmdId = String(id);
+    setTimeout(() => {
+      commands.delete(cmdId);
+      events.delete(`cmd:${cmdId}`);
+    }, 30_000);
     return { ...command };
   }
 

@@ -34,6 +34,8 @@
         <button class="sb-btn sb-feat" data-feat="remote" type="button"><span class="icon" data-icon="globe"></span><span>远程</span></button>
         <button class="sb-btn sb-feat" data-feat="style-ref" type="button"><span class="icon" data-icon="sparkle"></span><span>风格参考</span></button>
         <button class="sb-btn sb-feat" data-feat="subtitle-voice" type="button"><span class="icon" data-icon="mic"></span><span>字幕与音色</span></button>
+        <div style="flex:1"></div>
+        <button class="sb-btn sb-feat" data-feat="settings" type="button"><span class="icon" data-icon="settings"></span><span>设置</span></button>
       </div>
 
       <!-- 状态面板 -->
@@ -233,15 +235,6 @@
               <h3 class="sv-title">远程访问</h3>
               <p class="sv-desc">通过手机浏览器远程操控主控任务</p>
 
-              <!-- 隧道配置（首次使用） -->
-              <div id="remote-tunnel-setup" style="display:none">
-                <div class="s-row" style="margin-bottom:8px"><span class="s-label">Cloudflare Token</span>
-                  <input id="remote-cf-token" type="password" placeholder="API Token" style="flex:1" />
-                </div>
-                <button class="btn btn-primary btn-block" id="remote-setup-btn" type="button">自动配置隧道</button>
-                <p class="sv-note">首次使用需要 Cloudflare API Token 来创建隧道。获取方式：Cloudflare Dashboard → 我的个人资料 → API 令牌 → 创建令牌（权限选"编辑区域 DNS"）</p>
-              </div>
-
               <div class="sv-card" id="remote-status-card">
                 <div class="sv-card-row">
                   <span class="sv-card-label">状态</span>
@@ -272,8 +265,9 @@
                     <span style="font-size:12px;color:var(--muted-foreground)">打开App时自动开启远程</span>
                   </label>
                 </div>
-                <label>用户名
-                  <input id="remote-username" type="text" placeholder="admin" />
+                <label>设备名称
+                  <input id="remote-device-name" type="text" placeholder="如：办公室电脑" />
+                  <span style="font-size:10px;color:var(--muted-foreground);margin-top:2px">在远程控制中心显示的名称</span>
                 </label>
                 <label>密码
                   <div style="display:flex;gap:6px;align-items:center">
@@ -284,7 +278,17 @@
                 <button class="btn btn-primary btn-block" id="remote-save-btn" type="button">保存并启用</button>
               </div>
 
-              <div class="sv-note" id="remote-note">设置用户名和密码后点击保存，再开启远程开关。扫描二维码或复制链接在手机浏览器打开。</div>
+              <div class="sv-card" style="margin-top:12px">
+                <div class="sv-card-row">
+                  <span class="sv-card-label">远程页面版本</span>
+                  <span class="sv-card-value" id="remote-ui-version">检查中...</span>
+                </div>
+                <div style="padding:4px 0 8px">
+                  <button class="btn btn-sm btn-ghost" id="remote-check-update-btn" type="button">检查更新</button>
+                </div>
+              </div>
+
+              <div class="sv-note" id="remote-note">设置设备名称和密码后点击保存，再开启远程开关。扫描二维码或复制链接打开远程控制中心，在网页上选择设备并输入密码即可操控。</div>
             </div>
           </div>
         </div>
@@ -427,6 +431,17 @@
         <button type="button" id="voicebox-reset-btn" class="btn btn-ghost"><span class="icon" data-icon="trash"></span>重置环境</button>
         <button type="button" id="voicebox-install-btn" class="btn btn-primary"><span class="icon" data-icon="download"></span>安装依赖</button>
       </div>
+
+      <div class="s-divider"></div>
+
+      <div class="s-section-label">检查更新</div>
+      <div class="s-row"><span class="s-label">App 版本</span><span id="settings-app-version" class="s-path">-</span></div>
+      <div class="s-row"><span class="s-label">插件版本</span><span id="settings-plugin-version" class="s-path">-</span></div>
+      <div class="s-row"><span class="s-label">远程页面版本</span><span id="settings-remote-ui-version" class="s-path">-</span></div>
+      <div class="s-row">
+        <button type="button" id="settings-check-update-btn" class="btn btn-primary"><span class="icon" data-icon="refresh"></span>检查更新</button>
+      </div>
+      <div id="update-status" style="font-size:12px;color:var(--muted-foreground);margin-top:4px"></div>
 
     </div>
   </div></dialog>

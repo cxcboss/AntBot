@@ -327,6 +327,7 @@ class TaskRunner {
         this.currentTaskId = targetId;
         this.stopRequested = true;
         this.setTaskState(targetId, {
+          status: 'cancelling',
           message: '正在停止当前任务'
         });
       } else if (row.status === 'pending') {
@@ -1059,6 +1060,13 @@ class TaskRunner {
       });
       this.log('', error.message, 'error');
     } finally {
+      // 整批任务结束，关闭 voicebox 和 auto_dub_web 释放内存
+      try {
+        const { shutdownVoicebox, shutdownAutoDub } = require('./services/autoDubClient');
+        await shutdownAutoDub(this.log).catch(() => {});
+        await shutdownVoicebox(this.log).catch(() => {});
+      } catch {}
+
       runRecord.endedAt = nowIso();
       // 状态重置优先执行，确保 runner 不会卡死
       this.running = false;

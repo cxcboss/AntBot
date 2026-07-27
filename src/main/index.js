@@ -262,6 +262,18 @@ app.whenReady().then(async () => {
     createWindow();
   }
 
+  // 自动检查远程页面更新
+  try {
+    const updater = require('./services/remoteUpdater');
+    updater.setLogger(console.log);
+    updater.autoUpdate().then(result => {
+      if (result.ok && !result.alreadyLatest) {
+        const win = BrowserWindow.getAllWindows()[0];
+        if (win && !win.isDestroyed()) win.webContents.send('app:toast', `远程页面已更新到 v${result.version}`, 'success');
+      }
+    }).catch(() => {});
+  } catch {}
+
   app.on('activate', () => {
     if (isHeadlessMode) {
       return;
@@ -285,9 +297,19 @@ app.on('before-quit', async () => {
   if (ipcCleanup) await ipcCleanup().catch(() => {});
   systemControl?.dispose();
   bridgeServiceManager.stop();
-  // 关闭 voicebox 后端释放内存
+  // 关闭远程服务和隧道
   try {
-    const { shutdownVoicebox } = require('./services/autoDubClient');
+    const { stopRemoteServer } = require('./services/remoteServer');
+    stopRemoteServer();
+  } catch {}
+  try {
+    const tunnelManager = require('./services/tunnelManager');
+    tunnelManager.stopTunnel();
+  } catch {}
+  // 关闭 voicebox 和 auto_dub_web 释放内存
+  try {
+    const { shutdownVoicebox, shutdownAutoDub } = require('./services/autoDubClient');
+    await shutdownAutoDub(() => {}).catch(() => {});
     await shutdownVoicebox(() => {}).catch(() => {});
   } catch {}
 });

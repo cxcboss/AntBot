@@ -127,7 +127,7 @@ function makeBubbleHtml(raw){
   const rawLines=raw.split(/\r?\n/).filter(l=>l.trim());
   const showNum=rawLines.length>=3;
   const numbered=rawLines.map((l,i)=>(showNum?`${i+1}、`:``)+l).join('\n');
-  const escapedRaw=esc(numbered).replace(/`/g,'\\`').replace(/\$/g,'\\$');
+  const escapedRaw=esc(raw).replace(/\\/g,'\\\\').replace(/\n/g,'\\n').replace(/\r/g,'\\r').replace(/`/g,'\\`').replace(/\$/g,'\\$');
   return`<div class="msg-content">${formatted}</div><button class="msg-raw-toggle" type="button" onclick="const raw=this.nextElementSibling;const copy=this.nextElementSibling.nextElementSibling;const shown=raw.classList.toggle('show');this.textContent=shown?'隐藏原文':'显示原文';copy.style.display=shown?'block':'none'">显示原文</button><div class="msg-raw">${esc(numbered)}</div><div class="msg-raw-actions" style="display:none"><button class="msg-copy-btn" type="button" onclick="navigator.clipboard.writeText('${escapedRaw.replace(/'/g,"\\'")}');this.textContent='已复制';setTimeout(()=>this.textContent='复制',1500)">复制</button></div>`;
 }
 
@@ -245,6 +245,7 @@ function taskCard(t,live=false){
   if(canCancel)acts.push(`<button class="task-btn cancel" data-stop="${esc(t.id)}">取消</button>`);
   if(canRetry)acts.push(`<button class="task-btn" data-retry-task="${esc(t.id)}">重试</button>`);
   if(isCompleted&&t.outputPath)acts.push(`<button class="task-btn" data-open-output="${esc(t.outputPath)}">打开目录</button>`);
+  if(st==='warning'&&t.outputPath)acts.push(`<button class="task-btn" data-republish="${esc(t.id)}">重新发布</button>`);
 
   const inner=`<div class="task-inner"><div class="task-head"><div class="task-title">${esc(title)}</div><div class="task-badge">${esc(statusLabel)}</div></div>${tagsHtml}${progressHtml}${msg}${acts.length?`<div class="task-acts">${acts.join('')}</div>`:''}</div>`;
   const overlay=isCancelling?'<div class="task-cancelling">取消中...</div>':'';
@@ -646,23 +647,24 @@ function renderEditCards() {
   container.innerHTML = S.editVideos.map(v => {
     const st = v.status || 'pending';
     const pct = Math.max(0, Math.min(100, v.progress || 0));
-    const icons = { pending: '⏳', preparing: '🔧', ready: '📋', composing: '🎬', paused: '⏸', completed: '✅', failed: '❌', cancelled: '🚫' };
+    const icons = { pending: '⏳', preparing: '🔧', ready: '📋', composing: '🎬', paused: '⏸', completed: '✅', failed: '❌', cancelled: '🚫', cancelling: '⏳' };
     const icon = icons[st] || '';
-    const txt = st === 'preparing' ? `${v.step || '准备中'} ${pct}%` : st === 'ready' ? `待合成 · ${v.videoName || ''}` : st === 'composing' ? `合成中 ${pct}%` : st === 'completed' ? `完成 ${fmtDur(v.duration)}` : st === 'failed' ? `失败` : st === 'paused' ? '已暂停' : st === 'cancelled' ? '已取消' : '等待中';
+    const txt = st === 'preparing' ? `${v.step || '准备中'} ${pct}%` : st === 'ready' ? `待合成 · ${v.videoName || ''}` : st === 'composing' ? `合成中 ${pct}%` : st === 'completed' ? `完成 ${fmtDur(v.duration)}` : st === 'failed' ? `失败` : st === 'paused' ? '已暂停' : st === 'cancelled' ? '已取消' : st === 'cancelling' ? '取消中...' : '等待中';
     const selectedClass = v.selected ? ' selected' : '';
     let acts = '';
     if (st === 'pending') acts = `<button class="edit-act-btn" data-act="start" data-vid="${esc(v.id)}">开始</button><button class="edit-act-btn danger" data-act="remove" data-vid="${esc(v.id)}">移除</button>`;
     else if (st === 'preparing') acts = `<button class="edit-act-btn" data-act="pause" data-vid="${esc(v.id)}">暂停</button><button class="edit-act-btn danger" data-act="cancel" data-vid="${esc(v.id)}">取消</button>`;
     else if (st === 'ready') acts = `<button class="edit-act-btn" data-act="compose" data-vid="${esc(v.id)}">合成</button><button class="edit-act-btn danger" data-act="cancel" data-vid="${esc(v.id)}">取消</button>`;
     else if (st === 'composing') acts = `<button class="edit-act-btn danger" data-act="cancel" data-vid="${esc(v.id)}">取消</button>`;
+    else if (st === 'cancelling') acts = `<button class="edit-act-btn" disabled style="opacity:.5">取消中...</button>`;
     else if (st === 'paused') acts = `<button class="edit-act-btn" data-act="resume" data-vid="${esc(v.id)}">继续</button><button class="edit-act-btn danger" data-act="cancel" data-vid="${esc(v.id)}">取消</button>`;
     else if (st === 'completed') acts = `<button class="edit-act-btn" data-act="open" data-vid="${esc(v.id)}">打开</button><button class="edit-act-btn danger" data-act="remove" data-vid="${esc(v.id)}">移除</button>`;
     else { const retryLabel = v.retryCount > 0 ? `重试 (${v.retryCount})` : '重试'; acts = `<button class="edit-act-btn" data-act="retry" data-vid="${esc(v.id)}">${retryLabel}</button><button class="edit-act-btn danger" data-act="remove" data-vid="${esc(v.id)}">移除</button>`; }
 
-    const showProgress = ['preparing', 'composing'].includes(st);
+    const showProgress = ['preparing', 'composing', 'cancelling'].includes(st);
     const etaText = v.eta ? ` · 预计${v.eta}` : '';
     const errorDetail = st === 'failed' && v.error ? `<div class="edit-card-error" data-error-toggle="${esc(v.id)}"><span class="error-summary">${esc(v.error.slice(0, 50))}${v.error.length > 50 ? '...' : ''}</span><span class="error-expand">展开</span></div><div class="edit-card-error-full hidden" data-error-full="${esc(v.id)}">${esc(v.error)}</div>` : '';
-    const optDisabled = ['completed', 'composing'].includes(st) ? ' disabled' : '';
+    const optDisabled = ['completed', 'composing', 'cancelling'].includes(st) ? ' disabled' : '';
     const thumbnailHtml = v.thumbnailUrl ? `<img src="${v.thumbnailUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:var(--r-sm)" />` : `<span class="icon" data-icon="film"></span>`;
     return `<div class="edit-card ${st}${selectedClass}" data-video-id="${esc(v.id)}">
       <div class="edit-card-select"><input type="checkbox" ${v.selected ? 'checked' : ''} data-select="${esc(v.id)}"></div>
@@ -723,7 +725,11 @@ function bindEditCardEvents() {
     else if (action === 'retry') await window.antbot.editRetryTask(vid);
     else if (action === 'pause') await window.antbot.editPauseTask(vid);
     else if (action === 'resume') await window.antbot.editStartTask(vid);
-    else if (action === 'cancel') await window.antbot.cancelEditTask(vid);
+    else if (action === 'cancel') {
+      const local = S.editVideos.find(v => v.id === vid);
+      if (local && local.status !== 'cancelling') { local.status = 'cancelling'; local.message = '取消中...'; renderEditCards(); renderEditStartBtn(); }
+      await window.antbot.cancelEditTask(vid);
+    }
     else if (action === 'remove') {
       await window.antbot.editRemoveTask(vid);
       S.editVideos = S.editVideos.filter(v => v.id !== vid);
@@ -2011,7 +2017,7 @@ function bind(){
   el.openVideoBtn?.addEventListener('click',()=>void window.antbot.openExternal('https://channels.weixin.qq.com/platform').catch(e=>toast(e.message,'error')));
   el.openDouyinBtn?.addEventListener('click',()=>void window.antbot.openExternal('https://creator.douyin.com/creator-micro/home').catch(e=>toast(e.message,'error')));
   // Settings
-  el.openSettingsBtn?.addEventListener('click',()=>{fillForm();el.setDlg?.showModal();if(isMobile())closeSidebar();checkDeps();loadModels();checkVoicebox();loadApiUsage();});
+  el.openSettingsBtn?.addEventListener('click',()=>{fillForm();el.setDlg?.showModal();if(isMobile())closeSidebar();checkDeps();loadModels();checkVoicebox();loadApiUsage();loadSettingsVersions();});
   el.setClose?.addEventListener('click',()=>closeDlg(el.setDlg));
   // Auto-save on settings input change
   document.getElementById('settings-body')?.addEventListener('change',()=>{void saveSettings();});
@@ -2112,6 +2118,17 @@ function bind(){
       const outputPath=openOutputBtn.dataset.openOutput;
       if(outputPath){void window.antbot.revealInFolder(outputPath).catch(()=>{})}
     }
+    const republishBtn=e.target.closest('[data-republish]');
+    if(republishBtn){
+      const tid=republishBtn.dataset.republish;
+      republishBtn.disabled=true;republishBtn.textContent='发布中...';
+      window.antbot.republishTask(tid).then(r=>{
+        if(r?.ok)toast('已重新发布','success');
+        else toast(r?.error||'发布失败','error');
+      }).catch(err=>toast(err.message,'error')).finally(()=>{
+        republishBtn.disabled=false;republishBtn.textContent='重新发布';
+      });
+    }
   });
   // Chips
   el.chips?.addEventListener('click',e=>{
@@ -2129,8 +2146,9 @@ function bind(){
   // Chat scroll
   el.scroll?.addEventListener('scroll',()=>{if(!el.scroll||el.scroll.scrollTop>80||S.chatCount>=S.history.length)return;const ph=el.scroll.scrollHeight,pt=el.scroll.scrollTop;S.chatCount=Math.min(S.chatCount+20,S.history.length);renderChat();requestAnimationFrame(()=>{el.scroll.scrollTop=el.scroll.scrollHeight-ph+pt})});
   // IPC
-  window.antbot.onProgress(p=>{const pin=el.scroll&&(el.scroll.scrollHeight-el.scroll.scrollTop-el.scroll.clientHeight<80);S.progress=p||S.progress;renderChat({stick:pin});renderBtns();renderStats();renderStatus()});
+  window.antbot.onProgress(p=>{const pin=el.scroll&&(el.scroll.scrollHeight-el.scroll.scrollTop-el.scroll.clientHeight<80);const oldTasks=S.progress?.tasks||[];S.progress=p||S.progress;if(p?.tasks){const cancelIds=new Set(oldTasks.filter(t=>t.status==='cancelling').map(t=>t.id));p.tasks.forEach(t=>{if(cancelIds.has(t.id)&&t.status!=='stopped'&&t.status!=='failed'&&t.status!=='completed')t.status='cancelling'})}renderChat({stick:pin});renderBtns();renderStats();renderStatus()});
   window.antbot.onLog(p=>{if(p?.message?.startsWith('[语音克隆]')){S.vc.logs.push(p.message.replace('[语音克隆] ',''));S.vc.logs=S.vc.logs.slice(-16);renderVC()}});
+  window.antbot.onToast?.((msg, type) => { if (msg) toast(msg, type || 'info'); });
   window.antbot.onVoiceCloneProgress(p=>{
     S.vc={...S.vc,running:p?.status==='running',status:p?.status||S.vc.status,step:p?.step||S.vc.step,pct:typeof p?.percent==='number'?p.percent:S.vc.pct};
     if(p?.message){S.vc.logs.push(p.message);S.vc.logs=S.vc.logs.slice(-16)}
@@ -2627,8 +2645,8 @@ async function initRemotePage() {
   const urlEl = document.getElementById('remote-url');
   const toggle = document.getElementById('remote-toggle');
   const toggleText = document.getElementById('remote-toggle-text');
-  const usernameEl = document.getElementById('remote-username');
   const passwordEl = document.getElementById('remote-password');
+  const deviceNameEl = document.getElementById('remote-device-name');
   const copyBtn = document.getElementById('remote-copy-btn');
   const saveBtn = document.getElementById('remote-save-btn');
   const qrRow = document.getElementById('remote-qr-row');
@@ -2641,8 +2659,8 @@ async function initRemotePage() {
   // 加载当前设置
   try {
     const creds = await window.antbot.remoteGetCredentials();
-    if (usernameEl) usernameEl.value = creds.username || '';
     if (passwordEl) passwordEl.value = creds.password || '';
+    if (deviceNameEl) deviceNameEl.value = creds.deviceName || '';
     if (autoToggle && creds.autoStart) autoToggle.classList.add('on');
   } catch {}
 
@@ -2654,50 +2672,13 @@ async function initRemotePage() {
       toggleText.textContent = '已启用';
       statusText.textContent = status.tunnel?.running ? '已连接' : '服务已启动';
       if (status.tunnel?.url) {
-        currentUrl = status.tunnel.url;
+        currentUrl = 'https://hub.onebugmanai.online';
         urlEl.textContent = currentUrl;
         copyBtn.style.display = '';
         showQrCode(currentUrl);
       }
     }
   } catch {}
-
-  // 检查 cloudflared 和隧道配置
-  const tunnelSetup = document.getElementById('remote-tunnel-setup');
-  try {
-    const cf = await window.antbot.remoteCheckCloudflared();
-    if (!cf.available) {
-      document.getElementById('remote-note').textContent = '未检测到 cloudflared，请先安装: brew install cloudflared';
-    } else {
-      // 检查是否有命名隧道配置
-      const status = await window.antbot.remoteStatus();
-      if (!status.tunnel?.running) {
-        // 显示隧道配置区域
-        if (tunnelSetup) tunnelSetup.style.display = '';
-      }
-    }
-  } catch {}
-
-  // 隧道配置按钮
-  document.getElementById('remote-setup-btn')?.addEventListener('click', async () => {
-    const tokenEl = document.getElementById('remote-cf-token');
-    const cfToken = tokenEl?.value?.trim();
-    if (!cfToken) { toast('请输入 Cloudflare API Token', 'error'); return; }
-    const btn = document.getElementById('remote-setup-btn');
-    btn.disabled = true; btn.textContent = '配置中...';
-    try {
-      const result = await window.antbot.remoteSetupTunnel(cfToken);
-      if (result.ok) {
-        toast('隧道配置成功: ' + result.fqdn, 'success');
-        if (tunnelSetup) tunnelSetup.style.display = 'none';
-        // 保存 token 到凭证
-        await window.antbot.remoteUpdateCredentials({ cfToken });
-      } else {
-        toast('配置失败: ' + result.error, 'error');
-      }
-    } catch (e) { toast('配置失败: ' + e.message, 'error'); }
-    btn.disabled = false; btn.textContent = '自动配置隧道';
-  });
 
   // 密码显示/隐藏
   passToggle?.addEventListener('click', () => {
@@ -2716,8 +2697,8 @@ async function initRemotePage() {
 
   // 保存并启用按钮
   saveBtn?.addEventListener('click', async () => {
-    const username = usernameEl?.value?.trim() || 'admin';
     const password = passwordEl?.value?.trim();
+    const deviceName = deviceNameEl?.value?.trim() || '';
     if (!password) { toast('请设置密码', 'error'); return; }
 
     saveBtn.disabled = true;
@@ -2725,8 +2706,7 @@ async function initRemotePage() {
     toggleText.textContent = '启动中...';
 
     try {
-      // 直接传入用户名密码启动（IPC 内部会保存）
-      const r = await window.antbot.remoteStart({ username, password });
+      const r = await window.antbot.remoteStart({ password, deviceName });
       if (!r.ok) { toast(r.error, 'error'); toggleText.textContent = '关闭'; saveBtn.disabled = false; saveBtn.textContent = '保存并启用'; return; }
 
       // 启动 tunnel
@@ -2736,7 +2716,7 @@ async function initRemotePage() {
         toggle.classList.add('on');
         toggleText.textContent = '已启用';
         statusText.textContent = '已连接';
-        currentUrl = t.url;
+        currentUrl = 'https://hub.onebugmanai.online';
         urlEl.textContent = currentUrl;
         copyBtn.style.display = '';
         showQrCode(currentUrl);
@@ -2791,15 +2771,202 @@ async function initRemotePage() {
   // 监听 tunnel URL 更新
   window.antbot.onRemoteTunnelUrl?.((url) => {
     if (url) {
-      currentUrl = url;
-      urlEl.textContent = url;
+      currentUrl = 'https://hub.onebugmanai.online';
+      urlEl.textContent = currentUrl;
       copyBtn.style.display = '';
-      showQrCode(url);
+      showQrCode(currentUrl);
     }
   });
   window.antbot.onRemoteTunnelStatus?.((s) => {
     if (statusText) statusText.textContent = s.status === 'running' ? '已连接' : s.status === 'starting' ? '连接中...' : '未连接';
   });
+
+  // App 版本显示
+  const versionEl = document.getElementById('remote-ui-version');
+  try {
+    const v = await window.antbot.getAppVersion();
+    if (versionEl) versionEl.textContent = v?.version || S.app?.version || '-';
+  } catch { if (versionEl) versionEl.textContent = S.app?.version || '-'; }
+
+  // 检查更新按钮
+  const checkUpdateBtn = document.getElementById('remote-check-update-btn');
+  checkUpdateBtn?.addEventListener('click', async () => {
+    checkUpdateBtn.disabled = true;
+    checkUpdateBtn.textContent = '检查中...';
+    try {
+      const result = await window.antbot.checkAllUpdates();
+      showUpdateDialog(result);
+    } catch (e) {
+      toast('检查更新失败: ' + e.message, 'error');
+    }
+    checkUpdateBtn.disabled = false;
+    checkUpdateBtn.textContent = '检查更新';
+  });
+}
+
+
+/* ── Settings Update Check ── */
+async function loadSettingsVersions() {
+  try {
+    const [appV, pluginV, remoteV] = await Promise.all([
+      window.antbot.getAppVersion().catch(() => null),
+      window.antbot.getPluginVersion().catch(() => null),
+      window.antbot.remoteGetLocalVersion?.().catch(() => null),
+    ]);
+    const appEl = document.getElementById('settings-app-version');
+    const pluginEl = document.getElementById('settings-plugin-version');
+    const remoteEl = document.getElementById('settings-remote-ui-version');
+    if (appEl) appEl.textContent = appV?.version || '-';
+    if (pluginEl) pluginEl.textContent = pluginV?.version || '-';
+    if (remoteEl) remoteEl.textContent = remoteV?.version || '-';
+  } catch {}
+  // 绑定检查更新按钮
+  const btn = document.getElementById('settings-check-update-btn');
+  if (btn && !btn._bound) {
+    btn._bound = true;
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      btn.textContent = '检查中...';
+      const statusEl = document.getElementById('update-status');
+      try {
+        const result = await window.antbot.checkAllUpdates();
+        const hasAny = result?.app?.hasUpdate || result?.plugin?.hasUpdate;
+        if (hasAny) {
+          closeDlg(el.setDlg);
+          showUpdateDialog(result);
+        } else {
+          if (statusEl) statusEl.textContent = '所有组件已是最新版本';
+          toast('已是最新版本', 'success');
+        }
+      } catch (e) {
+        if (statusEl) statusEl.textContent = '检查失败: ' + e.message;
+        toast('检查更新失败', 'error');
+      }
+      btn.disabled = false;
+      btn.innerHTML = '<span class="icon" data-icon="refresh"></span>检查更新';
+      injectIcons();
+    });
+  }
+}
+
+/* ── Update Dialog ── */
+function showUpdateDialog(result) {
+  // 移除已有弹窗
+  document.getElementById('update-overlay')?.remove();
+
+  const app = result.app || {};
+  const plugin = result.plugin || {};
+  const hasAppUpdate = !!app.hasUpdate;
+  const hasPluginUpdate = !!plugin.hasUpdate;
+  const hasAnyUpdate = hasAppUpdate || hasPluginUpdate;
+
+  const appCur = esc(app.currentVersion || '-');
+  const appLat = esc(app.latestVersion || '-');
+  const pluginCur = esc(plugin.currentVersion || '-');
+  const pluginLat = esc(plugin.latestVersion || '-');
+  const changelog = esc(app.changelog || '');
+
+  const overlay = document.createElement('div');
+  overlay.id = 'update-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);backdrop-filter:blur(4px);';
+
+  overlay.innerHTML = `<div style="width:min(440px,calc(100vw - 24px));max-height:calc(100vh - 48px);display:flex;flex-direction:column;border-radius:var(--radius-xl);background:var(--popover);box-shadow:var(--shadow-lg);overflow:hidden">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border);flex-shrink:0">
+      <h3 style="font-size:15px;font-weight:600;color:var(--foreground)">检查更新</h3>
+      <button id="update-close-x" style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:var(--radius);color:var(--muted-foreground);border:0;background:none;cursor:pointer;font-size:16px" title="关闭">&times;</button>
+    </div>
+    <div style="padding:16px;overflow-y:auto">
+      <div style="margin-bottom:12px">
+        <div style="font-size:12px;font-weight:600;color:var(--muted-foreground);margin-bottom:6px">应用</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-radius:var(--radius);border:1px solid var(--border);background:var(--secondary);font-size:13px">
+          <span style="color:var(--foreground)">${hasAppUpdate ? '发现新版本' : '当前版本'}</span>
+          <span style="font-weight:600;color:${hasAppUpdate ? 'var(--warning)' : 'var(--muted-foreground)'}">${appCur} → ${appLat}</span>
+        </div>
+      </div>
+      <div style="margin-bottom:12px">
+        <div style="font-size:12px;font-weight:600;color:var(--muted-foreground);margin-bottom:6px">插件</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-radius:var(--radius);border:1px solid var(--border);background:var(--secondary);font-size:13px">
+          <span style="color:var(--foreground)">${hasPluginUpdate ? '发现新版本' : '当前版本'}</span>
+          <span style="font-weight:600;color:${hasPluginUpdate ? 'var(--warning)' : 'var(--muted-foreground)'}">${pluginCur} → ${pluginLat}</span>
+        </div>
+      </div>
+      ${hasAppUpdate && changelog ? `<div style="margin-bottom:12px"><div style="font-size:12px;font-weight:600;color:var(--muted-foreground);margin-bottom:6px">更新日志</div><pre style="margin:0;padding:10px;border-radius:var(--radius);background:var(--background);border:1px solid var(--border);font-size:12px;line-height:1.6;color:var(--foreground);max-height:200px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;font-family:var(--font-mono)">${changelog}</pre></div>` : ''}
+      ${!hasAnyUpdate ? '<div style="text-align:center;padding:16px 0;font-size:14px;font-weight:600;color:var(--success)">已是最新版本</div>' : ''}
+      <div id="update-progress" style="display:none;margin-bottom:12px">
+        <div style="font-size:12px;color:var(--muted-foreground);margin-bottom:6px" id="update-progress-text">正在下载...</div>
+        <div style="height:6px;border-radius:var(--radius-full);background:var(--muted);overflow:hidden"><div id="update-progress-bar" style="height:100%;width:0;background:var(--primary);border-radius:var(--radius-full);transition:width var(--transition-normal)"></div></div>
+      </div>
+    </div>
+    <div id="update-actions" style="display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid var(--border);flex-shrink:0">
+      ${hasAnyUpdate
+        ? `<button id="update-btn-later" style="height:32px;padding:0 14px;border-radius:var(--radius);font-size:13px;font-weight:500;border:1px solid var(--border);background:var(--card);color:var(--foreground);cursor:pointer;transition:all var(--transition-fast)">稍后再说</button><button id="update-btn-now" style="height:32px;padding:0 14px;border-radius:var(--radius);font-size:13px;font-weight:500;border:0;background:var(--primary);color:var(--primary-foreground);cursor:pointer;transition:all var(--transition-fast)">立即更新</button>`
+        : '<button id="update-btn-close" style="height:32px;padding:0 14px;border-radius:var(--radius);font-size:13px;font-weight:500;border:0;background:var(--primary);color:var(--primary-foreground);cursor:pointer;transition:all var(--transition-fast)">确定</button>'}
+    </div>
+  </div>`;
+
+  // "立即更新" 逻辑
+  if (hasAnyUpdate) {
+    overlay.querySelector('#update-btn-now')?.addEventListener('click', async () => {
+      const actionsEl = overlay.querySelector('#update-actions');
+      const progressEl = overlay.querySelector('#update-progress');
+      const progressText = overlay.querySelector('#update-progress-text');
+      const progressBar = overlay.querySelector('#update-progress-bar');
+      const btnNow = overlay.querySelector('#update-btn-now');
+      const btnLater = overlay.querySelector('#update-btn-later');
+      if (btnNow) btnNow.disabled = true;
+      if (btnLater) btnLater.disabled = true;
+      if (progressEl) progressEl.style.display = '';
+      if (progressText) progressText.textContent = '正在下载...';
+      if (progressBar) progressBar.style.width = '30%';
+
+      try {
+        const tasks = [];
+        if (hasAppUpdate) tasks.push(window.antbot.downloadAppUpdate(app.downloadUrl));
+        if (hasPluginUpdate) tasks.push(window.antbot.downloadPluginUpdate(plugin.downloadUrl));
+        const results = await Promise.all(tasks);
+        if (progressBar) progressBar.style.width = '80%';
+
+        const appResult = hasAppUpdate ? results[0] : null;
+        if (appResult?.zipPath) {
+          if (progressText) progressText.textContent = '正在安装...';
+          await window.antbot.installAppUpdate(appResult.zipPath);
+        }
+        if (progressBar) progressBar.style.width = '100%';
+        if (progressText) progressText.textContent = '更新完成';
+
+        // 切换为重启确认
+        const bodyEl = overlay.querySelector('div:nth-child(1) > div:nth-child(2)');
+        if (bodyEl) bodyEl.innerHTML = '<div style="text-align:center;padding:24px 0;font-size:14px;color:var(--foreground)">更新已就绪，需要重启应用。<br/>是否立即重启？</div>';
+        if (actionsEl) actionsEl.innerHTML = `<button id="update-btn-restart-later" style="height:32px;padding:0 14px;border-radius:var(--radius);font-size:13px;font-weight:500;border:1px solid var(--border);background:var(--card);color:var(--foreground);cursor:pointer;transition:all var(--transition-fast)">稍后重启</button><button id="update-btn-restart-now" style="height:32px;padding:0 14px;border-radius:var(--radius);font-size:13px;font-weight:500;border:0;background:var(--primary);color:var(--primary-foreground);cursor:pointer;transition:all var(--transition-fast)">立即重启</button>`;
+
+        overlay.querySelector('#update-btn-restart-now')?.addEventListener('click', () => {
+          window.antbot.executeAppUpdate(appResult?.scriptPath);
+          window.antbot.quitApp();
+        });
+        overlay.querySelector('#update-btn-restart-later')?.addEventListener('click', () => overlay.remove());
+      } catch (e) {
+        if (progressText) progressText.textContent = '下载失败: ' + (e.message || '未知错误');
+        if (progressBar) progressBar.style.width = '100%';
+        if (progressBar) progressBar.style.background = 'var(--destructive)';
+        if (btnNow) { btnNow.disabled = false; btnNow.textContent = '重试'; }
+        if (btnLater) btnLater.disabled = false;
+      }
+    });
+
+    // "稍后再说" 逻辑
+    overlay.querySelector('#update-btn-later')?.addEventListener('click', () => {
+      localStorage.setItem('update-dismissed-at', Date.now());
+      overlay.remove();
+    });
+  } else {
+    overlay.querySelector('#update-btn-close')?.addEventListener('click', () => overlay.remove());
+  }
+
+  // 关闭按钮和点击遮罩
+  overlay.querySelector('#update-close-x')?.addEventListener('click', () => overlay.remove());
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+  document.body.appendChild(overlay);
 }
 
 
@@ -2870,7 +3037,7 @@ async function init(){
   try {
     const creds = await window.antbot.remoteGetCredentials();
     if (creds.autoStart && creds.password) {
-      const r = await window.antbot.remoteStart({ username: creds.username || 'admin', password: creds.password });
+      const r = await window.antbot.remoteStart({ password: creds.password, deviceName: creds.deviceName || '' });
       if (r.ok) {
         const t = await window.antbot.remoteStartTunnel().catch(() => ({}));
         if (t?.ok) console.log('[远程] 自动启动成功:', t.url);

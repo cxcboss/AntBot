@@ -1310,7 +1310,9 @@ async function ensureVoiceCloneBackend(projectPath, logger = () => {}, progress 
         : [startScript];
       const env = { ...process.env, VOICEBOX_PYTHON: venvPython, VENV_DIR: venvDir, VOICEBOX_DATA_DIR: voiceboxDataDir, VOICEBOX_MODELS_DIR: path.join(voiceboxDataDir, 'models') };
       const logFilePath = await getVoiceboxLogFilePath(projectPath);
-      const child = spawn(launchCommand, launchArgs, { cwd: projectPath, env, stdio: ['ignore', 'pipe', 'pipe'], shell: process.platform === 'win32' });
+      const child = await spawnLoggedDetachedProcess(launchCommand, launchArgs, {
+        cwd: projectPath, env, logFilePath, label: 'voicebox'
+      });
       startedVoiceboxBackends.set(projectPath, { child, logFilePath });
       progress({ status: 'running', step: '启动后端', percent: 80, message: '正在启动 voicebox 后端...' });
       await waitForVoiceCloneReady(15000);
@@ -1969,11 +1971,26 @@ async function shutdownVoicebox(logger = () => {}) {
   logger('voicebox 后端已关闭');
 }
 
+async function shutdownAutoDub(logger = () => {}) {
+  for (const [key, rec] of startedServers) {
+    const child = getStartedChild(rec);
+    if (child && child.exitCode === null) {
+      try { child.kill('SIGTERM'); } catch {}
+      await new Promise(r => setTimeout(r, 2000));
+      try { if (child.exitCode === null) child.kill('SIGKILL'); } catch {}
+    }
+    startedServers.delete(key);
+  }
+  await killAutoDubByPort(logger);
+  logger('auto_dub_web 已关闭');
+}
+
 module.exports = {
   detectAutoDubProject,
   resolveAutoDubProjectPath,
   createVoiceCloneProfileWithAutoDub,
   processWithAutoDub,
   getManagedChildren,
-  shutdownVoicebox
+  shutdownVoicebox,
+  shutdownAutoDub
 };

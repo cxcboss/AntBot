@@ -81,6 +81,13 @@ async function getStatus() {
 }
 
 async function getMobileHTML() {
+  // 优先从热更新目录读取
+  try {
+    const updater = require('./remoteUpdater');
+    const html = await updater.getLocalFile('remote-ui/index.html');
+    if (html) return html;
+  } catch {}
+  // 回退到内置版本
   const htmlPath = path.join(__dirname, 'remote-ui', 'index.html');
   try {
     return await fs.readFile(htmlPath, 'utf-8');
@@ -117,25 +124,23 @@ function startRemoteServer({ store, taskRunner, mainWindowRef, appLog }) {
       if (method === 'POST' && pathname === '/remote/login') {
         const body = await readBody(req);
         // 从独立凭证文件读取
-        let remoteUser = 'admin';
         let remotePass = '';
         try {
           const credsPath = path.join(os.homedir(), 'AntBot', 'remote-credentials.json');
           const creds = JSON.parse(await fs.readFile(credsPath, 'utf-8'));
-          remoteUser = creds.username || 'admin';
           remotePass = creds.password || '';
         } catch {}
 
         if (!remotePass) {
           return sendJson(res, 400, { ok: false, error: '请先在 App 中设置远程访问密码' });
         }
-        if (body.username !== remoteUser || body.password !== remotePass) {
-          return sendJson(res, 401, { ok: false, error: '用户名或密码错误' });
+        if (body.password !== remotePass) {
+          return sendJson(res, 401, { ok: false, error: '密码错误' });
         }
 
         const token = generateToken();
-        _sessions.set(token, { username: body.username, createdAt: Date.now() });
-        log('info', `用户 ${body.username} 登录成功`);
+        _sessions.set(token, { username: 'admin', createdAt: Date.now() });
+        log('info', '登录成功');
         return sendJson(res, 200, { ok: true, token });
       }
 
@@ -274,6 +279,25 @@ function startRemoteServer({ store, taskRunner, mainWindowRef, appLog }) {
         // 广播设置变更到所有 SSE 客户端
         broadcast('settings-update', body);
         return sendJson(res, 200, { ok: true });
+      }
+
+      // GET /remote/voices — 读取音色列表
+      if (method === 'GET' && pathname === '/remote/voices') {
+        try {
+          const dataDir = path.join(os.homedir(), 'AntBot');
+          const raw = await fs.readFile(path.join(dataDir, 'voices.json'), 'utf-8');
+          return sendJson(res, 200, { ok: true, voices: JSON.parse(raw) });
+        } catch { return sendJson(res, 200, { ok: true, voices: [] }); }
+      }
+
+      // GET /remote/styles — 读取风格列表
+      if (method === 'GET' && pathname === '/remote/styles') {
+        try {
+          const dataDir = path.join(os.homedir(), 'AntBot');
+          const raw = await fs.readFile(path.join(dataDir, 'style-refs.json'), 'utf-8');
+          const styles = JSON.parse(raw).filter(s => s.prompt && !s.learning);
+          return sendJson(res, 200, { ok: true, styles });
+        } catch { return sendJson(res, 200, { ok: true, styles: [] }); }
       }
 
       // 404

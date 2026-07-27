@@ -54,6 +54,7 @@ composeEditVideo (smartEditor.js)     →  { outputPath }
 ## Critical Rules
 
 - **Module docs:** Read `docs/modules/*.md` before modifying any service module. Update the doc after changing module behavior.
+- **远程页面热更新:** 修改远程控制页面（remote-ui、Hub 页面）前必须先读 `docs/remote-hot-update.md`，了解热更新机制、GitHub 仓库、版本号更新流程和 checklist。
 - **No gradients:** CSS uses solid colors only. Theme color `var(--primary)` only on key interactive elements.
 - **Design system:** All UI changes MUST follow the design system defined below. Read the "Design System" section before modifying any CSS or adding new components.
 - **No `File.path`:** Electron 35 deprecated it. Use `window.antbot.getPathForFile(file)` (exposes `webUtils.getPathForFile`).

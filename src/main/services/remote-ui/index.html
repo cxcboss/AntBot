@@ -1,93 +1,120 @@
 <!DOCTYPE html>
-<html lang="zh-CN"><head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>搬运蚁 - 远程控制</title>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>搬运蚁 远程控制</title>
 <style>
-*{box-sizing:border-box;margin:0;padding:0}
-:root{--bg:#FAFAFA;--card:#FFF;--text:#0A0A0A;--muted:#78716C;--border:#E7E5E2;--primary:#0D9488;--primary-hover:#0F766E;--primary-fg:#FFF;--accent:#F0FDFA;--accent-fg:#0D9488;--destructive:#DC2626;--success:#16A34A;--radius:8px;--radius-lg:12px;--shadow:0 1px 3px rgba(0,0,0,.06)}
-@media(prefers-color-scheme:dark){:root{--bg:#09090B;--card:#111113;--text:#FAFAFA;--muted:#A1A1AA;--border:#27272A;--primary:#5EEAD4;--primary-hover:#99F6E4;--primary-fg:#042F2E;--accent:#134E4A;--accent-fg:#5EEAD4;--shadow:0 1px 3px rgba(0,0,0,.3)}}
-body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.5;overflow:hidden;height:100vh;height:100dvh}
-.app{display:flex;flex-direction:column;height:100vh;height:100dvh}
-.header{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);background:var(--card);flex-shrink:0;height:48px;z-index:20}
-.header-title{flex:1;font-size:16px;font-weight:700}
-.header-user{font-size:12px;color:var(--muted);cursor:pointer;padding:4px 8px;border-radius:var(--radius)}
-.header-user:hover{color:var(--text);background:var(--muted)}
-.conn-banner{display:none;align-items:center;gap:8px;padding:6px 12px;font-size:12px;font-weight:500;flex-shrink:0}
-.conn-banner.show{display:flex}
-.conn-banner.checking,.conn-banner.retry{background:#FEF3C7;color:#92400E}
-.conn-banner.offline{background:#FEE2E2;color:#991B1B}
-.conn-banner.ok{background:#DCFCE7;color:#166534}
-.conn-spinner{width:14px;height:14px;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;animation:spin .6s linear infinite}
-@keyframes spin{to{transform:rotate(360deg)}}
-.sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:30}
+:root{
+  --bg:#09090b;--card:#18181b;--fg:#fafafa;--muted:#a1a1aa;
+  --border:#27272a;--primary:#5eead4;--primary-hover:#99f6e4;
+  --accent:#134e4a;--accent-fg:#5eead4;
+  --destructive:#ef4444;--destructive-bg:#2d1212;
+  --success:#22c55e;--warning:#f59e0b;
+  --radius:8px;--radius-lg:12px;--radius-xl:16px;
+  --shadow:0 4px 6px -1px rgba(0,0,0,.3);
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Display","PingFang SC","Inter",sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:var(--font);background:var(--bg);color:var(--fg);font-size:13px;height:100vh;overflow:hidden}
+.header{display:flex;align-items:center;padding:8px 12px;background:var(--card);border-bottom:1px solid var(--border);height:44px;gap:8px}
+.header-title{flex:1;font-size:15px;font-weight:600;text-align:center}
+.header-device{font-size:12px;color:var(--accent-fg);cursor:pointer;padding:4px 8px;border-radius:var(--radius);transition:background 120ms}
+.header-device:hover{background:var(--accent)}
+.nav-icon{width:18px;height:18px}
+.nav-item{background:none;border:none;color:var(--fg);cursor:pointer;padding:6px;border-radius:var(--radius);transition:background 120ms;display:flex;align-items:center;gap:6px;font-size:13px}
+.nav-item:hover{background:var(--border)}
+.sidebar-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:99;display:none}
 .sidebar-overlay.show{display:block}
-.sidebar{position:fixed;left:0;top:0;bottom:0;width:240px;background:var(--card);border-right:1px solid var(--border);z-index:31;transform:translateX(-100%);transition:transform 200ms;display:flex;flex-direction:column}
+.sidebar{position:fixed;top:0;left:0;width:240px;height:100%;background:var(--card);border-right:1px solid var(--border);z-index:100;transform:translateX(-100%);transition:transform 200ms ease;display:flex;flex-direction:column}
 .sidebar.open{transform:translateX(0)}
-.sidebar-header{padding:16px;border-bottom:1px solid var(--border);font-size:16px;font-weight:700}
-.sidebar-nav{padding:8px;flex:1}
-.nav-item{display:flex;align-items:center;gap:8px;width:100%;padding:10px 12px;border-radius:var(--radius);font-size:14px;color:var(--text);background:none;border:none;cursor:pointer;transition:background 120ms}
-.nav-item:hover{background:var(--accent)}
-.nav-item.active{background:var(--accent);color:var(--accent-fg);font-weight:600}
-.nav-icon{width:18px;height:18px;opacity:.7}
-.nav-item.active .nav-icon{opacity:1}
-.content{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}
-.page{display:none;flex:1;min-height:0;overflow-y:auto;padding:12px}
-.page.active{display:flex;flex-direction:column}
-.chat{flex:1;min-height:0;overflow-y:auto;padding:12px}
+.sidebar-header{padding:16px;font-size:15px;font-weight:700;border-bottom:1px solid var(--border)}
+.sidebar-nav{flex:1;padding:8px;display:flex;flex-direction:column;gap:2px}
+.sidebar-nav .nav-item{width:100%;padding:10px 12px;border-radius:var(--radius);font-size:13px;justify-content:flex-start}
+.sidebar-nav .nav-item.active{background:var(--accent);color:var(--accent-fg)}
+.sidebar-footer{padding:12px;border-top:1px solid var(--border)}
+.sidebar-footer .nav-item{width:100%;color:var(--destructive);justify-content:center;font-size:12px}
+.content{height:calc(100vh - 44px);overflow:hidden}
+.page{display:none;height:100%;overflow-y:auto;padding:12px}
+.page.active{display:block}
+#page-main{padding:0;display:none;flex-direction:column}
+#page-main.active{display:flex}
+#page-subtitle.active,#page-remote.active{display:block}
+.form-group{margin-bottom:16px}
+.form-label{display:block;font-size:11px;font-weight:500;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px}
+.form-input{width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--fg);font-size:13px;outline:none;transition:border-color 120ms}
+.form-input:focus{border-color:var(--primary)}
+.btn{padding:8px 16px;border-radius:var(--radius);font-size:13px;font-weight:500;cursor:pointer;border:1px solid var(--border);background:var(--card);color:var(--fg);transition:all 120ms}
+.btn:hover{border-color:var(--primary)}
+.btn-primary{background:var(--primary);color:#000;border-color:var(--primary)}
+.btn-primary:hover{background:var(--primary-hover)}
+.btn-ghost{background:none;border:none;color:var(--muted)}
+.btn-ghost:hover{color:var(--fg)}
+.btn-block{width:100%;display:block}
+.btn-sm{padding:4px 10px;font-size:11px;height:28px}
+.section-title{font-size:14px;font-weight:600;margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+.slider-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.slider-label{font-size:11px;color:var(--muted);width:32px;flex-shrink:0}
+.slider-val{font-size:11px;color:var(--muted);width:36px;text-align:right;flex-shrink:0}
+input[type=range]{flex:1;height:4px;-webkit-appearance:none;background:var(--border);border-radius:2px;outline:none}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:var(--primary);cursor:pointer}
+.slider-h::-webkit-slider-thumb{background:hsl(var(--h,30),100%,50%)!important}
+.slider-s::-webkit-slider-thumb{background:hsl(var(--h,30),var(--s,100)%,50%)!important}
+.conn-banner{display:none;padding:6px 12px;font-size:11px;text-align:center;gap:6px;align-items:center;justify-content:center}
+.conn-banner.show{display:flex}
+.conn-banner.ok{background:var(--accent);color:var(--accent-fg)}
+.conn-banner.checking,.conn-banner.retry{background:#2d1f0a;color:var(--warning)}
+.conn-banner.offline{background:var(--destructive-bg);color:var(--destructive)}
+.conn-spinner{width:12px;height:12px;border:2px solid var(--border);border-top-color:var(--primary);border-radius:50%;animation:spin .6s linear infinite;display:inline-block}
+@keyframes spin{to{transform:rotate(360deg)}}
+.chat{flex:1;overflow-y:auto;padding:12px}
 .chat-stream{display:flex;flex-direction:column;gap:8px}
-.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--muted);gap:8px}
-.empty-icon{font-size:32px;opacity:.4}
-.task{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:10px 12px;box-shadow:var(--shadow);max-width:100%}
-.task-head{display:flex;align-items:center;gap:6px;margin-bottom:4px}
-.task-name{font-size:13px;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.task-badge{font-size:10px;font-weight:500;padding:2px 8px;border-radius:999px;flex-shrink:0}
-.badge-running{background:var(--accent);color:var(--accent-fg)}
-.badge-completed{background:#DCFCE7;color:var(--success)}
-.badge-failed{background:#FEE2E2;color:var(--destructive)}
-.badge-warning{background:#FEF3C7;color:#D97706}
-.badge-pending{background:var(--muted);color:var(--bg)}
-.task-msg{font-size:11px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.task-bar{height:3px;background:var(--border);border-radius:999px;margin-top:6px;overflow:hidden}
-.task-bar-fill{height:100%;background:var(--primary);border-radius:999px;transition:width .3s}
+.input-bar{border-top:1px solid var(--border);padding:8px 12px;background:var(--card);position:sticky;bottom:0}
+.input-row{display:flex;gap:8px;align-items:flex-end}
+.input-field{flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--fg);font-size:13px;resize:none;outline:none;max-height:120px;font-family:var(--font);transition:border-color 120ms}
+.input-field:focus{border-color:var(--primary)}
+.send-btn{width:36px;height:36px;border-radius:50%;background:var(--primary);border:none;color:#000;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all 120ms}
+.send-btn:disabled{opacity:.3;cursor:not-allowed}
+.chips{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}
+.chip{font-size:10px;padding:2px 8px;border-radius:999px;background:var(--accent);color:var(--accent-fg)}
+.task{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px;position:relative}
+.task-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px}
+.task-name{font-size:12px;font-weight:600}
+.task-badge{font-size:10px;padding:2px 8px;border-radius:999px;font-weight:500}
+.badge-pending{background:var(--accent);color:var(--accent-fg)}
+.badge-running{background:#2d1f0a;color:var(--warning)}
+.badge-completed{background:#0a2d12;color:var(--success)}
+.badge-warning{background:#2d1f0a;color:var(--warning)}
+.badge-failed{background:var(--destructive-bg);color:var(--destructive)}
+.task-msg{font-size:11px;color:var(--muted);margin-bottom:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.task-bar{height:4px;background:var(--border);border-radius:2px;overflow:hidden}
+.task-bar-fill{height:100%;background:var(--primary);border-radius:2px;transition:width 300ms}
 .task-bar-fill.done{background:var(--success)}
 .task-bar-fill.error{background:var(--destructive)}
-.task-actions{display:flex;gap:6px;margin-top:6px}
-.input-bar{background:var(--card);border-top:1px solid var(--border);padding:8px 12px;flex-shrink:0}
-.input-row{display:flex;gap:8px;align-items:flex-end}
-.input-field{flex:1;min-height:36px;max-height:120px;padding:8px 12px;border:1px solid var(--border);border-radius:18px;background:var(--bg);color:var(--text);font-size:14px;font-family:inherit;line-height:1.4;resize:none;outline:none}
-.input-field::placeholder{color:var(--muted)}
-.send-btn{width:36px;height:36px;border-radius:50%;background:var(--primary);color:var(--primary-fg);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all 120ms}
-.send-btn:hover{background:var(--primary-hover)}
-.send-btn:disabled{background:var(--border);color:var(--muted);cursor:not-allowed;opacity:.6}
-.chips{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}
-.chip{display:inline-flex;align-items:center;height:24px;padding:0 8px;border-radius:999px;font-size:11px;background:var(--muted);color:var(--text)}
-.form-group{margin-bottom:16px}
-.form-label{font-size:12px;color:var(--muted);margin-bottom:4px;display:block}
-.form-input{width:100%;height:40px;padding:0 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:14px;font-family:inherit}
-.form-input:focus{outline:none;border-color:var(--primary)}
-.section-title{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;margin-top:16px}
-.slider-row{display:flex;align-items:center;gap:8px;margin-bottom:6px}
-.slider-label{font-size:11px;color:var(--muted);width:28px;flex-shrink:0}
-.slider-val{font-size:11px;color:var(--muted);width:36px;text-align:right;flex-shrink:0}
-input[type=range]{flex:1;height:6px;-webkit-appearance:none;appearance:none;border-radius:3px;outline:none}
-input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:var(--card);border:2px solid var(--border);cursor:pointer;box-shadow:var(--shadow)}
-.slider-h{background:linear-gradient(to right,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)}
-.slider-s{background:linear-gradient(to right,#888,var(--primary))}
-.slider-l{background:linear-gradient(to right,#000,#888,#fff)}
-.dialog-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;align-items:center;justify-content:center}
+.task-actions{display:flex;gap:6px;margin-top:8px;justify-content:flex-end}
+.empty{text-align:center;padding:40px 16px;color:var(--muted);font-size:13px}
+.empty-icon{font-size:32px;margin-bottom:8px;opacity:.5}
+.toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:var(--card);border:1px solid var(--border);padding:8px 16px;border-radius:var(--radius);font-size:12px;z-index:200;box-shadow:var(--shadow)}
+.dialog-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center;z-index:200}
 .dialog-overlay.show{display:flex}
-.dialog{background:var(--card);border-radius:var(--radius-lg);padding:20px;max-width:320px;width:90%;box-shadow:var(--shadow)}
-.dialog-title{font-size:16px;font-weight:600;margin-bottom:8px}
+.dialog{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-xl);padding:24px;width:90%;max-width:320px;box-shadow:var(--shadow)}
+.dialog-title{font-size:15px;font-weight:600;margin-bottom:8px}
 .dialog-text{font-size:13px;color:var(--muted);margin-bottom:16px}
 .dialog-actions{display:flex;gap:8px;justify-content:flex-end}
-.btn{display:inline-flex;align-items:center;justify-content:center;height:40px;padding:0 16px;border-radius:var(--radius);font-size:14px;font-weight:500;border:none;cursor:pointer;transition:all 120ms}
-.btn-primary{background:var(--primary);color:var(--primary-fg)}
-.btn-primary:hover{opacity:.9}
-.btn-ghost{background:transparent;border:1px solid var(--border);color:var(--text)}
-.btn-ghost:hover{background:var(--muted)}
-.btn-block{width:100%}
-.toast{position:fixed;top:56px;left:50%;transform:translateX(-50%);background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:8px 16px;font-size:13px;box-shadow:var(--shadow);z-index:200;animation:fadeIn .2s}
-@keyframes fadeIn{from{opacity:0;transform:translateX(-50%) translateY(-8px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+.exit-menu{position:fixed;top:44px;right:8px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:4px;box-shadow:var(--shadow);z-index:150;display:none;min-width:160px}
+.exit-menu.show{display:block}
+.exit-menu-item{display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:var(--radius);font-size:13px;color:var(--fg);cursor:pointer;border:none;background:none;width:100%;text-align:left;transition:background 120ms}
+.exit-menu-item:hover{background:var(--border)}
+.exit-menu-item.danger{color:var(--destructive)}
+.chip-popup{position:fixed;background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:6px;box-shadow:var(--shadow);z-index:150;min-width:180px;max-height:280px;overflow-y:auto}
+.chip-popup .popup-item{display:block;width:100%;padding:8px 12px;border:none;background:none;color:var(--fg);font-size:13px;text-align:left;cursor:pointer;border-radius:var(--radius);transition:background 120ms}
+.chip-popup .popup-item:hover{background:var(--border)}
+.chip-popup .popup-item.active{background:var(--accent);color:var(--accent-fg)}
+.chip-popup .popup-slider{padding:8px 12px}
+.chip-popup .popup-slider label{display:block;font-size:11px;color:var(--muted);margin-bottom:6px}
+.chip-popup .popup-slider input[type=range]{width:100%}
+.chip-popup .popup-slider .sv{font-size:12px;color:var(--accent-fg);text-align:center;margin-top:4px}
+.chip-overlay{position:fixed;inset:0;z-index:149}
 </style>
 </head>
 <body>
@@ -99,21 +126,32 @@ let token=localStorage.getItem('antbot-token');
 let tasks=[];
 let sseSource=null;
 let currentPage='main';
-let currentUser=localStorage.getItem('antbot-user')||'';
 let userPassword=localStorage.getItem('antbot-pass')||'';
+let deviceName=localStorage.getItem('antbot-device')||'';
 let consecutiveErrors=0;
 let reconnectTimer=null;
 
+// 从 URL 参数获取 Hub 传递的 token 和设备名
+const urlParams=new URLSearchParams(window.location.search);
+const hubToken=urlParams.get('hub_token');
+const hubDevice=urlParams.get('device_name');
+if(hubToken){
+  token=hubToken;
+  localStorage.setItem('antbot-token',token);
+  if(hubDevice){deviceName=hubDevice;localStorage.setItem('antbot-device',deviceName);}
+  // 清除 URL 参数
+  window.history.replaceState({},'',window.location.pathname);
+}
+
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 
-async function login(username,password){
+async function login(password){
   try{
-    const res=await fetch(API+'/remote/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password})});
+    const res=await fetch(API+'/remote/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:'admin',password})});
     const data=await res.json();
     if(data.ok){
-      token=data.token;currentUser=username;userPassword=password;
+      token=data.token;userPassword=password;
       localStorage.setItem('antbot-token',token);
-      localStorage.setItem('antbot-user',username);
       localStorage.setItem('antbot-pass',password);
       initApp();
     }else{showToast(data.error||'登录失败')}
@@ -121,13 +159,22 @@ async function login(username,password){
 }
 
 function logout(){
-  token=null;currentUser='';userPassword='';
+  token=null;userPassword='';
   if(reconnectTimer)clearTimeout(reconnectTimer);
   if(sseSource)sseSource.close();
   localStorage.removeItem('antbot-token');
-  localStorage.removeItem('antbot-user');
   localStorage.removeItem('antbot-pass');
   renderLogin();
+}
+
+function exitToHub(){
+  token=null;userPassword='';
+  if(reconnectTimer)clearTimeout(reconnectTimer);
+  if(sseSource)sseSource.close();
+  localStorage.removeItem('antbot-token');
+  localStorage.removeItem('antbot-pass');
+  localStorage.removeItem('antbot-device');
+  window.location.href=HUB_URL;
 }
 
 async function api(method,path,body){
@@ -153,41 +200,43 @@ function connectSSE(){
     if(i>=0)tasks[i]={...tasks[i],...t};else tasks.push(t);
     renderTasks();
   });
-  sseSource.addEventListener('status',e=>{const d=JSON.parse(e.data);tasks=d.tasks||[];renderTasks();});
+  sseSource.addEventListener('status',e=>{
+    const s=JSON.parse(e.data);
+    if(s.tasks){tasks=s.tasks;renderTasks();}
+  });
   sseSource.addEventListener('settings-update',e=>{
-    try{
-      const d=JSON.parse(e.data);
-      if(d?.style){
-        if(d.style.subtitleTextColor)setColorFromHex('color',d.style.subtitleTextColor);
-        if(d.style.subtitleStrokeColor)setColorFromHex('stroke',d.style.subtitleStrokeColor);
-        if(d.style.subtitlePositionPercent!=null){const el=document.getElementById('sub-position');if(el)el.value=d.style.subtitlePositionPercent;}
-      }
-      if(d?.editDefaults||d?.voiceClone||d?.retry)loadSettings();
-      showToast('设置已同步');
-    }catch{}
+    const patch=JSON.parse(e.data);
+    if(currentSettings){
+      if(patch.editDefaults)currentSettings.editDefaults={...currentSettings.editDefaults,...patch.editDefaults};
+      if(patch.voiceClone)currentSettings.voiceClone={...currentSettings.voiceClone,...patch.voiceClone};
+      if(patch.retry)currentSettings.retry={...currentSettings.retry,...patch.retry};
+      renderChips(currentSettings);
+    }
   });
   sseSource.onerror=()=>{
-    consecutiveErrors++;sseSource.close();sseSource=null;
-    if(consecutiveErrors>=3){showBanner('checking');reconnectViaHub();}
-    else{showBanner('retry');reconnectTimer=setTimeout(connectSSE,Math.min(consecutiveErrors*2000,10000));}
+    consecutiveErrors++;
+    if(consecutiveErrors>=3){showBanner('retry');reconnectViaHub();}
+    else if(consecutiveErrors>=1){showBanner('checking')}
   };
 }
 
 async function reconnectViaHub(){
+  if(reconnectTimer)clearTimeout(reconnectTimer);
+  if(!deviceName)return;
   try{
-    const res=await fetch(HUB_URL+'/api/tunnel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:currentUser,password:userPassword})});
-    const d=await res.json();
-    if(d.ok&&d.tunnelUrl){
-      const newApi=d.tunnelUrl.replace(/\/$/,'');
-      if(newApi!==API){
-        showBanner('newurl');
-        const lr=await fetch(newApi+'/remote/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:currentUser,password:userPassword})});
-        const ld=await lr.json();
-        if(ld.ok){token=ld.token;localStorage.setItem('antbot-token',token);window.location.href=newApi;return;}
+    const res=await fetch(HUB_URL+'/api/devices');
+    const data=await res.json();
+    if(data.ok){
+      const dev=data.devices.find(d=>d.deviceName===deviceName);
+      if(dev&&dev.tunnelUrl&&dev.tunnelUrl!==API){
+        showBanner('newurl');API=dev.tunnelUrl;
+        setTimeout(()=>{const sep=API.includes('?')?'&':'?';window.location.href=API+sep+'hub_token='+(token||'')+'&device_name='+encodeURIComponent(deviceName)},1500);
+        return;
       }
-      showBanner('retry');reconnectTimer=setTimeout(connectSSE,3000);
-    }else showBanner('offline');
-  }catch{showBanner('offline')}
+    }
+  }catch{}
+  showBanner('offline');
+  reconnectTimer=setTimeout(reconnectViaHub,15000);
 }
 
 function showBanner(st){
@@ -203,22 +252,20 @@ function renderLogin(){
   document.getElementById('app').innerHTML=
     '<div style="display:flex;align-items:center;justify-content:center;height:100vh;padding:24px">'+
     '<div style="width:100%;max-width:360px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:32px 24px;box-shadow:var(--shadow)">'+
-    '<div style="text-align:center;font-size:32px;margin-bottom:16px">🐜</div>'+
     '<div style="text-align:center;font-size:18px;font-weight:700;margin-bottom:4px">搬运蚁远程控制</div>'+
-    '<div style="text-align:center;font-size:13px;color:var(--muted);margin-bottom:24px">输入账号密码连接到你的电脑</div>'+
+    (deviceName?'<div style="text-align:center;font-size:13px;color:var(--accent-fg);margin-bottom:20px">'+esc(deviceName)+'</div>':'<div style="text-align:center;font-size:13px;color:var(--muted);margin-bottom:20px">输入密码连接到设备</div>')+
     '<form id="login-form">'+
-    '<div style="margin-bottom:12px"><input class="form-input" id="login-user" type="text" placeholder="用户名" autocomplete="username" style="width:100%"></div>'+
-    '<div style="margin-bottom:16px"><input class="form-input" id="login-pass" type="password" placeholder="密码" autocomplete="current-password" style="width:100%"></div>'+
-    '<button class="btn btn-primary btn-block" type="submit">登录</button>'+
+    '<div style="margin-bottom:16px"><input class="form-input" id="login-pass" type="password" placeholder="访问密码" autocomplete="current-password" style="width:100%"></div>'+
+    '<button class="btn btn-primary btn-block" type="submit">连接</button>'+
     '</form><div id="login-error" style="color:var(--destructive);font-size:12px;text-align:center;margin-top:8px"></div>'+
     '</div></div>';
   document.getElementById('login-form').addEventListener('submit',e=>{
     e.preventDefault();
-    const u=document.getElementById('login-user').value.trim();
     const p=document.getElementById('login-pass').value.trim();
-    if(!u||!p){document.getElementById('login-error').textContent='请输入用户名和密码';return;}
-    login(u,p);
+    if(!p){document.getElementById('login-error').textContent='请输入密码';return;}
+    login(p);
   });
+  document.getElementById('login-pass')?.focus();
 }
 
 function initApp(){
@@ -234,12 +281,15 @@ function renderAppShell(){
 <div class="header">
   <button class="nav-item" id="sidebar-toggle" style="width:auto;padding:6px;flex-shrink:0"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" x2="21" y1="6" y2="6"/><line x1="3" x2="21" y1="12" y2="12"/><line x1="3" x2="21" y1="18" y2="18"/></svg></button>
   <span class="header-title" id="header-title">主控</span>
-  <span class="header-user" id="header-user">${esc(currentUser)}</span>
+  <span class="header-device" id="header-device">${esc(deviceName||'设备')}</span>
 </div>
 <div class="conn-banner" id="conn-banner"><span class="conn-spinner"></span><span id="conn-text"></span></div>
+<div class="exit-menu" id="exit-menu">
+  <button class="exit-menu-item danger" id="exit-btn">退出到设备列表</button>
+</div>
 <div class="sidebar-overlay" id="sidebar-overlay"></div>
 <div class="sidebar" id="sidebar">
-  <div class="sidebar-header">🐜 搬运蚁</div>
+  <div class="sidebar-header">搬运蚁</div>
   <nav class="sidebar-nav">
     <button class="nav-item active" data-page="main"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>主控</button>
     <button class="nav-item" data-page="subtitle"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>字幕</button>
@@ -268,7 +318,6 @@ function renderAppShell(){
   </div>
   <div class="page" id="page-remote">
     <div class="section-title">远程设置</div>
-    <div class="form-group"><label class="form-label">用户名</label><input class="form-input" id="remote-user" type="text" /></div>
     <div class="form-group"><label class="form-label">密码</label><input class="form-input" id="remote-pass" type="password" /></div>
     <button class="btn btn-primary btn-block" id="remote-save-btn" type="button">保存并重新登录</button>
   </div>
@@ -279,18 +328,22 @@ function renderAppShell(){
     <button class="send-btn" id="send-btn" type="button" disabled><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg></button>
   </div>
   <div class="chips" id="chips"></div>
-</div>
-<div class="dialog-overlay" id="logout-dialog">
-  <div class="dialog">
-    <div class="dialog-title">退出登录</div>
-    <div class="dialog-text">确认退出当前账号？</div>
-    <div class="dialog-actions"><button class="btn btn-ghost" id="logout-cancel">取消</button><button class="btn btn-primary" id="logout-confirm">确认退出</button></div>
-  </div>
 </div>`;
   return h;
 }
 
 function bindEvents(){
+  // 设备名点击 → 退出菜单
+  document.getElementById('header-device')?.addEventListener('click',e=>{
+    e.stopPropagation();
+    const menu=document.getElementById('exit-menu');
+    menu?.classList.toggle('show');
+  });
+  document.addEventListener('click',()=>{
+    document.getElementById('exit-menu')?.classList.remove('show');
+  });
+  document.getElementById('exit-btn')?.addEventListener('click',exitToHub);
+
   document.getElementById('sidebar-toggle')?.addEventListener('click',()=>{
     document.getElementById('sidebar')?.classList.toggle('open');
     document.getElementById('sidebar-overlay')?.classList.toggle('show');
@@ -301,16 +354,6 @@ function bindEvents(){
   });
   document.querySelectorAll('.nav-item[data-page]').forEach(btn=>{
     btn.addEventListener('click',()=>switchPage(btn.dataset.page));
-  });
-  document.getElementById('header-user')?.addEventListener('click',()=>{
-    document.getElementById('logout-dialog')?.classList.add('show');
-  });
-  document.getElementById('logout-cancel')?.addEventListener('click',()=>{
-    document.getElementById('logout-dialog')?.classList.remove('show');
-  });
-  document.getElementById('logout-confirm')?.addEventListener('click',()=>{
-    document.getElementById('logout-dialog')?.classList.remove('show');
-    logout();
   });
   const input=document.getElementById('task-input');
   const sendBtn=document.getElementById('send-btn');
@@ -335,10 +378,9 @@ function bindEvents(){
     showToast('已保存并同步');
   });
   document.getElementById('remote-save-btn')?.addEventListener('click',async()=>{
-    const u=document.getElementById('remote-user')?.value?.trim();
     const p=document.getElementById('remote-pass')?.value?.trim();
     if(!p){showToast('请设置密码');return;}
-    await api('POST','/remote/settings',{remote:{username:u,password:p}});
+    await api('POST','/remote/settings',{remote:{password:p}});
     showToast('已保存，需重新登录');setTimeout(logout,1000);
   });
   setupColorPicker('color','#FFA100');
@@ -358,10 +400,89 @@ function switchPage(page){
   if(page==='remote')loadRemoteSettings();
 }
 
-async function loadSettings(){const d=await api('GET','/remote/settings');if(d)renderChips(d);}
+async function loadSettings(){const d=await api('GET','/remote/settings');if(d){currentSettings=d;renderChips(d);}}
+let currentSettings=null;
+let activePopup=null;let activeOverlay=null;
+function closePopup(){if(activePopup){activePopup.remove();activePopup=null}if(activeOverlay){activeOverlay.remove();activeOverlay=null}}
 function renderChips(s){
   const c=document.getElementById('chips');if(!c)return;
-  c.innerHTML='<span class="chip">'+esc(s?.editDefaults?.style||'未设置')+'</span><span class="chip">'+esc(s?.voiceClone?.profileName||'未设置')+'</span><span class="chip">重试'+(s?.retry?.failedTaskRetries??0)+'次</span>';
+  const style=s?.editDefaults?.style||'未设置';
+  const voice=s?.voiceClone?.profileName||'未设置';
+  const retry=Math.max(0,Number(s?.retry?.failedTaskRetries??0));
+  c.innerHTML='<button class="chip" data-chip="style">'+esc(style)+'</button>'
+    +'<button class="chip" data-chip="voice">'+esc(voice)+'</button>'
+    +'<span class="chip-spacer"></span>'
+    +'<button class="chip" data-chip="retry">重试'+retry+'次</button>';
+  c.querySelectorAll('[data-chip]').forEach(btn=>{
+    btn.addEventListener('click',e=>{e.stopPropagation();showChipPopup(btn.dataset.chip,btn)});
+  });
+}
+function showChipPopup(type,anchor){
+  closePopup();
+  const overlay=document.createElement('div');overlay.className='chip-overlay';
+  overlay.addEventListener('click',closePopup);
+  document.body.appendChild(overlay);activeOverlay=overlay;
+  const popup=document.createElement('div');popup.className='chip-popup';
+  const rect=anchor.getBoundingClientRect();
+  popup.style.left=Math.max(8,rect.left)+'px';
+  popup.style.bottom=(window.innerHeight-rect.top+6)+'px';
+  popup.style.maxHeight=Math.min(280,rect.top-20)+'px';
+
+  if(type==='style'){
+    popup.innerHTML='<div style="padding:6px 12px;font-size:11px;color:var(--muted)">加载中...</div>';
+    document.body.appendChild(popup);activePopup=popup;
+    api('GET','/remote/styles').then(d=>{
+      const styles=d?.styles||[];
+      if(!styles.length){popup.innerHTML='<div style="padding:8px 12px;font-size:12px;color:var(--muted)">暂无风格，请先在App中学习</div>';return;}
+      const cur=currentSettings?.editDefaults?.style||'';
+      popup.innerHTML=styles.map(s=>'<button class="popup-item'+(s.name===cur?' active':'')+'" data-val="'+esc(s.name)+'">'+esc(s.name)+'</button>').join('');
+      popup.querySelectorAll('.popup-item').forEach(btn=>{
+        btn.addEventListener('click',async()=>{
+          const val=btn.dataset.val;
+          await api('POST','/remote/settings',{editDefaults:{...currentSettings?.editDefaults,style:val}});
+          currentSettings.editDefaults={...currentSettings?.editDefaults,style:val};
+          renderChips(currentSettings);closePopup();showToast('风格: '+val);
+        });
+      });
+    });
+    return;
+  }
+
+  if(type==='voice'){
+    popup.innerHTML='<div style="padding:6px 12px;font-size:11px;color:var(--muted)">加载中...</div>';
+    document.body.appendChild(popup);activePopup=popup;
+    api('GET','/remote/voices').then(d=>{
+      const voices=d?.voices||[];
+      if(!voices.length){popup.innerHTML='<div style="padding:8px 12px;font-size:12px;color:var(--muted)">暂无音色，请先在App中克隆</div>';return;}
+      const cur=currentSettings?.voiceClone?.voiceId||'';
+      popup.innerHTML=voices.map(v=>'<button class="popup-item'+(v.id===cur?' active':'')+'" data-vid="'+esc(v.id)+'" data-vname="'+esc(v.name)+'">'+esc(v.name)+'</button>').join('');
+      popup.querySelectorAll('.popup-item').forEach(btn=>{
+        btn.addEventListener('click',async()=>{
+          const vid=btn.dataset.vid,vname=btn.dataset.vname;
+          await api('POST','/remote/settings',{voiceClone:{...currentSettings?.voiceClone,voiceId:vid,profileName:vname}});
+          currentSettings.voiceClone={...currentSettings?.voiceClone,voiceId:vid,profileName:vname};
+          renderChips(currentSettings);closePopup();showToast('音色: '+vname);
+        });
+      });
+    });
+    return;
+  }
+
+  if(type==='retry'){
+    const cur=Math.max(0,Number(currentSettings?.retry?.failedTaskRetries??0));
+    popup.innerHTML='<div class="popup-slider"><label>重试次数</label><input type="range" min="0" max="4" step="1" value="'+cur+'"><div class="sv">'+(cur===0?'不重试':cur+'次')+'</div></div>';
+    document.body.appendChild(popup);activePopup=popup;
+    const range=popup.querySelector('input[type=range]');
+    const val=popup.querySelector('.sv');
+    range.addEventListener('input',()=>{const v=Number(range.value);val.textContent=v===0?'不重试':v+'次'});
+    range.addEventListener('change',async()=>{
+      const v=Number(range.value);
+      await api('POST','/remote/settings',{retry:{failedTaskRetries:v}});
+      currentSettings.retry={failedTaskRetries:v};
+      renderChips(currentSettings);closePopup();showToast(v===0?'不重试':'重试 '+v+' 次');
+    });
+    return;
+  }
 }
 async function loadSubtitleSettings(){
   const d=await api('GET','/remote/settings');if(!d)return;const s=d?.style||{};
@@ -370,7 +491,6 @@ async function loadSubtitleSettings(){
 }
 async function loadRemoteSettings(){
   const d=await api('GET','/remote/credentials');if(!d)return;
-  const u=document.getElementById('remote-user');if(u)u.value=d.username||'';
   const p=document.getElementById('remote-pass');if(p)p.value=d.password||'';
 }
 
@@ -407,8 +527,8 @@ function renderTasks(){
     const barC=st==='completed'?'done':st==='failed'?'error':'';
     const msg=t.message||'';
     let acts='';
-    if(st==='failed')acts+='<button class="btn btn-ghost" style="height:28px;padding:0 10px;font-size:11px" data-action="retry" data-id="'+t.id+'">重试</button>';
-    if(['pending','queued','running'].includes(st))acts+='<button class="btn btn-ghost" style="height:28px;padding:0 10px;font-size:11px" data-action="stop" data-id="'+t.id+'">停止</button>';
+    if(st==='failed')acts+='<button class="btn btn-ghost btn-sm" data-action="retry" data-id="'+t.id+'">重试</button>';
+    if(['pending','queued','running'].includes(st))acts+='<button class="btn btn-ghost btn-sm" data-action="stop" data-id="'+t.id+'">停止</button>';
     return '<div class="task"><div class="task-head"><span class="task-name">'+esc(name)+'</span><span class="task-badge '+bc+'">'+bt+'</span></div>'+
       (t.isOriginal?'<div style="margin-top:4px"><span style="font-size:10px;padding:1px 6px;border-radius:999px;background:var(--accent);color:var(--accent-fg)">原创</span></div>':'')+
       (msg?'<div class="task-msg">'+esc(msg)+'</div>':'')+

@@ -328,6 +328,31 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
   ipcMain.handle('task:stop-one', async (_event, taskId) => taskRunner.stopTask(taskId, {}));
   ipcMain.handle('task:resume-one', async (_event, payload) => taskRunner.resumeTask(payload?.taskId, {}, payload?.task || null));
 
+  ipcMain.handle('task:republish', async (_event, taskId) => {
+    try {
+      const { publishVideo } = require('./services/publisher');
+      const settings = await store.getSettings();
+      // 找到任务信息
+      const row = taskRunner.progressRows?.find(r => r.id === taskId);
+      const historyItem = (await store.getHistory())?.flatMap(h => h.items || []).find(i => i.id === taskId);
+      const outputPath = row?.outputPath || historyItem?.outputPath;
+      if (!outputPath) return { ok: false, error: '未找到视频文件路径' };
+      const publishEnabled = settings?.publish?.enabled !== false;
+      if (!publishEnabled) return { ok: false, error: '自动发布已关闭' };
+      // 更新状态
+      taskRunner.setTaskState(taskId, { status: 'running', step: '发布', progress: 95, message: '重新发布中...' });
+      const task = { id: taskId, rawLine: row?.rawLine || historyItem?.rawLine || '', publishCopy: row?.publishCopy || historyItem?.publishCopy || '', publishTopics: row?.publishTopics || historyItem?.publishTopics || [], platforms: row?.platforms || historyItem?.platforms || [] };
+      const result = await publishVideo({ task, settings, outputPath, log: (msg) => appLog('info', `[republish] ${msg}`) });
+      const publishedPlatforms = result?.platforms || [];
+      const platformNames = publishedPlatforms.map(p => p === 'videoChannel' ? '视频号' : '抖音').join('、');
+      taskRunner.setTaskState(taskId, { status: 'completed', progress: 100, step: '完成', message: platformNames ? `已发布到 ${platformNames}` : '发布完成' });
+      return { ok: true };
+    } catch (e) {
+      taskRunner.setTaskState(taskId, { status: 'warning', step: '部分完成', message: `发布失败: ${e.message}` });
+      return { ok: false, error: e.message };
+    }
+  });
+
   ipcMain.handle('publish:bridge-status', async () => {
     const { createBrowserPublishBridge } = require('./services/browserPublishBridge');
     const settings = await store.getSettings();
@@ -962,10 +987,10 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
     await fs.writeFile(REMOTE_CREDS_PATH, JSON.stringify(creds, null, 2));
   }
 
-  ipcMain.handle('remote:start', async (_event, { username, password } = {}) => {
+  ipcMain.handle('remote:start', async (_event, { password, deviceName } = {}) => {
     // 保存凭证到独立文件
     if (password) {
-      await writeRemoteCreds({ username: username || 'admin', password, autoStart: true });
+      await writeRemoteCreds({ password, deviceName: deviceName || '', autoStart: true });
     }
     if (!remoteServerStarted) {
       startRemoteServer({ store, taskRunner, mainWindowRef, appLog });
@@ -975,9 +1000,10 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
   });
 
   ipcMain.handle('remote:stop', async () => {
+    const creds = await readRemoteCreds();
     stopRemoteServer();
     remoteServerStarted = false;
-    tunnelManager.stopTunnel();
+    tunnelManager.stopTunnel(creds.deviceName || creds.username);
     return { ok: true };
   });
 
@@ -995,8 +1021,7 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
           if (win && !win.isDestroyed()) win.webContents.send('remote:tunnel-status', status);
         },
         log: appLog,
-        username: creds.username,
-        password: creds.password,
+        deviceName: creds.deviceName || creds.username || os.hostname(),
       });
       return { ok: true, url: result.url };
     } catch (e) {
@@ -1005,7 +1030,8 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
   });
 
   ipcMain.handle('remote:stop-tunnel', async () => {
-    tunnelManager.stopTunnel();
+    const creds = await readRemoteCreds();
+    tunnelManager.stopTunnel(creds.deviceName || creds.username);
     return { ok: true };
   });
 
@@ -1032,7 +1058,9 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
   });
 
   ipcMain.handle('remote:get-credentials', async () => {
-    return await readRemoteCreds();
+    const creds = await readRemoteCreds();
+    if (!creds.deviceName) creds.deviceName = os.hostname();
+    return creds;
   });
 
   ipcMain.handle('remote:update-credentials', async (_event, updates) => {
@@ -1051,6 +1079,44 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
       return { ok: false, error: e.message };
     }
   });
+
+  // ── Update system ──
+  const updater = require('./services/appUpdater');
+  updater.setLogger(appLog);
+
+  ipcMain.handle('update:check-all', async () => {
+    try { return await updater.checkAllUpdates(); } catch (e) { return { error: e.message }; }
+  });
+
+  ipcMain.handle('update:download-app', async (_event, downloadUrl) => {
+    try { return await updater.downloadAppUpdate(downloadUrl); } catch (e) { return { ok: false, error: e.message }; }
+  });
+
+  ipcMain.handle('update:install-app', async (_event, zipPath) => {
+    try { return await updater.installAppUpdate(zipPath); } catch (e) { return { ok: false, error: e.message }; }
+  });
+
+  ipcMain.handle('update:execute', async (_event, scriptPath) => {
+    try { return updater.executeUpdate(scriptPath); } catch (e) { return { ok: false, error: e.message }; }
+  });
+
+  ipcMain.handle('update:download-plugin', async (_event, downloadUrl) => {
+    try { return await updater.downloadPluginUpdate(downloadUrl); } catch (e) { return { ok: false, error: e.message }; }
+  });
+
+  ipcMain.handle('update:install-plugin', async (_event, zipPath) => {
+    try { return await updater.installPluginUpdate(zipPath); } catch (e) { return { ok: false, error: e.message }; }
+  });
+
+  ipcMain.handle('update:get-app-version', async () => {
+    try { return await updater.getAppVersion(); } catch { return '0.0.0'; }
+  });
+
+  ipcMain.handle('update:get-plugin-version', async () => {
+    try { return await updater.getPluginVersion(); } catch { return '0.0.0'; }
+  });
+
+  ipcMain.handle('app:quit', async () => { app.quit(); });
 
   async function getModelsDir() {
     const settings = await store.getSettings();

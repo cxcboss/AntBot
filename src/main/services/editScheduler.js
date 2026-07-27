@@ -163,13 +163,14 @@ class EditScheduler {
     if (ctrl) ctrl.abort();
     t.status = 'cancelled';
     t.message = '已取消';
+    this.abortControllers.delete(id);
+    this.onTaskUpdate(t);
+    this.saveState();
+    // 异步清理临时文件，不阻塞状态通知
     await this.artifacts.cleanupTaskCache(t);
     t.tmpDir = '';
     t.srtPath = '';
     t.srtContent = '';
-    this.abortControllers.delete(id);
-    this.onTaskUpdate(t);
-    this.saveState();
     this._maybeShutdownVoicebox();
   }
 

@@ -105,6 +105,7 @@ const BASE_DEFAULT_SETTINGS = {
     enabled: false,
     port: 17888,
     password: '',
+    deviceName: '',
     publicMode: 'off',
     cloudflaredPath: ''
   },
