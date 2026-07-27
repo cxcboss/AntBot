@@ -1080,6 +1080,30 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
     }
   });
 
+  ipcMain.handle('remote:get-local-version', async () => {
+    try {
+      const updater = require('./services/remoteUpdater');
+      return await updater.getLocalVersion();
+    } catch { return { version: '0.0.0' }; }
+  });
+
+  ipcMain.handle('remote:check-update', async () => {
+    try {
+      const updater = require('./services/remoteUpdater');
+      updater.setLogger(appLog);
+      const result = await updater.checkForUpdates();
+      return { hasUpdate: result.hasUpdate, latestVersion: result.remoteVersion, currentVersion: result.localVersion, changelog: '', downloadUrl: '' };
+    } catch (e) { return { hasUpdate: false, error: e.message }; }
+  });
+
+  ipcMain.handle('remote:do-update', async () => {
+    try {
+      const updater = require('./services/remoteUpdater');
+      updater.setLogger(appLog);
+      return await updater.autoUpdate();
+    } catch (e) { return { ok: false, error: e.message }; }
+  });
+
   // ── Update system ──
   const updater = require('./services/appUpdater');
   updater.setLogger(appLog);

@@ -49,6 +49,9 @@ contextBridge.exposeInMainWorld('antbot', {
   remoteGenerateQr: (text) => ipcRenderer.invoke('remote:generate-qr', text),
   remoteGetCredentials: () => ipcRenderer.invoke('remote:get-credentials'),
   remoteUpdateCredentials: (updates) => ipcRenderer.invoke('remote:update-credentials', updates),
+  remoteGetLocalVersion: () => ipcRenderer.invoke('remote:get-local-version'),
+  remoteCheckUpdate: () => ipcRenderer.invoke('remote:check-update'),
+  remoteDoUpdate: () => ipcRenderer.invoke('remote:do-update'),
   // Update system
   checkAllUpdates: () => ipcRenderer.invoke('update:check-all'),
   downloadAppUpdate: (url) => ipcRenderer.invoke('update:download-app', url),

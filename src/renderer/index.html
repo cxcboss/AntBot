@@ -16,7 +16,7 @@
     <nav class="sidebar" id="sidebar">
       <div class="sidebar-header">
         <span class="sidebar-logo">搬运蚁</span>
-        <span class="sidebar-ver"><span id="app-badge"></span><button class="sidebar-update" id="check-update-btn" type="button">更新</button></span>
+        <span class="sidebar-ver"><span id="app-badge"></span></span>
       </div>
 
       <!-- 侧边栏标签切换 -->
@@ -34,6 +34,7 @@
         <button class="sb-btn sb-feat" data-feat="remote" type="button"><span class="icon" data-icon="globe"></span><span>远程</span></button>
         <button class="sb-btn sb-feat" data-feat="style-ref" type="button"><span class="icon" data-icon="sparkle"></span><span>风格参考</span></button>
         <button class="sb-btn sb-feat" data-feat="subtitle-voice" type="button"><span class="icon" data-icon="mic"></span><span>字幕与音色</span></button>
+        <button class="sb-btn sb-feat" data-feat="update" type="button"><span class="icon" data-icon="arrowUpCircle"></span><span>更新</span></button>
         <div style="flex:1"></div>
         <button class="sb-btn sb-feat" data-feat="settings" type="button"><span class="icon" data-icon="settings"></span><span>设置</span></button>
       </div>
@@ -278,16 +279,6 @@
                 <button class="btn btn-primary btn-block" id="remote-save-btn" type="button">保存并启用</button>
               </div>
 
-              <div class="sv-card" style="margin-top:12px">
-                <div class="sv-card-row">
-                  <span class="sv-card-label">远程页面版本</span>
-                  <span class="sv-card-value" id="remote-ui-version">检查中...</span>
-                </div>
-                <div style="padding:4px 0 8px">
-                  <button class="btn btn-sm btn-ghost" id="remote-check-update-btn" type="button">检查更新</button>
-                </div>
-              </div>
-
               <div class="sv-note" id="remote-note">设置设备名称和密码后点击保存，再开启远程开关。扫描二维码或复制链接打开远程控制中心，在网页上选择设备并输入密码即可操控。</div>
             </div>
           </div>
@@ -365,6 +356,90 @@
             </div>
           </div>
         </div>
+
+        <!-- 更新页面 -->
+        <div class="feat-view" id="view-update">
+          <div class="sv-scroll">
+            <!-- 浏览器插件更新 -->
+            <div class="sv-block">
+              <h3 class="sv-title">浏览器插件更新</h3>
+              <p class="sv-desc">管理本地浏览器插件版本</p>
+              <div class="update-item" id="upd-plugin">
+                <div class="update-meta">
+                  <span class="update-ver-label">当前版本</span>
+                  <span class="update-ver" id="upd-plugin-current">-</span>
+                  <span class="update-ver-label" id="upd-plugin-latest-label" style="display:none">最新版本</span>
+                  <span class="update-ver accent" id="upd-plugin-latest" style="display:none">-</span>
+                </div>
+                <button class="btn btn-sm btn-ghost" id="upd-plugin-check-btn" type="button">检查更新</button>
+                <div class="update-changelog hidden" id="upd-plugin-changelog"></div>
+                <div class="update-actions hidden" id="upd-plugin-actions">
+                  <div class="update-size" id="upd-plugin-size"></div>
+                  <button class="btn btn-primary btn-sm" id="upd-plugin-download-btn" type="button">下载并安装</button>
+                  <div class="update-progress hidden" id="upd-plugin-progress">
+                    <div class="update-progress-bar"><div class="update-progress-fill" id="upd-plugin-bar"></div></div>
+                    <span class="update-progress-text" id="upd-plugin-progress-text">0%</span>
+                  </div>
+                </div>
+                <div class="update-log" id="upd-plugin-log"></div>
+              </div>
+            </div>
+
+            <div class="sv-sep"></div>
+
+            <!-- 远程页面更新 -->
+            <div class="sv-block">
+              <h3 class="sv-title">远程页面更新</h3>
+              <p class="sv-desc">更新远程控制界面（无需重启 App）</p>
+              <div class="update-item" id="upd-remote">
+                <div class="update-meta">
+                  <span class="update-ver-label">当前版本</span>
+                  <span class="update-ver" id="upd-remote-current">-</span>
+                  <span class="update-ver-label" id="upd-remote-latest-label" style="display:none">最新版本</span>
+                  <span class="update-ver accent" id="upd-remote-latest" style="display:none">-</span>
+                </div>
+                <button class="btn btn-sm btn-ghost" id="upd-remote-check-btn" type="button">检查更新</button>
+                <div class="update-changelog hidden" id="upd-remote-changelog"></div>
+                <div class="update-actions hidden" id="upd-remote-actions">
+                  <div class="update-size" id="upd-remote-size"></div>
+                  <button class="btn btn-primary btn-sm" id="upd-remote-download-btn" type="button">下载并安装</button>
+                  <div class="update-progress hidden" id="upd-remote-progress">
+                    <div class="update-progress-bar"><div class="update-progress-fill" id="upd-remote-bar"></div></div>
+                    <span class="update-progress-text" id="upd-remote-progress-text">0%</span>
+                  </div>
+                </div>
+                <div class="update-log" id="upd-remote-log"></div>
+              </div>
+            </div>
+
+            <div class="sv-sep"></div>
+
+            <!-- App 更新 -->
+            <div class="sv-block">
+              <h3 class="sv-title">App 更新</h3>
+              <p class="sv-desc">更新搬运蚁应用本体（需要重启）</p>
+              <div class="update-item" id="upd-app">
+                <div class="update-meta">
+                  <span class="update-ver-label">当前版本</span>
+                  <span class="update-ver" id="upd-app-current">-</span>
+                  <span class="update-ver-label" id="upd-app-latest-label" style="display:none">最新版本</span>
+                  <span class="update-ver accent" id="upd-app-latest" style="display:none">-</span>
+                </div>
+                <button class="btn btn-sm btn-ghost" id="upd-app-check-btn" type="button">检查更新</button>
+                <div class="update-changelog hidden" id="upd-app-changelog"></div>
+                <div class="update-actions hidden" id="upd-app-actions">
+                  <div class="update-size" id="upd-app-size"></div>
+                  <button class="btn btn-primary btn-sm" id="upd-app-download-btn" type="button">下载并安装</button>
+                  <div class="update-progress hidden" id="upd-app-progress">
+                    <div class="update-progress-bar"><div class="update-progress-fill" id="upd-app-bar"></div></div>
+                    <span class="update-progress-text" id="upd-app-progress-text">0%</span>
+                  </div>
+                </div>
+                <div class="update-log" id="upd-app-log"></div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </main>
   </div>
@@ -431,17 +506,6 @@
         <button type="button" id="voicebox-reset-btn" class="btn btn-ghost"><span class="icon" data-icon="trash"></span>重置环境</button>
         <button type="button" id="voicebox-install-btn" class="btn btn-primary"><span class="icon" data-icon="download"></span>安装依赖</button>
       </div>
-
-      <div class="s-divider"></div>
-
-      <div class="s-section-label">检查更新</div>
-      <div class="s-row"><span class="s-label">App 版本</span><span id="settings-app-version" class="s-path">-</span></div>
-      <div class="s-row"><span class="s-label">插件版本</span><span id="settings-plugin-version" class="s-path">-</span></div>
-      <div class="s-row"><span class="s-label">远程页面版本</span><span id="settings-remote-ui-version" class="s-path">-</span></div>
-      <div class="s-row">
-        <button type="button" id="settings-check-update-btn" class="btn btn-primary"><span class="icon" data-icon="refresh"></span>检查更新</button>
-      </div>
-      <div id="update-status" style="font-size:12px;color:var(--muted-foreground);margin-top:4px"></div>
 
     </div>
   </div></dialog>

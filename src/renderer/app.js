@@ -86,12 +86,13 @@ function switchFeature(feat){
   const btn=$(`.sb-feat[data-feat="${feat}"]`);
   if(view)view.classList.add('active');
   if(btn)btn.classList.add('active');
-  const titles={main:'主控',edit:'剪辑',publish:'发布',download:'下载',remote:'远程','style-ref':'风格参考','subtitle-voice':'字幕与音色'};
+  const titles={main:'主控',edit:'剪辑',publish:'发布',download:'下载',remote:'远程','style-ref':'风格参考','subtitle-voice':'字幕与音色',update:'更新'};
   if(el.pageTitle)el.pageTitle.textContent=titles[feat]||feat;
   renderStatus();
   if(feat==='subtitle-voice') loadPresetVoices();
   if(feat==='download') initDownloadPage();
   if(feat==='remote') initRemotePage();
+  if(feat==='update') initUpdatePage();
   // 清理下载页定时器
   if(feat!=='download' && _dlDotsTimer){clearInterval(_dlDotsTimer);_dlDotsTimer=null;}
   if(isMobile())closeSidebar();
@@ -2017,7 +2018,7 @@ function bind(){
   el.openVideoBtn?.addEventListener('click',()=>void window.antbot.openExternal('https://channels.weixin.qq.com/platform').catch(e=>toast(e.message,'error')));
   el.openDouyinBtn?.addEventListener('click',()=>void window.antbot.openExternal('https://creator.douyin.com/creator-micro/home').catch(e=>toast(e.message,'error')));
   // Settings
-  el.openSettingsBtn?.addEventListener('click',()=>{fillForm();el.setDlg?.showModal();if(isMobile())closeSidebar();checkDeps();loadModels();checkVoicebox();loadApiUsage();loadSettingsVersions();});
+  el.openSettingsBtn?.addEventListener('click',()=>{fillForm();el.setDlg?.showModal();if(isMobile())closeSidebar();checkDeps();loadModels();checkVoicebox();loadApiUsage();});
   el.setClose?.addEventListener('click',()=>closeDlg(el.setDlg));
   // Auto-save on settings input change
   document.getElementById('settings-body')?.addEventListener('change',()=>{void saveSettings();});
@@ -2780,193 +2781,209 @@ async function initRemotePage() {
   window.antbot.onRemoteTunnelStatus?.((s) => {
     if (statusText) statusText.textContent = s.status === 'running' ? '已连接' : s.status === 'starting' ? '连接中...' : '未连接';
   });
+}
 
-  // App 版本显示
-  const versionEl = document.getElementById('remote-ui-version');
-  try {
-    const v = await window.antbot.getAppVersion();
-    if (versionEl) versionEl.textContent = v?.version || S.app?.version || '-';
-  } catch { if (versionEl) versionEl.textContent = S.app?.version || '-'; }
 
-  // 检查更新按钮
-  const checkUpdateBtn = document.getElementById('remote-check-update-btn');
-  checkUpdateBtn?.addEventListener('click', async () => {
-    checkUpdateBtn.disabled = true;
-    checkUpdateBtn.textContent = '检查中...';
-    try {
-      const result = await window.antbot.checkAllUpdates();
-      showUpdateDialog(result);
-    } catch (e) {
-      toast('检查更新失败: ' + e.message, 'error');
-    }
-    checkUpdateBtn.disabled = false;
-    checkUpdateBtn.textContent = '检查更新';
+/* ── Update Page ── */
+async function initUpdatePage() {
+  // 加载各组件当前版本
+  const [appV, pluginV, remoteV] = await Promise.all([
+    window.antbot.getAppVersion?.().catch(()=>null),
+    window.antbot.getPluginVersion?.().catch(()=>null),
+    window.antbot.remoteGetLocalVersion?.().catch(()=>null),
+  ]);
+  const $t = (id) => document.getElementById(id);
+  if($t('upd-app-current')) $t('upd-app-current').textContent = appV?.version || '-';
+  if($t('upd-plugin-current')) $t('upd-plugin-current').textContent = pluginV?.version || '-';
+  if($t('upd-remote-current')) $t('upd-remote-current').textContent = remoteV?.version || '-';
+
+  setupUpdater('plugin', {
+    checkFn: async () => {
+      const r = await window.antbot.checkAllUpdates();
+      return r?.plugin || {hasUpdate: false};
+    },
+    downloadFn: async (url) => window.antbot.downloadPluginUpdate(url),
+    installFn: async (zip) => window.antbot.installPluginUpdate(zip),
+    noRestart: true,
+  });
+  setupUpdater('remote', {
+    checkFn: async () => {
+      const r = await window.antbot.remoteCheckUpdate?.();
+      return r || {hasUpdate: false};
+    },
+    downloadFn: async () => window.antbot.remoteDoUpdate?.(),
+    installFn: null,
+    noRestart: true,
+  });
+  setupUpdater('app', {
+    checkFn: async () => {
+      const r = await window.antbot.checkAllUpdates();
+      return r?.app || {hasUpdate: false};
+    },
+    downloadFn: async (url) => window.antbot.downloadAppUpdate(url),
+    installFn: async (zip) => window.antbot.installAppUpdate(zip),
+    noRestart: false,
   });
 }
 
+function setupUpdater(key, { checkFn, downloadFn, installFn, noRestart }) {
+  const $t = (id) => document.getElementById(id);
+  const checkBtn = $t(`upd-${key}-check-btn`);
+  if (!checkBtn || checkBtn._bound) return;
+  checkBtn._bound = true;
 
-/* ── Settings Update Check ── */
-async function loadSettingsVersions() {
-  try {
-    const [appV, pluginV, remoteV] = await Promise.all([
-      window.antbot.getAppVersion().catch(() => null),
-      window.antbot.getPluginVersion().catch(() => null),
-      window.antbot.remoteGetLocalVersion?.().catch(() => null),
-    ]);
-    const appEl = document.getElementById('settings-app-version');
-    const pluginEl = document.getElementById('settings-plugin-version');
-    const remoteEl = document.getElementById('settings-remote-ui-version');
-    if (appEl) appEl.textContent = appV?.version || '-';
-    if (pluginEl) pluginEl.textContent = pluginV?.version || '-';
-    if (remoteEl) remoteEl.textContent = remoteV?.version || '-';
-  } catch {}
-  // 绑定检查更新按钮
-  const btn = document.getElementById('settings-check-update-btn');
-  if (btn && !btn._bound) {
-    btn._bound = true;
-    btn.addEventListener('click', async () => {
-      btn.disabled = true;
-      btn.textContent = '检查中...';
-      const statusEl = document.getElementById('update-status');
-      try {
-        const result = await window.antbot.checkAllUpdates();
-        const hasAny = result?.app?.hasUpdate || result?.plugin?.hasUpdate;
-        if (hasAny) {
-          closeDlg(el.setDlg);
-          showUpdateDialog(result);
-        } else {
-          if (statusEl) statusEl.textContent = '所有组件已是最新版本';
-          toast('已是最新版本', 'success');
-        }
-      } catch (e) {
-        if (statusEl) statusEl.textContent = '检查失败: ' + e.message;
-        toast('检查更新失败', 'error');
-      }
-      btn.disabled = false;
-      btn.innerHTML = '<span class="icon" data-icon="refresh"></span>检查更新';
-      injectIcons();
-    });
+  function log(msg, type='') {
+    const el = $t(`upd-${key}-log`);
+    if (!el) return;
+    const line = document.createElement('div');
+    if (type) line.className = `log-${type}`;
+    line.textContent = msg;
+    el.appendChild(line);
+    el.scrollTop = el.scrollHeight;
   }
+
+  function setProgress(pct, text) {
+    const bar = $t(`upd-${key}-bar`);
+    const txt = $t(`upd-${key}-progress-text`);
+    const wrap = $t(`upd-${key}-progress`);
+    if (wrap) wrap.classList.remove('hidden');
+    if (bar) bar.style.width = pct + '%';
+    if (txt) txt.textContent = text || pct + '%';
+  }
+
+  checkBtn.addEventListener('click', async () => {
+    checkBtn.disabled = true;
+    checkBtn.textContent = '检查中...';
+    const logEl = $t(`upd-${key}-log`);
+    if (logEl) logEl.innerHTML = '';
+    $t(`upd-${key}-changelog`)?.classList.add('hidden');
+    $t(`upd-${key}-actions`)?.classList.add('hidden');
+    $t(`upd-${key}-latest-label`)?.style.setProperty('display','none');
+    $t(`upd-${key}-latest`)?.style.setProperty('display','none');
+
+    try {
+      const result = await checkFn();
+      if (result.hasUpdate) {
+        const latestEl = $t(`upd-${key}-latest`);
+        const latestLbl = $t(`upd-${key}-latest-label`);
+        if (latestEl) { latestEl.textContent = result.latestVersion || result.remoteVersion || ''; latestEl.style.display = ''; }
+        if (latestLbl) latestLbl.style.display = '';
+        if (result.changelog) {
+          const cl = $t(`upd-${key}-changelog`);
+          if (cl) { cl.textContent = result.changelog; cl.classList.remove('hidden'); }
+        }
+        const sizeEl = $t(`upd-${key}-size`);
+        if (sizeEl && result.fileSize) sizeEl.textContent = (result.fileSize/1024/1024).toFixed(1) + ' MB';
+        $t(`upd-${key}-actions`)?.classList.remove('hidden');
+        log(`发现新版本 ${result.latestVersion || result.remoteVersion}`, 'success');
+
+        // 绑定下载按钮
+        const dlBtn = $t(`upd-${key}-download-btn`);
+        if (dlBtn && !dlBtn._bound) {
+          dlBtn._bound = true;
+          dlBtn.addEventListener('click', async () => {
+            dlBtn.disabled = true;
+            dlBtn.textContent = '下载中...';
+            setProgress(5, '准备下载...');
+            log('开始下载...');
+            try {
+              // 进度模拟（curl 不支持实时回调）
+              const progressTimer = setInterval(() => {
+                const bar = $t(`upd-${key}-bar`);
+                if (bar) {
+                  const cur = parseInt(bar.style.width) || 5;
+                  if (cur < 85) bar.style.width = (cur + 3) + '%';
+                }
+              }, 500);
+
+              let zipPath = null;
+              if (key === 'remote') {
+                // 远程页面直接更新，无需 zip
+                const r = await downloadFn(result.downloadUrl || result.remoteVersion);
+                clearInterval(progressTimer);
+                if (r?.ok) {
+                  setProgress(100, '完成');
+                  log('远程页面已更新', 'success');
+                  const curEl = $t(`upd-${key}-current`);
+                  if (curEl) curEl.textContent = r.version || result.latestVersion || '';
+                } else {
+                  throw new Error(r?.error || '更新失败');
+                }
+              } else {
+                const dlResult = await downloadFn(result.downloadUrl);
+                clearInterval(progressTimer);
+                if (!dlResult?.ok && !dlResult?.zipPath) throw new Error(dlResult?.error || '下载失败');
+                zipPath = dlResult?.zipPath || dlResult;
+                setProgress(90, '安装中...');
+                log('下载完成，正在安装...');
+
+                if (installFn) {
+                  const installResult = await installFn(zipPath);
+                  if (!installResult?.ok) throw new Error(installResult?.error || '安装失败');
+                  setProgress(100, '完成');
+                  log('安装完成', 'success');
+
+                  if (!noRestart && installResult.scriptPath) {
+                    // App 更新 — 专属重启弹窗
+                    showAppRestartDialog(installResult.scriptPath);
+                  } else {
+                    toast('更新成功', 'success');
+                    const curEl = $t(`upd-${key}-current`);
+                    if (curEl) curEl.textContent = result.latestVersion || result.remoteVersion || '';
+                  }
+                }
+              }
+            } catch (e) {
+              const bar = $t(`upd-${key}-bar`);
+              if (bar) bar.style.background = 'var(--destructive)';
+              setProgress(100, '失败');
+              log('失败: ' + e.message, 'error');
+              dlBtn.disabled = false;
+              dlBtn.textContent = '重试';
+              dlBtn._bound = false;
+            }
+          });
+        }
+      } else if (result.gracePeriod) {
+        log('刚安装完毕，暂不检查更新');
+      } else {
+        log('已是最新版本', 'success');
+      }
+    } catch (e) {
+      log('检查失败: ' + e.message, 'error');
+    }
+    checkBtn.disabled = false;
+    checkBtn.textContent = '检查更新';
+  });
 }
 
-/* ── Update Dialog ── */
-function showUpdateDialog(result) {
-  // 移除已有弹窗
-  document.getElementById('update-overlay')?.remove();
-
-  const app = result.app || {};
-  const plugin = result.plugin || {};
-  const hasAppUpdate = !!app.hasUpdate;
-  const hasPluginUpdate = !!plugin.hasUpdate;
-  const hasAnyUpdate = hasAppUpdate || hasPluginUpdate;
-
-  const appCur = esc(app.currentVersion || '-');
-  const appLat = esc(app.latestVersion || '-');
-  const pluginCur = esc(plugin.currentVersion || '-');
-  const pluginLat = esc(plugin.latestVersion || '-');
-  const changelog = esc(app.changelog || '');
-
+function showAppRestartDialog(scriptPath) {
+  const old = document.getElementById('app-restart-overlay');
+  if (old) old.remove();
   const overlay = document.createElement('div');
-  overlay.id = 'update-overlay';
-  overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);backdrop-filter:blur(4px);';
-
-  overlay.innerHTML = `<div style="width:min(440px,calc(100vw - 24px));max-height:calc(100vh - 48px);display:flex;flex-direction:column;border-radius:var(--radius-xl);background:var(--popover);box-shadow:var(--shadow-lg);overflow:hidden">
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border);flex-shrink:0">
-      <h3 style="font-size:15px;font-weight:600;color:var(--foreground)">检查更新</h3>
-      <button id="update-close-x" style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:var(--radius);color:var(--muted-foreground);border:0;background:none;cursor:pointer;font-size:16px" title="关闭">&times;</button>
-    </div>
-    <div style="padding:16px;overflow-y:auto">
-      <div style="margin-bottom:12px">
-        <div style="font-size:12px;font-weight:600;color:var(--muted-foreground);margin-bottom:6px">应用</div>
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-radius:var(--radius);border:1px solid var(--border);background:var(--secondary);font-size:13px">
-          <span style="color:var(--foreground)">${hasAppUpdate ? '发现新版本' : '当前版本'}</span>
-          <span style="font-weight:600;color:${hasAppUpdate ? 'var(--warning)' : 'var(--muted-foreground)'}">${appCur} → ${appLat}</span>
-        </div>
-      </div>
-      <div style="margin-bottom:12px">
-        <div style="font-size:12px;font-weight:600;color:var(--muted-foreground);margin-bottom:6px">插件</div>
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-radius:var(--radius);border:1px solid var(--border);background:var(--secondary);font-size:13px">
-          <span style="color:var(--foreground)">${hasPluginUpdate ? '发现新版本' : '当前版本'}</span>
-          <span style="font-weight:600;color:${hasPluginUpdate ? 'var(--warning)' : 'var(--muted-foreground)'}">${pluginCur} → ${pluginLat}</span>
-        </div>
-      </div>
-      ${hasAppUpdate && changelog ? `<div style="margin-bottom:12px"><div style="font-size:12px;font-weight:600;color:var(--muted-foreground);margin-bottom:6px">更新日志</div><pre style="margin:0;padding:10px;border-radius:var(--radius);background:var(--background);border:1px solid var(--border);font-size:12px;line-height:1.6;color:var(--foreground);max-height:200px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;font-family:var(--font-mono)">${changelog}</pre></div>` : ''}
-      ${!hasAnyUpdate ? '<div style="text-align:center;padding:16px 0;font-size:14px;font-weight:600;color:var(--success)">已是最新版本</div>' : ''}
-      <div id="update-progress" style="display:none;margin-bottom:12px">
-        <div style="font-size:12px;color:var(--muted-foreground);margin-bottom:6px" id="update-progress-text">正在下载...</div>
-        <div style="height:6px;border-radius:var(--radius-full);background:var(--muted);overflow:hidden"><div id="update-progress-bar" style="height:100%;width:0;background:var(--primary);border-radius:var(--radius-full);transition:width var(--transition-normal)"></div></div>
-      </div>
-    </div>
-    <div id="update-actions" style="display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid var(--border);flex-shrink:0">
-      ${hasAnyUpdate
-        ? `<button id="update-btn-later" style="height:32px;padding:0 14px;border-radius:var(--radius);font-size:13px;font-weight:500;border:1px solid var(--border);background:var(--card);color:var(--foreground);cursor:pointer;transition:all var(--transition-fast)">稍后再说</button><button id="update-btn-now" style="height:32px;padding:0 14px;border-radius:var(--radius);font-size:13px;font-weight:500;border:0;background:var(--primary);color:var(--primary-foreground);cursor:pointer;transition:all var(--transition-fast)">立即更新</button>`
-        : '<button id="update-btn-close" style="height:32px;padding:0 14px;border-radius:var(--radius);font-size:13px;font-weight:500;border:0;background:var(--primary);color:var(--primary-foreground);cursor:pointer;transition:all var(--transition-fast)">确定</button>'}
+  overlay.id = 'app-restart-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(6px);z-index:1000;display:flex;align-items:center;justify-content:center';
+  overlay.innerHTML = `<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius-xl);padding:28px 28px 20px;max-width:360px;width:90%;box-shadow:0 20px 40px rgba(0,0,0,.4)">
+    <div style="font-size:15px;font-weight:700;margin-bottom:8px">更新已就绪</div>
+    <div style="font-size:13px;color:var(--muted-foreground);margin-bottom:20px;line-height:1.6">新版本已下载完成。App 将关闭并自动重启完成更新，整个过程约 5-10 秒。</div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button id="restart-later-btn" class="btn btn-ghost">稍后重启</button>
+      <button id="restart-now-btn" class="btn btn-primary">立即重启</button>
     </div>
   </div>`;
-
-  // "立即更新" 逻辑
-  if (hasAnyUpdate) {
-    overlay.querySelector('#update-btn-now')?.addEventListener('click', async () => {
-      const actionsEl = overlay.querySelector('#update-actions');
-      const progressEl = overlay.querySelector('#update-progress');
-      const progressText = overlay.querySelector('#update-progress-text');
-      const progressBar = overlay.querySelector('#update-progress-bar');
-      const btnNow = overlay.querySelector('#update-btn-now');
-      const btnLater = overlay.querySelector('#update-btn-later');
-      if (btnNow) btnNow.disabled = true;
-      if (btnLater) btnLater.disabled = true;
-      if (progressEl) progressEl.style.display = '';
-      if (progressText) progressText.textContent = '正在下载...';
-      if (progressBar) progressBar.style.width = '30%';
-
-      try {
-        const tasks = [];
-        if (hasAppUpdate) tasks.push(window.antbot.downloadAppUpdate(app.downloadUrl));
-        if (hasPluginUpdate) tasks.push(window.antbot.downloadPluginUpdate(plugin.downloadUrl));
-        const results = await Promise.all(tasks);
-        if (progressBar) progressBar.style.width = '80%';
-
-        const appResult = hasAppUpdate ? results[0] : null;
-        if (appResult?.zipPath) {
-          if (progressText) progressText.textContent = '正在安装...';
-          await window.antbot.installAppUpdate(appResult.zipPath);
-        }
-        if (progressBar) progressBar.style.width = '100%';
-        if (progressText) progressText.textContent = '更新完成';
-
-        // 切换为重启确认
-        const bodyEl = overlay.querySelector('div:nth-child(1) > div:nth-child(2)');
-        if (bodyEl) bodyEl.innerHTML = '<div style="text-align:center;padding:24px 0;font-size:14px;color:var(--foreground)">更新已就绪，需要重启应用。<br/>是否立即重启？</div>';
-        if (actionsEl) actionsEl.innerHTML = `<button id="update-btn-restart-later" style="height:32px;padding:0 14px;border-radius:var(--radius);font-size:13px;font-weight:500;border:1px solid var(--border);background:var(--card);color:var(--foreground);cursor:pointer;transition:all var(--transition-fast)">稍后重启</button><button id="update-btn-restart-now" style="height:32px;padding:0 14px;border-radius:var(--radius);font-size:13px;font-weight:500;border:0;background:var(--primary);color:var(--primary-foreground);cursor:pointer;transition:all var(--transition-fast)">立即重启</button>`;
-
-        overlay.querySelector('#update-btn-restart-now')?.addEventListener('click', () => {
-          window.antbot.executeAppUpdate(appResult?.scriptPath);
-          window.antbot.quitApp();
-        });
-        overlay.querySelector('#update-btn-restart-later')?.addEventListener('click', () => overlay.remove());
-      } catch (e) {
-        if (progressText) progressText.textContent = '下载失败: ' + (e.message || '未知错误');
-        if (progressBar) progressBar.style.width = '100%';
-        if (progressBar) progressBar.style.background = 'var(--destructive)';
-        if (btnNow) { btnNow.disabled = false; btnNow.textContent = '重试'; }
-        if (btnLater) btnLater.disabled = false;
-      }
-    });
-
-    // "稍后再说" 逻辑
-    overlay.querySelector('#update-btn-later')?.addEventListener('click', () => {
-      localStorage.setItem('update-dismissed-at', Date.now());
-      overlay.remove();
-    });
-  } else {
-    overlay.querySelector('#update-btn-close')?.addEventListener('click', () => overlay.remove());
-  }
-
-  // 关闭按钮和点击遮罩
-  overlay.querySelector('#update-close-x')?.addEventListener('click', () => overlay.remove());
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
-
   document.body.appendChild(overlay);
+  document.getElementById('restart-later-btn').addEventListener('click', () => overlay.remove());
+  document.getElementById('restart-now-btn').addEventListener('click', async () => {
+    overlay.querySelector('#restart-now-btn').disabled = true;
+    overlay.querySelector('#restart-now-btn').textContent = '重启中...';
+    try {
+      await window.antbot.executeAppUpdate(scriptPath);
+      await window.antbot.quitApp();
+    } catch (e) {
+      toast('重启失败: ' + e.message, 'error');
+      overlay.remove();
+    }
+  });
 }
 
 
