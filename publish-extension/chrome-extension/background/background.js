@@ -76,10 +76,11 @@ async function handleLoginCheck(platform, commandId) {
       await sleep(2000);
     }
 
-    // 截图获取二维码（全屏截图，不裁剪）
+    // 截图获取二维码，压缩后传输
     let qrDataUrl = null;
     try {
-      qrDataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
+      const raw = await chrome.tabs.captureVisibleTab(null, { format: 'jpeg', quality: 70 });
+      if (raw) qrDataUrl = await compressImage(raw, 600);
     } catch (e) {
       console.log('[BG] 截图失败:', e.message);
     }
@@ -108,6 +109,30 @@ function waitForTabComplete(tabId, timeoutMs = 10000) {
     }
     chrome.tabs.onUpdated.addListener(listener);
   });
+}
+
+async function compressImage(dataUrl, maxWidth = 600) {
+  try {
+    const resp = await fetch(dataUrl);
+    const blob = await resp.blob();
+    const bitmap = await createImageBitmap(blob);
+    const scale = Math.min(1, maxWidth / bitmap.width);
+    const w = Math.round(bitmap.width * scale);
+    const h = Math.round(bitmap.height * scale);
+    const canvas = new OffscreenCanvas(w, h);
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    const out = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.7 });
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(out);
+    });
+  } catch (e) {
+    console.log('[BG] 图片压缩失败，使用原图:', e.message);
+    return dataUrl;
+  }
 }
 
 async function handleBridgeCommand(command) {
