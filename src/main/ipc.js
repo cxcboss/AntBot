@@ -1080,6 +1080,13 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
     }
   });
 
+  ipcMain.handle('open-plugin-dir', async () => {
+    const dir = path.join(os.homedir(), 'AntBot', 'browser-plugin');
+    await fs.mkdir(dir, { recursive: true }).catch(() => {});
+    await shell.openPath(dir);
+    return { ok: true, path: dir };
+  });
+
   ipcMain.handle('remote:get-local-version', async () => {
     try {
       const updater = require('./services/remoteUpdater');
@@ -1125,8 +1132,8 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
     try { return await updater.installAppUpdate(zipPath); } catch (e) { return { ok: false, error: e.message }; }
   });
 
-  ipcMain.handle('update:execute', async (_event, scriptPath) => {
-    try { return updater.executeUpdate(scriptPath); } catch (e) { return { ok: false, error: e.message }; }
+  ipcMain.handle('update:cancel', async () => {
+    try { updater.cancelDownload(); return { ok: true }; } catch (e) { return { ok: false, error: e.message }; }
   });
 
   ipcMain.handle('update:download-plugin', async (_event, downloadUrl) => {

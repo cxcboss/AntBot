@@ -3,8 +3,61 @@ const fsNative = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
-const { execFile } = require('node:child_process');
+const https = require('node:https');
+const http = require('node:http');
 const { parseSemver, compareSemver, formatBytes } = require('./versionUtils');
+
+// ─── 代理检测 ───
+
+let _proxyAgent = null;
+let _proxyDetected = false;
+
+function detectProxy() {
+  if (_proxyDetected) return _proxyAgent;
+  _proxyDetected = true;
+  const envProxy = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy;
+  if (envProxy) { _proxyAgent = createProxyAgent(envProxy); return _proxyAgent; }
+  try {
+    const out = require('node:child_process').execFileSync('networksetup', ['-getwebproxy', 'Wi-Fi'], { timeout: 3000, encoding: 'utf-8' });
+    const enabled = /^Enabled:\s*Yes/m.test(out);
+    const hostMatch = out.match(/^Server:\s*(.+)$/m);
+    const portMatch = out.match(/^Port:\s*(.+)$/m);
+    if (enabled && hostMatch) {
+      _proxyAgent = createProxyAgent(`http://${hostMatch[1].trim()}:${(portMatch?.[1] || '80').trim()}`);
+    }
+  } catch {}
+  return _proxyAgent;
+}
+
+function createProxyAgent(proxyUrl) {
+  const proxy = new URL(proxyUrl);
+  return {
+    getAgent(isHttps) {
+      if (!isHttps) return new http.Agent({ host: proxy.hostname, port: parseInt(proxy.port) || 80 });
+      return new https.Agent({
+        createConnection: (options, callback) => {
+          const req = http.request({ host: proxy.hostname, port: parseInt(proxy.port) || 80, method: 'CONNECT', path: `${options.host}:${options.port}` });
+          req.on('connect', (res, socket) => {
+            if (res.statusCode === 200) {
+              const tlsSocket = require('node:tls').connect({ ...options, socket, servername: options.host }, () => callback(null, tlsSocket));
+              tlsSocket.on('error', callback);
+            } else callback(new Error(`代理连接失败: ${res.statusCode}`));
+          });
+          req.on('error', callback);
+          req.end();
+        }
+      });
+    }
+  };
+}
+
+function getHttpOptions(urlStr) {
+  const isHttps = urlStr.startsWith('https');
+  const proxy = detectProxy();
+  const opts = { timeout: 30000, headers: { 'User-Agent': 'AntBot-Updater' } };
+  if (proxy) opts.agent = proxy.getAgent(isHttps);
+  return opts;
+}
 
 const GITHUB_RAW = 'https://raw.githubusercontent.com/cxcboss/antbot-remote-ui/main';
 const VERSION_URL = `${GITHUB_RAW}/version.json`;
@@ -22,31 +75,48 @@ async function ensureLocalDir() {
   await fs.mkdir(BACKUP_DIR, { recursive: true });
 }
 
-// ─── 网络下载（curl，支持系统代理）───
+// ─── Node.js 原生 HTTP（直连，不走代理）───
 
-function curlGet(url) {
-  const tmpFile = path.join(os.tmpdir(), `antbot-dl-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+function nodeGet(url, maxRedirects = 5) {
   return new Promise((resolve, reject) => {
-    execFile('curl', ['-sL', '-o', tmpFile, '--connect-timeout', '15', '-m', '60', url], { timeout: 70000 }, async (err) => {
-      try {
-        if (err) { reject(new Error(`curl 失败: ${err.message}`)); return; }
-        const content = await fs.readFile(tmpFile, 'utf-8');
-        resolve(content);
-      } catch (e) {
-        reject(e);
-      } finally {
-        fs.unlink(tmpFile).catch(() => {});
-      }
-    });
+    function doRequest(reqUrl, redirectsLeft) {
+      const mod = reqUrl.startsWith('https') ? https : http;
+      const req = mod.get(reqUrl, getHttpOptions(reqUrl), (res) => {
+        if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
+          res.resume();
+          if (redirectsLeft <= 0) return reject(new Error('重定向次数过多'));
+          return doRequest(res.headers.location, redirectsLeft - 1);
+        }
+        if (res.statusCode !== 200) { res.resume(); return reject(new Error(`HTTP ${res.statusCode}`)); }
+        let data = '';
+        res.setEncoding('utf-8');
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => resolve(data));
+        res.on('error', reject);
+      });
+      req.on('error', reject);
+      req.on('timeout', () => { req.destroy(); reject(new Error('连接超时')); });
+    }
+    doRequest(url, maxRedirects);
   });
 }
 
-function curlPost(url, data) {
+function nodePost(url, body) {
   return new Promise((resolve, reject) => {
-    execFile('curl', ['-s', '-X', 'POST', '-H', 'Content-Type: application/json', '-m', '30', '-d', JSON.stringify(data), url], { timeout: 35000 }, (err, stdout) => {
-      if (err) return reject(new Error(`curl POST 失败: ${err.message}`));
-      try { resolve(JSON.parse(stdout)); } catch { resolve({ raw: stdout }); }
+    const payload = JSON.stringify(body);
+    const parsed = new URL(url);
+    const mod = parsed.protocol === 'https:' ? https : http;
+    const options = { method: 'POST', hostname: parsed.hostname, port: parsed.port, path: parsed.pathname, headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }, timeout: 30000 };
+    const req = mod.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => { try { resolve(JSON.parse(data)); } catch { resolve({ raw: data }); } });
+      res.on('error', reject);
     });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('连接超时')); });
+    req.write(payload);
+    req.end();
   });
 }
 
@@ -68,7 +138,7 @@ async function getLocalVersion() {
 }
 
 async function getRemoteVersion() {
-  const text = await curlGet(VERSION_URL);
+  const text = await nodeGet(VERSION_URL);
   return JSON.parse(text);
 }
 
@@ -78,7 +148,7 @@ async function downloadWithRetry(relativePath, maxRetry = MAX_RETRY) {
   const url = `${GITHUB_RAW}/${encodeURI(relativePath)}`;
   for (let attempt = 1; attempt <= maxRetry; attempt++) {
     try {
-      const content = await curlGet(url);
+      const content = await nodeGet(url);
       // SHA256 校验（如果远程提供了 hash）
       return content;
     } catch (e) {
@@ -191,7 +261,7 @@ async function downloadUpdate(remote) {
     try {
       const hubHtml = await getLocalFile('hub/index.html');
       if (hubHtml) {
-        await curlPost('https://hub.onebugmanai.online/api/update-html', { html: hubHtml, version: remote.version });
+        await nodePost('https://hub.onebugmanai.online/api/update-html', { html: hubHtml, version: remote.version });
         _log('info', `[热更新] Hub 页面已同步到云端`);
       }
     } catch (e) {

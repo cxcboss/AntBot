@@ -2824,10 +2824,17 @@ async function initUpdatePage() {
     installFn: async (zip) => window.antbot.installAppUpdate(zip),
     noRestart: false,
   });
-}
 
-// App 更新重启路径缓存（持久化到 localStorage）
-let _pendingRestartScript = localStorage.getItem('pending-restart-script') || null;
+  // 浏览器插件位置按钮
+  const pluginDirBtn = document.getElementById('upd-plugin-dir-btn');
+  if (pluginDirBtn && !pluginDirBtn._bound) {
+    pluginDirBtn._bound = true;
+    pluginDirBtn.addEventListener('click', async () => {
+      try { await window.antbot.openPluginDir(); }
+      catch (e) { toast('打开失败: ' + e.message, 'error'); }
+    });
+  }
+}
 
 function setupUpdater(key, { checkFn, downloadFn, installFn, noRestart }) {
   const $t = (id) => document.getElementById(id);
@@ -2911,6 +2918,26 @@ function setupUpdater(key, { checkFn, downloadFn, installFn, noRestart }) {
             newBtn.textContent = '下载中...';
             setProgress(0, '准备下载...');
             log('开始下载...');
+
+            // 添加取消按钮
+            const cancelBtn = document.createElement('button');
+            cancelBtn.className = 'btn btn-ghost btn-sm';
+            cancelBtn.textContent = '取消';
+            cancelBtn.style.cssText = 'margin-left:8px';
+            newBtn.parentNode.appendChild(cancelBtn);
+
+            let cancelled = false;
+            cancelBtn.addEventListener('click', async () => {
+              cancelled = true;
+              await window.antbot.cancelDownload?.();
+              cancelBtn.remove();
+              hideProgress();
+              newBtn.disabled = false;
+              newBtn.textContent = '下载并安装';
+              log('已取消下载');
+              toast('已取消更新', 'info');
+            });
+
             try {
               const removeListener = window.antbot.onUpdateProgress?.((p) => {
                 if (p.key === key && typeof p.percent === 'number') {
@@ -2927,6 +2954,7 @@ function setupUpdater(key, { checkFn, downloadFn, installFn, noRestart }) {
               if (key === 'remote') {
                 const r = await downloadFn(result.downloadUrl || newVer);
                 if (removeListener) removeListener();
+                cancelBtn?.remove();
                 if (r?.ok) {
                   log('远程页面已更新', 'success');
                   resetUI(r.version || newVer);
@@ -2937,6 +2965,7 @@ function setupUpdater(key, { checkFn, downloadFn, installFn, noRestart }) {
               } else {
                 const dlResult = await downloadFn(result.downloadUrl);
                 if (removeListener) removeListener();
+                cancelBtn?.remove();
                 if (!dlResult?.ok && !dlResult?.zipPath) throw new Error(dlResult?.error || '下载失败');
                 zipPath = dlResult?.zipPath || dlResult;
                 setProgress(95, '安装中...');
@@ -2945,13 +2974,11 @@ function setupUpdater(key, { checkFn, downloadFn, installFn, noRestart }) {
                 if (installFn) {
                   const installResult = await installFn(zipPath, result);
                   if (!installResult?.ok) throw new Error(installResult?.error || '安装失败');
-                  log('安装完成', 'success');
+                  log('已解压到下载目录', 'success');
 
-                  if (!noRestart && installResult.scriptPath) {
-                    _pendingRestartScript = installResult.scriptPath;
-                    localStorage.setItem('pending-restart-script', installResult.scriptPath);
+                  if (!noRestart && installResult.appPath) {
                     resetUI(newVer);
-                    showAppRestartDialog(installResult.scriptPath);
+                    showDownloadCompleteDialog(installResult.appPath, installResult.appDir);
                   } else {
                     resetUI(newVer);
                     toast('更新成功', 'success');
@@ -2959,6 +2986,8 @@ function setupUpdater(key, { checkFn, downloadFn, installFn, noRestart }) {
                 }
               }
             } catch (e) {
+              cancelBtn?.remove();
+              if (cancelled) return;
               const bar = $t(`upd-${key}-bar`);
               if (bar) bar.style.background = 'var(--destructive)';
               setProgress(0, '失败');
@@ -2979,49 +3008,28 @@ function setupUpdater(key, { checkFn, downloadFn, installFn, noRestart }) {
       checkBtn.textContent = '检查更新';
     }
   });
-
-  // 如果有待重启的 App 更新，显示重启按钮
-  if (!noRestart && _pendingRestartScript) {
-    const actionsEl = $t(`upd-${key}-actions`);
-    if (actionsEl) {
-      actionsEl.classList.remove('hidden');
-      actionsEl.innerHTML = '<button class="btn btn-primary btn-sm" id="upd-app-restart-pending-btn">立即安装</button>';
-      document.getElementById('upd-app-restart-pending-btn')?.addEventListener('click', () => {
-        showAppRestartDialog(_pendingRestartScript);
-      });
-    }
-  }
 }
 
-function showAppRestartDialog(scriptPath) {
+function showDownloadCompleteDialog(appPath, appDir) {
   const old = document.getElementById('app-restart-overlay');
   if (old) old.remove();
+  const appName = appPath.split('/').pop() || '搬运蚁.app';
   const overlay = document.createElement('div');
   overlay.id = 'app-restart-overlay';
   overlay.className = 'update-restart-overlay';
   overlay.innerHTML = `<div class="update-restart-box">
-    <h3>更新已就绪</h3>
-    <p>新版本已下载完成。App 将关闭并自动重启完成更新，整个过程约 5-10 秒。</p>
+    <h3>更新已下载</h3>
+    <p>新版本已解压到下载目录。<br><br><strong>操作步骤：</strong><br>1. 关闭当前 App<br>2. 打开下载目录，将 <strong>${appName}</strong> 拖到原 App 位置替换<br>3. 重新打开 App</p>
     <div class="update-restart-actions">
-      <button id="restart-later-btn" class="btn btn-ghost">稍后重启</button>
-      <button id="restart-now-btn" class="btn btn-primary">立即重启</button>
+      <button id="restart-later-btn" class="btn btn-ghost">稍后</button>
+      <button id="restart-open-btn" class="btn btn-primary">打开下载目录</button>
     </div>
   </div>`;
   document.body.appendChild(overlay);
   document.getElementById('restart-later-btn').addEventListener('click', () => overlay.remove());
-  document.getElementById('restart-now-btn').addEventListener('click', async () => {
-    const btn = overlay.querySelector('#restart-now-btn');
-    btn.disabled = true;
-    btn.textContent = '重启中...';
-    try {
-      localStorage.removeItem('pending-restart-script');
-      _pendingRestartScript = null;
-      await window.antbot.executeAppUpdate(scriptPath);
-      await window.antbot.quitApp();
-    } catch (e) {
-      toast('重启失败: ' + e.message, 'error');
-      overlay.remove();
-    }
+  document.getElementById('restart-open-btn').addEventListener('click', async () => {
+    try { await window.antbot.openExternal(appDir || 'file://' + appPath.substring(0, appPath.lastIndexOf('/'))); } catch {}
+    overlay.remove();
   });
 }
 
