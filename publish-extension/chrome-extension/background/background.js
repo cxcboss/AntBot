@@ -47,32 +47,43 @@ async function handleLoginCheck(platform, commandId) {
   if (!url) throw new Error(`不支持的平台: ${platform}`);
   const tab = await chrome.tabs.create({ url, active: true });
   try {
-    for (let i = 0; i < 20; i++) {
-      await sleep(1000);
-      try {
-        const ping = await chrome.tabs.sendMessage(tab.id, { action: 'ping' });
-        if (ping?.ready) break;
-      } catch {}
-    }
-    const result = await chrome.tabs.sendMessage(tab.id, { action: 'loginCheck' });
-    if (result?.loggedIn) {
-      return { loggedIn: true, platform };
-    }
-    let qrDataUrl = result?.qrDataUrl || null;
-    // 跨域 iframe 二维码：通过截图裁剪获取
-    if (result?.useScreenshot && !qrDataUrl) {
-      await sleep(1000);
-      try {
-        const screenshotDataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
-        if (result?.cropArea && screenshotDataUrl) {
-          qrDataUrl = await cropScreenshot(screenshotDataUrl, result.cropArea);
-        } else {
-          qrDataUrl = screenshotDataUrl;
-        }
-      } catch (e) {
-        console.log('[BG] 截图失败:', e.message);
+    // 等待页面加载完成
+    await waitForTabComplete(tab.id, 15000);
+
+    // 先通过 content script 检测是否已登录
+    let loggedIn = false;
+    try {
+      const ping = await chrome.tabs.sendMessage(tab.id, { action: 'ping' });
+      if (ping?.ready) {
+        const loginResult = await chrome.tabs.sendMessage(tab.id, { action: 'loginCheck' });
+        if (loginResult?.loggedIn) return { loggedIn: true, platform };
       }
+    } catch (e) {
+      console.log('[BG] content script 未就绪，使用截图方案:', e.message);
     }
+
+    // 未登录：尝试在 iframe 内点击"使用其他头像、昵称或账号"
+    if (platform === 'weixin') {
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id, allFrames: true },
+          func: () => {
+            const btn = document.querySelector('.js_switchToNormal');
+            if (btn) btn.click();
+          }
+        });
+      } catch {}
+      await sleep(2000);
+    }
+
+    // 截图获取二维码（全屏截图，不裁剪）
+    let qrDataUrl = null;
+    try {
+      qrDataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
+    } catch (e) {
+      console.log('[BG] 截图失败:', e.message);
+    }
+
     if (commandId && qrDataUrl) {
       await bridgeEvent(commandId, { type: 'login-qr', platform, qrDataUrl });
     }
@@ -82,26 +93,20 @@ async function handleLoginCheck(platform, commandId) {
   }
 }
 
-function cropScreenshot(dataUrl, area) {
+function waitForTabComplete(tabId, timeoutMs = 10000) {
   return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => {
-      const scale = img.width / window.screen.width;
-      const sx = Math.round(area.x * scale);
-      const sy = Math.round(area.y * scale);
-      const sw = Math.round(area.width * scale);
-      const sh = Math.round(area.height * scale);
-      const canvas = new OffscreenCanvas(sw, sh);
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
-      canvas.convertToBlob({ type: 'image/png' }).then(blob => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.readAsDataURL(blob);
-      }).catch(() => resolve(dataUrl));
-    };
-    img.onerror = () => resolve(dataUrl);
-    img.src = dataUrl;
+    const timer = setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve();
+    }, timeoutMs);
+    function listener(id, changeInfo) {
+      if (id === tabId && changeInfo.status === 'complete') {
+        clearTimeout(timer);
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    }
+    chrome.tabs.onUpdated.addListener(listener);
   });
 }
 
