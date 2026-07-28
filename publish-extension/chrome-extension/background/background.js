@@ -66,11 +66,11 @@ async function handleLoginCheck(platform, commandId) {
   }
 
   try {
-    // 先通过 content script 检测是否已登录
+    // 先通过 content script 检测是否已登录（只发给主 frame，避免 iframe 抢答）
     try {
-      const ping = await chrome.tabs.sendMessage(tabId, { action: 'ping' });
+      const ping = await chrome.tabs.sendMessage(tabId, { action: 'ping' }, { frameId: 0 });
       if (ping?.ready) {
-        const loginResult = await chrome.tabs.sendMessage(tabId, { action: 'loginCheck' });
+        const loginResult = await chrome.tabs.sendMessage(tabId, { action: 'loginCheck' }, { frameId: 0 });
         if (loginResult?.loggedIn) {
           closeLoginTab(platform);
           return { loggedIn: true, platform };
