@@ -100,6 +100,7 @@ function createBrowserPublishBridge({ baseUrl = 'http://127.0.0.1:18321', pollIn
     const startedAt = Date.now();
     let cursor = 0;
     let qrDataUrl = null;
+    let accounts = null;
     const TIMEOUT = 60_000;
 
     while (Date.now() - startedAt < TIMEOUT) {
@@ -111,6 +112,10 @@ function createBrowserPublishBridge({ baseUrl = 'http://127.0.0.1:18321', pollIn
             qrDataUrl = event.qrDataUrl;
             onProgress({ type: 'login-qr', qrDataUrl });
           }
+          if (event.type === 'account-selection' && event.accounts) {
+            accounts = event.accounts;
+            onProgress({ type: 'account-selection', accounts });
+          }
         }
       }
       if (result.command?.status === 'completed' || result.command?.status === 'failed') {
@@ -118,7 +123,9 @@ function createBrowserPublishBridge({ baseUrl = 'http://127.0.0.1:18321', pollIn
         return {
           loggedIn: Boolean(finalResult.loggedIn),
           platform: finalResult.platform || platform,
-          qrDataUrl: finalResult.qrDataUrl || qrDataUrl
+          qrDataUrl: finalResult.qrDataUrl || qrDataUrl,
+          accountSelection: Boolean(finalResult.accountSelection || accounts),
+          accounts: finalResult.accounts || accounts
         };
       }
       await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
@@ -126,7 +133,25 @@ function createBrowserPublishBridge({ baseUrl = 'http://127.0.0.1:18321', pollIn
     throw new Error('登录检测超时');
   };
 
-  return { call, getStatus, getCapabilities, invoke, publish, checkLogin };
+  const selectAccount = async ({ platform = 'weixin', accountIndex = 0 } = {}) => {
+    const accepted = await invoke('platform.selectAccount', { platform, accountIndex });
+    const id = accepted.command?.id;
+    const startedAt = Date.now();
+    const TIMEOUT = 30_000;
+
+    while (Date.now() - startedAt < TIMEOUT) {
+      const result = await call('GET', `/api/bridge/commands/${encodeURIComponent(id)}`);
+      if (result.command?.status === 'completed' || result.command?.status === 'failed') {
+        const finalResult = result.command.result || {};
+        if (finalResult.success === false) throw new Error(finalResult.error || '选择失败');
+        return finalResult;
+      }
+      await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+    }
+    throw new Error('选择账号超时');
+  };
+
+  return { call, getStatus, getCapabilities, invoke, publish, checkLogin, selectAccount };
 }
 
 module.exports = { createBrowserPublishBridge, requestJson };

@@ -318,6 +318,24 @@ function startRemoteServer({ store, taskRunner, mainWindowRef, appLog }) {
         }
       }
 
+      // POST /remote/select-account — 选择视频号账号
+      if (method === 'POST' && pathname === '/remote/select-account') {
+        const selectBody = await readBody(req);
+        const platform = selectBody?.platform || 'weixin';
+        const accountIndex = Number(selectBody?.accountIndex) || 0;
+        try {
+          const { createBrowserPublishBridge } = require('./browserPublishBridge');
+          const settings = await _store.getSettings();
+          const config = settings.publish?.browserExtension || {};
+          if (!config.enabled) return sendJson(res, 200, { ok: false, error: '浏览器插件未启用' });
+          const bridge = createBrowserPublishBridge({ baseUrl: config.baseUrl, timeoutMs: 30000 });
+          const result = await bridge.selectAccount({ platform, accountIndex });
+          return sendJson(res, 200, { ok: true, ...result });
+        } catch (error) {
+          return sendJson(res, 200, { ok: false, error: error.message });
+        }
+      }
+
       // 404
       sendJson(res, 404, { ok: false, error: 'Not found' });
 

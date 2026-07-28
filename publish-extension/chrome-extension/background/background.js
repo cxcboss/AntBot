@@ -75,6 +75,13 @@ async function handleLoginCheck(platform, commandId) {
           closeLoginTab(platform);
           return { loggedIn: true, platform };
         }
+        // 检测到账号选择页面
+        if (loginResult?.accountSelection && loginResult?.accounts?.length > 0) {
+          if (commandId) {
+            await bridgeEvent(commandId, { type: 'account-selection', platform, accounts: loginResult.accounts });
+          }
+          return { loggedIn: false, platform, accountSelection: true, accounts: loginResult.accounts };
+        }
       }
     } catch (e) {
       console.log('[BG] content script 未就绪:', e.message);
@@ -147,6 +154,42 @@ function closeLoginTab(platform) {
   if (tabId != null) chrome.tabs.remove(tabId).catch(() => {});
 }
 
+async function handleSelectAccount(platform, accountIndex, commandId) {
+  const tabId = loginCheckTabs[platform];
+  if (tabId == null) throw new Error('未找到登录页面，请先执行登录检测');
+  try {
+    await chrome.tabs.get(tabId);
+  } catch {
+    loginCheckTabs[platform] = null;
+    throw new Error('登录页面已关闭，请重新检测');
+  }
+  try {
+    const result = await chrome.tabs.sendMessage(tabId, { action: 'selectAccount', index: accountIndex });
+    if (!result?.success) throw new Error(result?.error || '选择失败');
+    // 等待页面跳转
+    await sleep(3000);
+    // 检查是否登录成功
+    try {
+      const tabInfo = await chrome.tabs.get(tabId);
+      if (tabInfo?.url && !/login/i.test(tabInfo.url)) {
+        closeLoginTab(platform);
+        return { success: true, loggedIn: true, platform };
+      }
+    } catch {}
+    // 再检查一次 content script 状态
+    try {
+      const loginResult = await chrome.tabs.sendMessage(tabId, { action: 'loginCheck' });
+      if (loginResult?.loggedIn) {
+        closeLoginTab(platform);
+        return { success: true, loggedIn: true, platform };
+      }
+    } catch {}
+    return { success: true, loggedIn: false, platform, message: '已选择，请在电脑上确认' };
+  } catch (e) {
+    throw new Error('选择账号失败: ' + e.message);
+  }
+}
+
 function waitForTabComplete(tabId, timeoutMs = 10000) {
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
@@ -210,6 +253,11 @@ async function handleBridgeCommand(command) {
   }
   if (action === 'platform.loginCheck') {
     const result = await handleLoginCheck(payload.platform || 'douyin', command.id);
+    await bridgeResult(command.id, { success: true, ...result });
+    return;
+  }
+  if (action === 'platform.selectAccount') {
+    const result = await handleSelectAccount(payload.platform || 'weixin', payload.accountIndex ?? 0, command.id);
     await bridgeResult(command.id, { success: true, ...result });
     return;
   }

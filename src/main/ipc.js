@@ -410,6 +410,20 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
     }
   });
 
+  ipcMain.handle('bridge:select-account', async (_event, platform, accountIndex) => {
+    const { createBrowserPublishBridge } = require('./services/browserPublishBridge');
+    const settings = await store.getSettings();
+    const config = settings.publish?.browserExtension || {};
+    if (!config.enabled) return { ok: false, error: '浏览器插件未启用' };
+    try {
+      const bridge = createBrowserPublishBridge({ baseUrl: config.baseUrl, timeoutMs: 30000 });
+      const result = await bridge.selectAccount({ platform: platform || 'weixin', accountIndex });
+      return { ok: true, ...result };
+    } catch (error) {
+      return { ok: false, error: error.message };
+    }
+  });
+
   ipcMain.handle('publish:start', async (_event, payload) => {
     appLog('info', '[publish] 开始发布视频');
     const { createBrowserPublishBridge } = require('./services/browserPublishBridge');

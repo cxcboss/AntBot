@@ -116,6 +116,17 @@ class WeixinPublisher {
         });
         return true;
       }
+      if (message.action === 'selectAccount') {
+        const items = document.querySelectorAll('.finder-item');
+        const idx = Number(message.index) || 0;
+        if (items[idx]) {
+          items[idx].click();
+          sendResponse({ success: true, clicked: idx });
+        } else {
+          sendResponse({ success: false, error: '账号选项不存在' });
+        }
+        return true;
+      }
     });
 
     this.isReady = true;
@@ -140,10 +151,37 @@ class WeixinPublisher {
     await new Promise(r => setTimeout(r, 2000));
     const url = window.location.href;
     const isLoginPage = /login\.html/i.test(url) || document.querySelector('.login-qrcode-wrap, .qrcode-area');
-    if (isLoginPage) return { loggedIn: false };
+    if (isLoginPage) {
+      // 检测是否出现账号选择页面（扫码后）
+      const chooseArea = document.querySelector('.choose-finder-area, .choose-body, .finder-list');
+      if (chooseArea) {
+        const items = document.querySelectorAll('.finder-item');
+        if (items.length > 0) {
+          const accounts = [];
+          items.forEach((item, i) => {
+            const name = item.querySelector('.info')?.textContent?.trim() || '';
+            const role = item.querySelector('.role')?.textContent?.trim() || '';
+            if (name) accounts.push({ name, role, index: i });
+          });
+          if (accounts.length > 0) return { loggedIn: false, accountSelection: true, accounts };
+        }
+      }
+      return { loggedIn: false };
+    }
     const publishForm = document.querySelector('[class*="post-create"], [class*="upload"], .publish-container');
     if (publishForm) return { loggedIn: true };
-    if (document.querySelector('.login-qrcode-wrap, .qrcode-area, [class*="login-panel"]')) return { loggedIn: false };
+    // 检测是否在账号选择页面（URL 变了但还在选择）
+    const chooseArea2 = document.querySelector('.choose-finder-area, .finder-list');
+    if (chooseArea2) {
+      const items = document.querySelectorAll('.finder-item');
+      const accounts = [];
+      items.forEach((item, i) => {
+        const name = item.querySelector('.info')?.textContent?.trim() || '';
+        const role = item.querySelector('.role')?.textContent?.trim() || '';
+        if (name) accounts.push({ name, role, index: i });
+      });
+      if (accounts.length > 0) return { loggedIn: false, accountSelection: true, accounts };
+    }
     return { loggedIn: true };
   }
 

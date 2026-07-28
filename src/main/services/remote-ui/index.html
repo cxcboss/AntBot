@@ -314,7 +314,7 @@ function renderAppShell(){
     <button class="nav-item" data-page="remote"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>远程</button>
     <button class="nav-item" data-page="login"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>平台登录</button>
   </nav>
-  <div class="sidebar-version" id="sidebar-version">v1.0.9</div>
+  <div class="sidebar-version" id="sidebar-version">v1.1.0</div>
 </div>
 <div class="content" id="content">
   <div class="page active" id="page-main">
@@ -556,6 +556,15 @@ async function checkPlatformLogin(platform){
     if(r.loggedIn){
       statusEl.textContent='已登录';statusEl.className='login-status ok';
       qrEl.innerHTML='';if(tipEl)tipEl.style.display='none';
+    }else if(r.accountSelection&&r.accounts&&r.accounts.length>0){
+      statusEl.textContent='请选择账号';statusEl.className='login-status checking';
+      let html='<div style="margin-top:8px"><div style="font-size:12px;color:var(--muted-foreground);margin-bottom:8px">扫码成功，请选择要登录的视频号：</div>';
+      r.accounts.forEach(function(a,i){
+        html+='<div class="login-card" style="padding:10px;margin-bottom:6px;cursor:pointer" onclick="selectWeixinAccount('+i+')"><div style="display:flex;justify-content:space-between;align-items:center"><span style="font-weight:600">'+a.name+'</span><span class="login-status ok">'+a.role+'</span></div></div>';
+      });
+      html+='</div>';
+      qrEl.innerHTML=html;
+      if(tipEl)tipEl.style.display='';
     }else{
       statusEl.textContent='未登录';statusEl.className='login-status fail';
       if(r.qrDataUrl){
@@ -584,6 +593,30 @@ function hideQrOverlay(){document.getElementById('qr-overlay')?.classList.remove
 function saveQrImage(dataUrl){
   const a=document.createElement('a');a.href=dataUrl;a.download='login-qr.jpg';document.body.appendChild(a);a.click();document.body.removeChild(a);
   showToast('截图已保存');
+}
+async function selectWeixinAccount(index){
+  const statusEl=document.getElementById('login-status-weixin');
+  const qrEl=document.getElementById('login-qr-weixin');
+  const tipEl=document.getElementById('login-tip');
+  document.querySelectorAll('.login-check-btn').forEach(b=>{b.disabled=true;b.style.opacity='0.5';b.style.pointerEvents='none';});
+  if(statusEl){statusEl.textContent='选择中...';statusEl.className='login-status checking';}
+  try{
+    const r=await api('POST','/select-account',{platform:'weixin',accountIndex:index});
+    if(r?.ok===false){showToast(r.error||'选择失败');return;}
+    if(r?.loggedIn){
+      if(statusEl){statusEl.textContent='已登录';statusEl.className='login-status ok';}
+      if(qrEl)qrEl.innerHTML='';
+      if(tipEl)tipEl.style.display='none';
+      showToast('视频号登录成功');
+    }else{
+      if(statusEl){statusEl.textContent='已选择，请确认';statusEl.className='login-status checking';}
+      showToast(r?.message||'已在电脑上选择，请确认');
+    }
+  }catch(e){
+    showToast('选择失败: '+e.message);
+  }finally{
+    document.querySelectorAll('.login-check-btn').forEach(b=>{b.disabled=false;b.style.opacity='';b.style.pointerEvents='';});
+  }
 }
 
 function hslToHex(h,s,l){s/=100;l/=100;const a=s*Math.min(l,1-l);const f=n=>{const k=(n+h/30)%12;const c=l-a*Math.max(Math.min(k-3,9-k,1),-1);return Math.round(255*c).toString(16).padStart(2,'0')};return '#'+f(0)+f(8)+f(4)}
