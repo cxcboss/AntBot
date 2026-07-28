@@ -90,6 +90,19 @@ class BridgeServiceManager {
   }
 
   async start() {
+    // 清理已退出的进程引用
+    if (this.process && this.process.pid && this.process.killed) {
+      this.process = null;
+    }
+    if (this.process) {
+      // 验证进程是否真的在运行
+      if (this.process.isExternal) {
+        const stillRunning = !(await this.isPortAvailable(this.port));
+        if (!stillRunning) {
+          this.process = null;
+        }
+      }
+    }
     if (this.process) {
       log('info', `${this.logPrefix} 服务已在运行`);
       return true;
