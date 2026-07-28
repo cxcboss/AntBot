@@ -436,7 +436,6 @@ function bindEvents(){
 }
 
 function switchPage(page){
-  if(loginPollTimer){clearInterval(loginPollTimer);loginPollTimer=null;}
   currentPage=page;
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.getElementById('page-'+page)?.classList.add('active');
@@ -542,7 +541,6 @@ async function loadRemoteSettings(){
   const d=await api('GET','/remote/credentials');if(!d)return;
   const p=document.getElementById('remote-pass');if(p)p.value=d.password||'';
 }
-let loginPollTimer=null;
 async function checkPlatformLogin(platform){
   const statusEl=document.getElementById('login-status-'+platform);
   const qrEl=document.getElementById('login-qr-'+platform);
@@ -561,20 +559,8 @@ async function checkPlatformLogin(platform){
     }else{
       statusEl.textContent='未登录';statusEl.className='login-status fail';
       if(r.qrDataUrl){
-        qrEl.innerHTML='<img src="'+r.qrDataUrl+'" alt="登录二维码" onclick="showQrOverlay(\''+r.qrDataUrl+'\')"/><div class="qr-tip">点击图片放大查看 · 请使用'+(platform==='weixin'?'微信':'抖音')+'扫码登录</div><div class="qr-actions"><button class="btn btn-sm btn-primary" onclick="saveQrImage(\''+r.qrDataUrl+'\')">保存截图</button></div>';
+        qrEl.innerHTML='<img src="'+r.qrDataUrl+'" alt="登录二维码" onclick="showQrOverlay(\''+r.qrDataUrl+'\')"/><div class="qr-tip">点击图片放大查看 · 请使用'+(platform==='weixin'?'微信':'抖音')+'扫码登录 · 扫码后点击下方按钮检查状态</div><div class="qr-actions"><button class="btn btn-sm btn-primary" onclick="saveQrImage(\''+r.qrDataUrl+'\')">保存截图</button><button class="btn btn-sm" style="background:var(--muted)" onclick="checkPlatformLogin(\''+platform+'\')">检查登录状态</button></div>';
         if(tipEl)tipEl.style.display='';
-        if(loginPollTimer)clearInterval(loginPollTimer);
-        loginPollTimer=setInterval(async()=>{
-          try{
-            const p=await api('POST','/platform-login',{platform});
-            if(p?.loggedIn){
-              clearInterval(loginPollTimer);loginPollTimer=null;
-              statusEl.textContent='已登录';statusEl.className='login-status ok';
-              qrEl.innerHTML='';if(tipEl)tipEl.style.display='none';
-              showToast((platform==='weixin'?'视频号':'抖音')+'登录成功');
-            }
-          }catch{}
-        },5000);
       }else{
         qrEl.innerHTML='<div class="qr-tip">'+(r.error||'未获取到二维码，请确保电脑端浏览器已打开')+'</div>';
       }

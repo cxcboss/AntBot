@@ -103,26 +103,24 @@ async function handleLoginCheck(platform, commandId) {
       await sleep(2000);
     }
 
-    // 截图获取二维码
+    // 截图获取二维码，不压缩（压缩会导致扫码失败）
     let qrDataUrl = null;
     try {
       await chrome.debugger.attach({ tabId }, '1.3');
       await sleep(500);
       const screenshot = await chrome.debugger.sendCommand(
         { tabId }, 'Page.captureScreenshot',
-        { format: 'jpeg', quality: 70, captureBeyondViewport: false }
+        { format: 'jpeg', quality: 85, captureBeyondViewport: false }
       );
       if (screenshot?.data) {
-        const raw = 'data:image/jpeg;base64,' + screenshot.data;
-        qrDataUrl = await compressImage(raw, 600);
+        qrDataUrl = 'data:image/jpeg;base64,' + screenshot.data;
         console.log('[BG] 二维码截图成功, 大小:', Math.round((qrDataUrl?.length || 0) / 1024), 'KB');
       }
     } catch (e) {
       console.log('[BG] debugger 截图失败:', e.message);
       try {
         const tabInfo = await chrome.tabs.get(tabId);
-        const raw = await chrome.tabs.captureVisibleTab(tabInfo.windowId, { format: 'jpeg', quality: 70 });
-        if (raw) qrDataUrl = await compressImage(raw, 600);
+        qrDataUrl = await chrome.tabs.captureVisibleTab(tabInfo.windowId, { format: 'jpeg', quality: 85 });
       } catch {}
     } finally {
       try { await chrome.debugger.detach({ tabId }); } catch {}
