@@ -76,13 +76,32 @@ async function handleLoginCheck(platform, commandId) {
       await sleep(2000);
     }
 
-    // 截图获取二维码，压缩后传输
+    // 截图获取二维码，使用 debugger API（不依赖当前窗口焦点）
     let qrDataUrl = null;
     try {
-      const raw = await chrome.tabs.captureVisibleTab(null, { format: 'jpeg', quality: 70 });
-      if (raw) qrDataUrl = await compressImage(raw, 600);
+      await chrome.debugger.attach({ tabId: tab.id }, '1.3');
+      await sleep(500);
+      const screenshot = await chrome.debugger.sendCommand(
+        { tabId: tab.id },
+        'Page.captureScreenshot',
+        { format: 'jpeg', quality: 70, captureBeyondViewport: false }
+      );
+      if (screenshot?.data) {
+        const raw = 'data:image/jpeg;base64,' + screenshot.data;
+        qrDataUrl = await compressImage(raw, 600);
+        console.log('[BG] 二维码截图成功, 大小:', Math.round((qrDataUrl?.length || 0) / 1024), 'KB');
+      }
     } catch (e) {
-      console.log('[BG] 截图失败:', e.message);
+      console.log('[BG] debugger 截图失败:', e.message);
+      // fallback: 尝试 captureVisibleTab
+      try {
+        const raw = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 70 });
+        if (raw) qrDataUrl = await compressImage(raw, 600);
+      } catch (e2) {
+        console.log('[BG] fallback 截图也失败:', e2.message);
+      }
+    } finally {
+      try { await chrome.debugger.detach({ tabId: tab.id }); } catch {}
     }
 
     if (commandId && qrDataUrl) {
