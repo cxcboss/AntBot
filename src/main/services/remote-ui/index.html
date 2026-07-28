@@ -63,9 +63,14 @@ body{font-family:var(--font);background:var(--bg);color:var(--fg);font-size:13px
 .login-status.checking{background:#fef9c3;color:#d97706}
 .login-check-btn{width:100%}
 .login-qr-area{margin-top:12px;text-align:center;min-height:0}
-.login-qr-area img{max-width:200px;max-height:200px;border-radius:var(--radius);border:1px solid var(--border)}
+.login-qr-area img{max-width:100%;border-radius:var(--radius);border:1px solid var(--border);cursor:pointer}
 .login-qr-area .qr-tip{font-size:11px;color:var(--muted-foreground);margin-top:8px}
+.login-qr-area .qr-actions{display:flex;gap:8px;justify-content:center;margin-top:8px}
 .login-tip{font-size:11px;color:var(--muted-foreground);text-align:center;margin-top:8px}
+.qr-overlay{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:200;display:none;align-items:center;justify-content:center;flex-direction:column;padding:16px}
+.qr-overlay.show{display:flex}
+.qr-overlay img{max-width:100%;max-height:80vh;border-radius:var(--radius)}
+.qr-overlay .qr-actions{display:flex;gap:8px;margin-top:12px}
 .slider-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
 .slider-label{font-size:11px;color:var(--muted);width:32px;flex-shrink:0}
 .slider-val{font-size:11px;color:var(--muted);width:36px;text-align:right;flex-shrink:0}
@@ -309,7 +314,7 @@ function renderAppShell(){
     <button class="nav-item" data-page="remote"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>远程</button>
     <button class="nav-item" data-page="login"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>平台登录</button>
   </nav>
-  <div class="sidebar-version" id="sidebar-version">v1.0.6</div>
+  <div class="sidebar-version" id="sidebar-version">v1.0.7</div>
 </div>
 <div class="content" id="content">
   <div class="page active" id="page-main">
@@ -350,6 +355,14 @@ function renderAppShell(){
     </div>
     <div class="login-tip" id="login-tip" style="display:none">请使用对应平台 APP 扫描二维码登录，登录成功后状态会自动更新</div>
   </div>
+</div>
+<div class="qr-overlay" id="qr-overlay">
+  <img id="qr-overlay-img" src="" alt="登录二维码"/>
+  <div class="qr-actions">
+    <button class="btn btn-sm btn-primary" id="qr-save-btn" type="button">保存到手机</button>
+    <button class="btn btn-sm" id="qr-close-btn" type="button" style="background:var(--muted)">关闭</button>
+  </div>
+</div>
 </div>
 <div class="input-bar" id="input-bar">
   <div class="input-row">
@@ -415,6 +428,9 @@ function bindEvents(){
   document.querySelectorAll('.login-check-btn').forEach(btn=>{
     btn.addEventListener('click',()=>checkPlatformLogin(btn.dataset.platform));
   });
+  document.getElementById('qr-overlay')?.addEventListener('click',e=>{if(e.target.id==='qr-overlay')hideQrOverlay();});
+  document.getElementById('qr-close-btn')?.addEventListener('click',hideQrOverlay);
+  document.getElementById('qr-save-btn')?.addEventListener('click',()=>{const img=document.getElementById('qr-overlay-img');if(img?.src)saveQrImage(img.src);});
   setupColorPicker('color','#FFA100');
   setupColorPicker('stroke','#000000');
 }
@@ -545,7 +561,7 @@ async function checkPlatformLogin(platform){
     }else{
       statusEl.textContent='未登录';statusEl.className='login-status fail';
       if(r.qrDataUrl){
-        qrEl.innerHTML='<img src="'+r.qrDataUrl+'" alt="登录二维码"/><div class="qr-tip">请使用'+(platform==='weixin'?'微信':'抖音')+'扫码登录</div>';
+        qrEl.innerHTML='<img src="'+r.qrDataUrl+'" alt="登录二维码" onclick="showQrOverlay(\''+r.qrDataUrl+'\')"/><div class="qr-tip">点击图片放大查看 · 请使用'+(platform==='weixin'?'微信':'抖音')+'扫码登录</div><div class="qr-actions"><button class="btn btn-sm btn-primary" onclick="saveQrImage(\''+r.qrDataUrl+'\')">保存截图</button></div>';
         if(tipEl)tipEl.style.display='';
         if(loginPollTimer)clearInterval(loginPollTimer);
         loginPollTimer=setInterval(async()=>{
@@ -571,6 +587,17 @@ async function checkPlatformLogin(platform){
     // 恢复所有检测按钮
     document.querySelectorAll('.login-check-btn').forEach(b=>{b.disabled=false;b.style.opacity='';b.style.pointerEvents='';});
   }
+}
+
+function showQrOverlay(dataUrl){
+  const overlay=document.getElementById('qr-overlay');
+  const img=document.getElementById('qr-overlay-img');
+  if(overlay&&img){img.src=dataUrl;overlay.classList.add('show');}
+}
+function hideQrOverlay(){document.getElementById('qr-overlay')?.classList.remove('show');}
+function saveQrImage(dataUrl){
+  const a=document.createElement('a');a.href=dataUrl;a.download='login-qr.jpg';document.body.appendChild(a);a.click();document.body.removeChild(a);
+  showToast('截图已保存');
 }
 
 function hslToHex(h,s,l){s/=100;l/=100;const a=s*Math.min(l,1-l);const f=n=>{const k=(n+h/30)%12;const c=l-a*Math.max(Math.min(k-3,9-k,1),-1);return Math.round(255*c).toString(16).padStart(2,'0')};return '#'+f(0)+f(8)+f(4)}
