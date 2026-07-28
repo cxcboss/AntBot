@@ -1,6 +1,6 @@
 {
   "name": "antbot",
-  "version": "0.3.7",
+  "version": "0.4.0",
   "description": "搬运蚁 - 内置浏览器的视频下载、字幕生成、剪辑与发布工作台",
   "main": "src/main/index.js",
   "author": "",

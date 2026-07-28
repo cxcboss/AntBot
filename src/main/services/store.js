@@ -9,8 +9,6 @@ const DEFAULT_USER_ID = 'user-1';
 const DEFAULT_USER_NAME = '蚂蚁1';
 const DEFAULT_GEMINI_PROFILE_ID = 'default';
 const DEFAULT_GEMINI_PROFILE_NAME = '默认 Gemini';
-const MAX_USERS = 5;
-const AVAILABLE_AVATAR_IDS = [1, 2, 3, 4, 5];
 const LEGACY_SUBTITLE_TEXT_COLORS = new Set(['', '#FFDD00']);
 const LEGACY_SUBTITLE_STROKE_COLORS = new Set(['', '#FFFFFF']);
 
@@ -75,11 +73,6 @@ function sanitizeGeminiProfileName(name, fallback = DEFAULT_GEMINI_PROFILE_NAME)
   return value || fallback;
 }
 
-function sanitizeUserName(name, fallback = DEFAULT_USER_NAME) {
-  const value = String(name || '').replace(/\s+/g, ' ').trim();
-  return value || fallback;
-}
-
 function normalizeUserId(value, fallbackIndex = 1) {
   const raw = String(value || '')
     .trim()
@@ -87,32 +80,6 @@ function normalizeUserId(value, fallbackIndex = 1) {
     .replace(/[^a-z0-9-]+/g, '-')
     .replace(/^-+|-+$/g, '');
   return raw || `user-${fallbackIndex}`;
-}
-
-function normalizeAvatarId(value) {
-  const numeric = Number(value);
-  return AVAILABLE_AVATAR_IDS.includes(numeric) ? numeric : null;
-}
-
-function pickAvailableAvatarId(users = [], preferredId = null) {
-  const preferred = normalizeAvatarId(preferredId);
-  const used = new Set(
-    (users || [])
-      .map((user) => normalizeAvatarId(user?.avatarId))
-      .filter(Boolean)
-  );
-
-  if (preferred && !used.has(preferred)) {
-    return preferred;
-  }
-
-  for (const avatarId of AVAILABLE_AVATAR_IDS) {
-    if (!used.has(avatarId)) {
-      return avatarId;
-    }
-  }
-
-  return AVAILABLE_AVATAR_IDS[0];
 }
 
 function buildSharedVoiceClone(seed = {}) {
@@ -128,28 +95,6 @@ function buildSharedRemote(seed = {}) {
 
 function buildSharedSystem(seed = {}) {
   return deepMerge(clone(buildDefaultSettings().system || {}), seed || {});
-}
-
-function buildUserProfileSettingsOverrides(seed = {}, geminiProfiles = buildGeminiProfiles()) {
-  const result = {};
-
-  if (seed.retry && typeof seed.retry === 'object') {
-    result.retry = clone(seed.retry);
-  }
-  if (seed.publish && typeof seed.publish === 'object') {
-    result.publish = clone(seed.publish);
-  }
-  if (seed.style && typeof seed.style === 'object') {
-    result.style = clone(seed.style);
-  }
-  if (seed.voiceClone && typeof seed.voiceClone === 'object') {
-    result.voiceClone = clone(seed.voiceClone);
-  }
-  if (typeof seed.geminiProfileId === 'string') {
-    result.geminiProfileId = resolveGeminiProfileId(seed.geminiProfileId, geminiProfiles);
-  }
-
-  return result;
 }
 
 function buildGeminiProfile(seed = {}, fallbackId = DEFAULT_GEMINI_PROFILE_ID) {
@@ -228,18 +173,12 @@ function buildUserRecord(seed = {}, options = {}) {
   const geminiProfiles = options.geminiProfiles || buildGeminiProfiles();
   return {
     id: normalizeUserId(seed.id, options.index || 1),
-    name: sanitizeUserName(seed.name, options.defaultName || DEFAULT_USER_NAME),
-    avatarId: normalizeAvatarId(seed.avatarId) || options.avatarId || AVAILABLE_AVATAR_IDS[0],
+    name: String(seed.name || options.defaultName || DEFAULT_USER_NAME).replace(/\s+/g, ' ').trim() || DEFAULT_USER_NAME,
     settings: buildUserSettings(
       seed.settings || {},
       sharedVoiceClone,
       sharedRemote,
       sharedSystem,
-      geminiProfiles
-    ),
-    profileSettingsEnabled: Boolean(seed.profileSettingsEnabled),
-    profileSettingsOverrides: buildUserProfileSettingsOverrides(
-      seed.profileSettingsOverrides || {},
       geminiProfiles
     ),
     history: Array.isArray(seed.history) ? seed.history.slice(0, 200) : [],
@@ -274,8 +213,7 @@ function buildDefaultState() {
         sharedVoiceClone,
         sharedRemote,
         sharedSystem,
-        geminiProfiles,
-        avatarId: AVAILABLE_AVATAR_IDS[0]
+        geminiProfiles
       })
     ]
   };
@@ -312,7 +250,6 @@ function normalizeState(seed = {}) {
     const geminiProfiles = buildGeminiProfiles(seed.geminiProfiles, sharedLoginState.gemini);
 
     const seenIds = new Set();
-    const avatarSeed = [];
     const users = seed.users.map((user, index) => {
       const normalized = buildUserRecord(user, {
         index: index + 1,
@@ -320,15 +257,13 @@ function normalizeState(seed = {}) {
         sharedRemote,
         sharedSystem,
         geminiProfiles,
-        defaultName: `蚂蚁${index + 1}`,
-        avatarId: pickAvailableAvatarId(avatarSeed, user?.avatarId)
+        defaultName: `蚂蚁${index + 1}`
       });
 
       if (seenIds.has(normalized.id)) {
         normalized.id = normalizeUserId(`${normalized.id}-${index + 1}`, index + 1);
       }
       seenIds.add(normalized.id);
-      avatarSeed.push(normalized);
       return normalized;
     });
 
@@ -366,8 +301,7 @@ function normalizeState(seed = {}) {
     sharedVoiceClone,
     sharedRemote,
     sharedSystem,
-    geminiProfiles,
-    avatarId: AVAILABLE_AVATAR_IDS[0]
+    geminiProfiles
   });
 
   return {
@@ -451,7 +385,6 @@ class StoreService {
     this.state.geminiProfiles = buildGeminiProfiles(this.state.geminiProfiles, this.state.sharedLoginState.gemini);
 
     const seenIds = new Set();
-    const avatarSeed = [];
     this.state.users = this.state.users.map((user, index) => {
       const next = buildUserRecord(user, {
         index: index + 1,
@@ -459,15 +392,13 @@ class StoreService {
         sharedRemote: this.state.sharedRemote,
         sharedSystem: this.state.sharedSystem,
         geminiProfiles: this.state.geminiProfiles,
-        defaultName: `蚂蚁${index + 1}`,
-        avatarId: pickAvailableAvatarId(avatarSeed, user?.avatarId)
+        defaultName: `蚂蚁${index + 1}`
       });
       if (seenIds.has(next.id)) {
         next.id = normalizeUserId(`${next.id}-${index + 1}`, index + 1);
         changed = true;
       }
       seenIds.add(next.id);
-      avatarSeed.push(next);
       return next;
     });
 
@@ -651,19 +582,6 @@ class StoreService {
       }
     }
 
-    if (version < 6) {
-      for (const user of this.state.users) {
-        if (user.profileSettingsEnabled !== false) {
-          user.profileSettingsEnabled = false;
-          changed = true;
-        }
-        if (user.profileSettingsOverrides && Object.keys(user.profileSettingsOverrides).length > 0) {
-          user.profileSettingsOverrides = {};
-          changed = true;
-        }
-      }
-    }
-
     return changed;
   }
 
@@ -698,45 +616,14 @@ class StoreService {
     return this.state.users.find((user) => user.id === userId) || null;
   }
 
-  buildUserSummary(user) {
-    const loginState = user.loginState || {};
-    const effectiveSettings = this.cloneSettingsForUser(user);
-    const geminiProfileId = resolveGeminiProfileId(effectiveSettings.geminiProfileId, this.state.geminiProfiles);
-    const geminiProfile = this.state.geminiProfiles.find((item) => item.id === geminiProfileId)
-      || this.state.geminiProfiles[0]
-      || buildGeminiProfile();
-    return {
-      id: user.id,
-      name: user.name,
-      avatarId: normalizeAvatarId(user.avatarId) || AVAILABLE_AVATAR_IDS[0],
-      isActive: user.id === this.state.activeUserId,
-      platformReady: Boolean(loginState.videoChannel?.loggedIn || loginState.douyin?.loggedIn),
-      geminiReady: Boolean(loginState.gemini?.loggedIn),
-      geminiProfileId,
-      geminiProfileName: geminiProfile.name,
-      profileSettingsEnabled: Boolean(user.profileSettingsEnabled),
-      remoteEnabled: Boolean(this.state.sharedRemote?.enabled),
-      remotePasswordConfigured: false,
-      historyCount: Array.isArray(user.history) ? user.history.length : 0,
-      createdAt: user.createdAt,
-      updatedAt: user.updatedAt
-    };
-  }
-
   cloneSettingsForUser(user) {
     const globalSettings = this.cloneGlobalSettingsForUser(user);
     const settings = clone(globalSettings);
-    if (user.profileSettingsEnabled) {
-      deepMerge(settings, clone(user.profileSettingsOverrides || {}));
-    }
     settings.__userId = user.id;
     settings.__userName = user.name;
-    settings.__avatarId = normalizeAvatarId(user.avatarId) || AVAILABLE_AVATAR_IDS[0];
     settings.__geminiProfileId = settings.geminiProfileId;
     settings.__geminiProfileName = this.state.geminiProfiles.find((item) => item.id === settings.geminiProfileId)?.name
       || DEFAULT_GEMINI_PROFILE_NAME;
-    settings.__profileSettingsEnabled = Boolean(user.profileSettingsEnabled);
-    settings.__profileSettingsOverrides = clone(user.profileSettingsOverrides || {});
     settings.__globalSettings = globalSettings;
     return settings;
   }
@@ -750,7 +637,6 @@ class StoreService {
     settings.remote.password = '';
     settings.__userId = user.id;
     settings.__userName = user.name;
-    settings.__avatarId = normalizeAvatarId(user.avatarId) || AVAILABLE_AVATAR_IDS[0];
     settings.__geminiProfileId = settings.geminiProfileId;
     settings.__geminiProfileName = this.state.geminiProfiles.find((item) => item.id === settings.geminiProfileId)?.name
       || DEFAULT_GEMINI_PROFILE_NAME;
@@ -759,27 +645,6 @@ class StoreService {
 
   touchUser(user) {
     user.updatedAt = nowIso();
-  }
-
-  nextUserName() {
-    const numbers = this.state.users
-      .map((user) => {
-        const matched = String(user.name || '').match(/^蚂蚁(\d+)$/);
-        return matched ? Number(matched[1]) : 0;
-      })
-      .filter((value) => Number.isFinite(value) && value > 0);
-
-    const nextIndex = numbers.length ? Math.max(...numbers) + 1 : this.state.users.length + 1;
-    return `蚂蚁${nextIndex}`;
-  }
-
-  nextUserId() {
-    const existing = new Set(this.state.users.map((user) => user.id));
-    let index = this.state.users.length + 1;
-    while (existing.has(`user-${index}`)) {
-      index += 1;
-    }
-    return `user-${index}`;
   }
 
   nextGeminiProfileName() {
@@ -805,20 +670,7 @@ class StoreService {
 
   async getSettingsForUser(userId) {
     await this.load();
-    const user = this.getUserRecordById(userId);
-    if (!user) {
-      throw new Error('用户不存在。');
-    }
-    return this.cloneSettingsForUser(user);
-  }
-
-  async getGlobalSettingsForUser(userId) {
-    await this.load();
-    const user = this.getUserRecordById(userId);
-    if (!user) {
-      throw new Error('用户不存在。');
-    }
-    return this.cloneGlobalSettingsForUser(user);
+    return this.cloneSettingsForUser(this.getActiveUserRecord());
   }
 
   async updateSettings(partialSettings) {
@@ -826,18 +678,11 @@ class StoreService {
     return this.updateSettingsForUser(this.getActiveUserRecord().id, partialSettings);
   }
 
-  async updateSettingsForUser(userId, partialSettings, options = {}) {
+  async updateSettingsForUser(userId, partialSettings) {
     await this.load();
 
-    const user = this.getUserRecordById(userId);
-    if (!user) {
-      throw new Error('用户不存在。');
-    }
+    const user = this.getActiveUserRecord();
     const nextPartial = clone(partialSettings || {});
-    const scope = options.scope === 'user-profile' ? 'user-profile' : 'global';
-    const profileSettingsEnabled = typeof options.profileSettingsEnabled === 'boolean'
-      ? options.profileSettingsEnabled
-      : null;
     const voiceClonePatch = nextPartial.voiceClone && typeof nextPartial.voiceClone === 'object'
       ? nextPartial.voiceClone
       : null;
@@ -850,26 +695,6 @@ class StoreService {
     const geminiProfileId = typeof nextPartial.geminiProfileId === 'string'
       ? resolveGeminiProfileId(nextPartial.geminiProfileId, this.state.geminiProfiles)
       : '';
-
-    if (scope === 'user-profile') {
-      const profilePatch = buildUserProfileSettingsOverrides(nextPartial, this.state.geminiProfiles);
-      if (profileSettingsEnabled !== null) {
-        user.profileSettingsEnabled = profileSettingsEnabled;
-        if (!profileSettingsEnabled) {
-          user.profileSettingsOverrides = {};
-        }
-      }
-      if (Object.keys(profilePatch).length > 0) {
-        user.profileSettingsOverrides = deepMerge(
-          clone(user.profileSettingsOverrides || {}),
-          profilePatch
-        );
-        user.profileSettingsEnabled = profileSettingsEnabled ?? true;
-      }
-      this.touchUser(user);
-      await this.persist();
-      return this.cloneSettingsForUser(user);
-    }
 
     if (voiceClonePatch) {
       delete nextPartial.voiceClone;
@@ -915,11 +740,7 @@ class StoreService {
 
   async getHistoryForUser(userId) {
     await this.load();
-    const user = this.getUserRecordById(userId);
-    if (!user) {
-      throw new Error('用户不存在。');
-    }
-    return clone(user.history || []);
+    return clone(this.getActiveUserRecord().history || []);
   }
 
   async appendHistory(runRecord) {
@@ -929,10 +750,7 @@ class StoreService {
 
   async appendHistoryForUser(userId, runRecord) {
     await this.load();
-    const user = this.getUserRecordById(userId);
-    if (!user) {
-      throw new Error('用户不存在。');
-    }
+    const user = this.getActiveUserRecord();
     user.history.unshift(clone(runRecord));
     user.history = user.history.slice(0, 200);
     this.touchUser(user);
@@ -947,10 +765,7 @@ class StoreService {
 
   async appendPublishedRecordsForUser(userId, records) {
     await this.load();
-    const user = this.getUserRecordById(userId);
-    if (!user) {
-      throw new Error('用户不存在。');
-    }
+    const user = this.getActiveUserRecord();
     const items = Array.isArray(records) ? clone(records) : [];
     user.publishedRecords.unshift(...items);
     user.publishedRecords = user.publishedRecords.slice(0, 500);
@@ -964,15 +779,6 @@ class StoreService {
     return clone(this.getActiveUserRecord().loginState || buildDefaultLoginState());
   }
 
-  async getLoginStateForUser(userId) {
-    await this.load();
-    const user = this.getUserRecordById(userId);
-    if (!user) {
-      throw new Error('用户不存在。');
-    }
-    return clone(user.loginState || buildDefaultLoginState());
-  }
-
   async setLoginState(service, loggedIn) {
     await this.load();
     return this.setLoginStateForUser(this.getActiveUserRecord().id, service, loggedIn);
@@ -980,10 +786,7 @@ class StoreService {
 
   async setLoginStateForUser(userId, service, loggedIn) {
     await this.load();
-    const user = this.getUserRecordById(userId);
-    if (!user) {
-      throw new Error('用户不存在。');
-    }
+    const user = this.getActiveUserRecord();
     const nextState = {
       loggedIn: Boolean(loggedIn),
       checkedAt: nowIso()
@@ -1033,11 +836,6 @@ class StoreService {
     return clone(this.state.sharedVoiceClone);
   }
 
-  async listUsers() {
-    await this.load();
-    return this.state.users.map((user) => this.buildUserSummary(user));
-  }
-
   async listGeminiProfiles() {
     await this.load();
     return clone(this.state.geminiProfiles || []);
@@ -1059,117 +857,6 @@ class StoreService {
     this.state.geminiProfiles.push(created);
     await this.persist();
     return clone(created);
-  }
-
-  async getActiveUserSummary() {
-    await this.load();
-    return this.buildUserSummary(this.getActiveUserRecord());
-  }
-
-  async getUserSummary(userId) {
-    await this.load();
-    const user = this.getUserRecordById(userId);
-    if (!user) {
-      throw new Error('用户不存在。');
-    }
-    return this.buildUserSummary(user);
-  }
-
-  async createUser(name = '') {
-    await this.load();
-    return this.createUserFromUser(this.getActiveUserRecord().id, name);
-  }
-
-  async createUserFromUser(sourceUserId, name = '') {
-    await this.load();
-    if (this.state.users.length >= MAX_USERS) {
-      throw new Error(`最多只支持 ${MAX_USERS} 个用户。`);
-    }
-    const source = this.getUserRecordById(sourceUserId) || this.getActiveUserRecord();
-    const newUser = buildUserRecord({
-      id: this.nextUserId(),
-      name: sanitizeUserName(name, this.nextUserName()),
-      avatarId: pickAvailableAvatarId(this.state.users),
-      settings: {
-        ...clone(source.settings),
-        geminiProfileId: DEFAULT_GEMINI_PROFILE_ID
-      },
-      profileSettingsEnabled: false,
-      profileSettingsOverrides: {},
-      loginState: {
-        ...buildDefaultLoginState()
-      }
-    }, {
-      index: this.state.users.length + 1,
-      sharedVoiceClone: this.state.sharedVoiceClone,
-      sharedRemote: this.state.sharedRemote,
-      sharedSystem: this.state.sharedSystem,
-      geminiProfiles: this.state.geminiProfiles
-    });
-
-    this.state.users.push(newUser);
-    this.touchUser(newUser);
-    await this.persist();
-    return this.buildUserSummary(newUser);
-  }
-
-  async switchUser(userId) {
-    await this.load();
-    const user = this.state.users.find((item) => item.id === userId);
-    if (!user) {
-      throw new Error('用户不存在。');
-    }
-    this.state.activeUserId = user.id;
-    this.touchUser(user);
-    await this.persist();
-    return this.buildUserSummary(user);
-  }
-
-  async renameUser(userId, name) {
-    await this.load();
-    const user = this.state.users.find((item) => item.id === userId);
-    if (!user) {
-      throw new Error('用户不存在。');
-    }
-    user.name = sanitizeUserName(name, user.name || DEFAULT_USER_NAME);
-    this.touchUser(user);
-    await this.persist();
-    return this.buildUserSummary(user);
-  }
-
-  async deleteUser(userId) {
-    await this.load();
-
-    if (this.state.users.length <= 1) {
-      throw new Error('至少保留一个用户。');
-    }
-
-    const index = this.state.users.findIndex((item) => item.id === userId);
-    if (index === -1) {
-      throw new Error('用户不存在。');
-    }
-
-    const [removed] = this.state.users.splice(index, 1);
-    const nextActiveUser = this.state.users[Math.max(0, index - 1)] || this.state.users[0];
-    if (this.state.activeUserId === removed.id) {
-      this.state.activeUserId = nextActiveUser.id;
-    }
-
-    if (nextActiveUser) {
-      this.touchUser(nextActiveUser);
-    }
-
-    await fs.rm(
-      path.join(app.getPath('userData'), 'browser-profiles', normalizeUserId(removed.id, 1)),
-      { recursive: true, force: true }
-    ).catch(() => {});
-
-    await this.persist();
-    return {
-      deletedUserId: removed.id,
-      activeUser: this.buildUserSummary(this.getActiveUserRecord()),
-      users: this.state.users.map((user) => this.buildUserSummary(user))
-    };
   }
 }
 

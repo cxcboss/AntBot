@@ -10,6 +10,7 @@ const bridgeQueue = createBridgeQueue();
 const bridgeEventSequences = new Map();
 const BRIDGE_CAPABILITIES = [
   'publish.start', 'publish.stop', 'publish.getState',
+  'platform.loginCheck',
   'browser.getState', 'browser.getTabs', 'browser.navigate',
   'browser.click', 'browser.type', 'browser.select', 'browser.scroll',
   'browser.screenshot', 'browser.eval', 'media.list', 'media.info', 'history.list'

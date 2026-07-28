@@ -53,6 +53,18 @@ body{font-family:var(--font);background:var(--bg);color:var(--fg);font-size:13px
 .btn-block{width:100%;display:block}
 .btn-sm{padding:4px 10px;font-size:11px;height:28px}
 .section-title{font-size:14px;font-weight:600;margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+.login-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px}
+.login-card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.login-platform-name{font-size:14px;font-weight:600}
+.login-status{font-size:11px;padding:2px 8px;border-radius:var(--radius-full);background:var(--muted);color:var(--muted-foreground)}
+.login-status.ok{background:#dcfce7;color:#16a34a}
+.login-status.fail{background:#fef2f2;color:#dc2626}
+.login-status.checking{background:#fef9c3;color:#d97706}
+.login-check-btn{width:100%}
+.login-qr-area{margin-top:12px;text-align:center;min-height:0}
+.login-qr-area img{max-width:200px;max-height:200px;border-radius:var(--radius);border:1px solid var(--border)}
+.login-qr-area .qr-tip{font-size:11px;color:var(--muted-foreground);margin-top:8px}
+.login-tip{font-size:11px;color:var(--muted-foreground);text-align:center;margin-top:8px}
 .slider-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
 .slider-label{font-size:11px;color:var(--muted);width:32px;flex-shrink:0}
 .slider-val{font-size:11px;color:var(--muted);width:36px;text-align:right;flex-shrink:0}
@@ -294,6 +306,7 @@ function renderAppShell(){
     <button class="nav-item active" data-page="main"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>主控</button>
     <button class="nav-item" data-page="subtitle"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>字幕</button>
     <button class="nav-item" data-page="remote"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>远程</button>
+    <button class="nav-item" data-page="login"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>平台登录</button>
   </nav>
 </div>
 <div class="content" id="content">
@@ -320,6 +333,20 @@ function renderAppShell(){
     <div class="section-title">远程设置</div>
     <div class="form-group"><label class="form-label">密码</label><input class="form-input" id="remote-pass" type="password" /></div>
     <button class="btn btn-primary btn-block" id="remote-save-btn" type="button">保存并重新登录</button>
+  </div>
+  <div class="page" id="page-login">
+    <div class="section-title">平台登录</div>
+    <div class="login-card" id="login-douyin">
+      <div class="login-card-header"><span class="login-platform-name">抖音</span><span class="login-status" id="login-status-douyin">未检测</span></div>
+      <button class="btn btn-sm btn-primary login-check-btn" data-platform="douyin" type="button">检测登录</button>
+      <div class="login-qr-area" id="login-qr-douyin"></div>
+    </div>
+    <div class="login-card" id="login-weixin">
+      <div class="login-card-header"><span class="login-platform-name">视频号</span><span class="login-status" id="login-status-weixin">未检测</span></div>
+      <button class="btn btn-sm btn-primary login-check-btn" data-platform="weixin" type="button">检测登录</button>
+      <div class="login-qr-area" id="login-qr-weixin"></div>
+    </div>
+    <div class="login-tip" id="login-tip" style="display:none">请使用对应平台 APP 扫描二维码登录，登录成功后状态会自动更新</div>
   </div>
 </div>
 <div class="input-bar" id="input-bar">
@@ -383,16 +410,20 @@ function bindEvents(){
     await api('POST','/remote/settings',{remote:{password:p}});
     showToast('已保存，需重新登录');setTimeout(logout,1000);
   });
+  document.querySelectorAll('.login-check-btn').forEach(btn=>{
+    btn.addEventListener('click',()=>checkPlatformLogin(btn.dataset.platform));
+  });
   setupColorPicker('color','#FFA100');
   setupColorPicker('stroke','#000000');
 }
 
 function switchPage(page){
+  if(loginPollTimer){clearInterval(loginPollTimer);loginPollTimer=null;}
   currentPage=page;
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.getElementById('page-'+page)?.classList.add('active');
   document.querySelectorAll('.nav-item[data-page]').forEach(n=>n.classList.toggle('active',n.dataset.page===page));
-  document.getElementById('header-title').textContent={main:'主控',subtitle:'字幕',remote:'远程'}[page]||'主控';
+  document.getElementById('header-title').textContent={main:'主控',subtitle:'字幕',remote:'远程',login:'平台登录'}[page]||'主控';
   document.getElementById('sidebar')?.classList.remove('open');
   document.getElementById('sidebar-overlay')?.classList.remove('show');
   const ib=document.getElementById('input-bar');if(ib)ib.style.display=page==='main'?'':'none';
@@ -492,6 +523,46 @@ async function loadSubtitleSettings(){
 async function loadRemoteSettings(){
   const d=await api('GET','/remote/credentials');if(!d)return;
   const p=document.getElementById('remote-pass');if(p)p.value=d.password||'';
+}
+let loginPollTimer=null;
+async function checkPlatformLogin(platform){
+  const statusEl=document.getElementById('login-status-'+platform);
+  const qrEl=document.getElementById('login-qr-'+platform);
+  const tipEl=document.getElementById('login-tip');
+  if(!statusEl||!qrEl)return;
+  statusEl.textContent='检测中...';statusEl.className='login-status checking';
+  qrEl.innerHTML='';if(tipEl)tipEl.style.display='none';
+  try{
+    const r=await api('POST','/platform-login',{platform});
+    if(!r){statusEl.textContent='请求失败';statusEl.className='login-status fail';return;}
+    if(r.loggedIn){
+      statusEl.textContent='已登录';statusEl.className='login-status ok';
+      qrEl.innerHTML='';if(tipEl)tipEl.style.display='none';
+    }else{
+      statusEl.textContent='未登录';statusEl.className='login-status fail';
+      if(r.qrDataUrl){
+        qrEl.innerHTML='<img src="'+r.qrDataUrl+'" alt="登录二维码"/><div class="qr-tip">请使用'+(platform==='weixin'?'微信':'抖音')+'扫码登录</div>';
+        if(tipEl)tipEl.style.display='';
+        if(loginPollTimer)clearInterval(loginPollTimer);
+        loginPollTimer=setInterval(async()=>{
+          try{
+            const p=await api('POST','/platform-login',{platform});
+            if(p?.loggedIn){
+              clearInterval(loginPollTimer);loginPollTimer=null;
+              statusEl.textContent='已登录';statusEl.className='login-status ok';
+              qrEl.innerHTML='';if(tipEl)tipEl.style.display='none';
+              showToast((platform==='weixin'?'视频号':'抖音')+'登录成功');
+            }
+          }catch{}
+        },5000);
+      }else{
+        qrEl.innerHTML='<div class="qr-tip">'+(r.error||'未获取到二维码，请确保电脑端浏览器已打开')+'</div>';
+      }
+    }
+  }catch(e){
+    statusEl.textContent='检测失败';statusEl.className='login-status fail';
+    qrEl.innerHTML='<div class="qr-tip">'+e.message+'</div>';
+  }
 }
 
 function hslToHex(h,s,l){s/=100;l/=100;const a=s*Math.min(l,1-l);const f=n=>{const k=(n+h/30)%12;const c=l-a*Math.max(Math.min(k-3,9-k,1),-1);return Math.round(255*c).toString(16).padStart(2,'0')};return '#'+f(0)+f(8)+f(4)}

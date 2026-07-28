@@ -147,6 +147,7 @@ contextBridge.exposeInMainWorld('antbot', {
   publishBridgeStart: () => ipcRenderer.invoke('publish:bridge-start'),
   publishBridgeStop: () => ipcRenderer.invoke('publish:bridge-stop'),
   publishBridgeServiceStatus: () => ipcRenderer.invoke('publish:bridge-service-status'),
+  checkPlatformLogin: (platform) => ipcRenderer.invoke('bridge:check-platform-login', platform),
   publishStart: (payload) => ipcRenderer.invoke('publish:start', payload),
   publishStop: (requestId) => ipcRenderer.invoke('publish:stop', requestId),
   publishSaveRecord: (record) => ipcRenderer.invoke('publish:save-record', record),

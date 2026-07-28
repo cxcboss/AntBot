@@ -37,6 +37,74 @@ async function bridgeResult(commandId, result) {
   try { await bridgeRequest(`/api/bridge/commands/${encodeURIComponent(commandId)}/result`, { method: 'POST', body: JSON.stringify(result) }); } catch (_) {}
 }
 
+const PLATFORM_LOGIN_URLS = {
+  douyin: 'https://creator.douyin.com/creator-micro/content/publish',
+  weixin: 'https://channels.weixin.qq.com/login.html'
+};
+
+async function handleLoginCheck(platform, commandId) {
+  const url = PLATFORM_LOGIN_URLS[platform];
+  if (!url) throw new Error(`不支持的平台: ${platform}`);
+  const tab = await chrome.tabs.create({ url, active: true });
+  try {
+    for (let i = 0; i < 20; i++) {
+      await sleep(1000);
+      try {
+        const ping = await chrome.tabs.sendMessage(tab.id, { action: 'ping' });
+        if (ping?.ready) break;
+      } catch {}
+    }
+    const result = await chrome.tabs.sendMessage(tab.id, { action: 'loginCheck' });
+    if (result?.loggedIn) {
+      return { loggedIn: true, platform };
+    }
+    let qrDataUrl = result?.qrDataUrl || null;
+    // 跨域 iframe 二维码：通过截图裁剪获取
+    if (result?.useScreenshot && !qrDataUrl) {
+      await sleep(1000);
+      try {
+        const screenshotDataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
+        if (result?.cropArea && screenshotDataUrl) {
+          qrDataUrl = await cropScreenshot(screenshotDataUrl, result.cropArea);
+        } else {
+          qrDataUrl = screenshotDataUrl;
+        }
+      } catch (e) {
+        console.log('[BG] 截图失败:', e.message);
+      }
+    }
+    if (commandId && qrDataUrl) {
+      await bridgeEvent(commandId, { type: 'login-qr', platform, qrDataUrl });
+    }
+    return { loggedIn: false, platform, qrDataUrl };
+  } finally {
+    chrome.tabs.remove(tab.id).catch(() => {});
+  }
+}
+
+function cropScreenshot(dataUrl, area) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = img.width / window.screen.width;
+      const sx = Math.round(area.x * scale);
+      const sy = Math.round(area.y * scale);
+      const sw = Math.round(area.width * scale);
+      const sh = Math.round(area.height * scale);
+      const canvas = new OffscreenCanvas(sw, sh);
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+      canvas.convertToBlob({ type: 'image/png' }).then(blob => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.readAsDataURL(blob);
+      }).catch(() => resolve(dataUrl));
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
+
 async function handleBridgeCommand(command) {
   const action = command?.action;
   const payload = command?.payload || {};
@@ -55,6 +123,11 @@ async function handleBridgeCommand(command) {
   }
   if (action === 'publish.getState') {
     await bridgeResult(command.id, { success: true, state: publishState });
+    return;
+  }
+  if (action === 'platform.loginCheck') {
+    const result = await handleLoginCheck(payload.platform || 'douyin', command.id);
+    await bridgeResult(command.id, { success: true, ...result });
     return;
   }
   const result = await executeBrowserCommand(action, payload);
@@ -245,6 +318,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case 'getPublishState': sendResponse(publishState); break;
     case 'stopPublish': stopPublishCompletely(); sendResponse({ success: true }); break;
     case 'ping': sendResponse({ ready: true, state: publishState }); break;
+    case 'clickIframeButton':
+      if (sender.tab?.id) {
+        chrome.scripting.executeScript({
+          target: { tabId: sender.tab.id, allFrames: true },
+          func: (selector) => {
+            const btn = document.querySelector(selector);
+            if (btn) { btn.click(); return true; }
+            return false;
+          },
+          args: [message.selector || '.js_switchToNormal']
+        }).catch(() => {});
+      }
+      sendResponse({ sent: true });
+      break;
     case 'getScheduledTime':
       sendResponse({ scheduledTime: calculateScheduledTime(message.videoIndex, message.firstVideoScheduled) });
       break;
@@ -531,6 +618,22 @@ async function sendPublishCommand(tabId) {
     console.log('[BG] 内容脚本未就绪，等待超时重试...');
     publishState.commandSent = false;
     return;
+  }
+  // 发布前检测登录状态
+  try {
+    const loginResult = await chrome.tabs.sendMessage(tabId, { action: 'loginCheck' });
+    if (loginResult && !loginResult.loggedIn) {
+      const platformName = publishState.platform === 'douyin' ? '抖音' : '视频号';
+      if (publishState.bridgeCommandId) {
+        await bridgeEvent(publishState.bridgeCommandId, { type: 'login-required', platform: publishState.platform, qrDataUrl: loginResult.qrDataUrl });
+        await bridgeResult(publishState.bridgeCommandId, { success: false, status: 'login-required', platform: publishState.platform, qrDataUrl: loginResult.qrDataUrl, error: `${platformName}未登录，请先扫码登录` });
+      }
+      sendProgress(`${platformName}未登录`, 'login-required', publishState.currentIndex, publishState.videos.length);
+      stopPublishCompletely();
+      return;
+    }
+  } catch (e) {
+    console.log('[BG] 登录检测失败，继续发布:', e.message);
   }
   publishState.commandSent = true;
   const video = publishState.videos[publishState.currentIndex];

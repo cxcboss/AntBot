@@ -396,6 +396,20 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
     catch (error) { return { ok: false, capabilities: [], message: error.message }; }
   });
 
+  ipcMain.handle('bridge:check-platform-login', async (_event, platform) => {
+    const { createBrowserPublishBridge } = require('./services/browserPublishBridge');
+    const settings = await store.getSettings();
+    const config = settings.publish?.browserExtension || {};
+    if (!config.enabled) return { ok: false, error: '浏览器插件未启用' };
+    try {
+      const bridge = createBrowserPublishBridge({ baseUrl: config.baseUrl, timeoutMs: 60000 });
+      const result = await bridge.checkLogin({ platform: platform || 'douyin' });
+      return { ok: true, ...result };
+    } catch (error) {
+      return { ok: false, error: error.message };
+    }
+  });
+
   ipcMain.handle('publish:start', async (_event, payload) => {
     appLog('info', '[publish] 开始发布视频');
     const { createBrowserPublishBridge } = require('./services/browserPublishBridge');
@@ -462,8 +476,9 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
 
   ipcMain.handle('publish:save-record', async (_event, record) => {
     appLog('info', `[publish] 保存发布记录: ${record.name}`);
-    const records = await loadPublishRecords();
+    let records = await loadPublishRecords();
     records.unshift({ ...record, id: record.id || Date.now(), publishTime: record.publishTime || new Date().toISOString() });
+    records = records.slice(0, 200);
     await savePublishRecordsToFile(records);
     return { ok: true };
   });

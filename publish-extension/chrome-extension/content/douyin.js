@@ -64,6 +64,12 @@ class DouyinPublisher {
         sendResponse({ aborted: true });
         return true;
       }
+      if (message.action === 'loginCheck') {
+        this.checkLoginState().then(result => sendResponse(result)).catch(err => {
+          sendResponse({ loggedIn: false, error: err.message });
+        });
+        return true;
+      }
     });
     this.isReady = true;
   }
@@ -80,6 +86,41 @@ class DouyinPublisher {
 
   stopAbortCheck() {
     if (this.abortCheckInterval) { clearInterval(this.abortCheckInterval); this.abortCheckInterval = null; }
+  }
+
+  async checkLoginState() {
+    await new Promise(r => setTimeout(r, 1500));
+    const url = window.location.href;
+    if (/login|passport|signin/i.test(url)) {
+      return { loggedIn: false, qrDataUrl: this.captureQrCode() };
+    }
+    const hasLoginForm = document.querySelector('[class*="login"], [class*="qrcode"], [class*="scan-login"]');
+    if (hasLoginForm) {
+      return { loggedIn: false, qrDataUrl: this.captureQrCode() };
+    }
+    return { loggedIn: true };
+  }
+
+  captureQrCode() {
+    const img = document.querySelector('img[src*="qrcode"], img[src*="QR"], img[class*="qr"], img[class*="QR"]')
+      || document.querySelector('[class*="qrcode"] img, [class*="QRCode"] img, [class*="login"] img[src*="data:image"]');
+    if (img && img.src) return img.src;
+    const canvas = document.querySelector('canvas[class*="qr"], canvas[class*="QR"], [class*="qrcode"] canvas, [class*="QRCode"] canvas');
+    if (canvas) {
+      try { return canvas.toDataURL('image/png'); } catch {}
+    }
+    const allImgs = document.querySelectorAll('img');
+    for (const el of allImgs) {
+      if (el.naturalWidth > 80 && el.naturalWidth < 400 && el.naturalWidth === el.naturalHeight) {
+        try {
+          const c = document.createElement('canvas');
+          c.width = el.naturalWidth; c.height = el.naturalHeight;
+          c.getContext('2d').drawImage(el, 0, 0);
+          return c.toDataURL('image/png');
+        } catch {}
+      }
+    }
+    return null;
   }
 
   async publishSingleVideo(video, settings, videoPath, videoIndex, totalVideos) {

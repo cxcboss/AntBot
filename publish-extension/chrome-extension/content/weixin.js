@@ -110,6 +110,12 @@ class WeixinPublisher {
         sendResponse({ aborted: true });
         return true;
       }
+      if (message.action === 'loginCheck') {
+        this.checkLoginState().then(result => sendResponse(result)).catch(err => {
+          sendResponse({ loggedIn: false, error: err.message });
+        });
+        return true;
+      }
     });
 
     this.isReady = true;
@@ -128,6 +134,48 @@ class WeixinPublisher {
 
   stopAbortCheck() {
     if (this.abortCheckInterval) { clearInterval(this.abortCheckInterval); this.abortCheckInterval = null; }
+  }
+
+  async checkLoginState() {
+    await new Promise(r => setTimeout(r, 2000));
+    const url = window.location.href;
+    const isLoginPage = /login\.html/i.test(url) || document.querySelector('.login-qrcode-wrap, .qrcode-area');
+    if (isLoginPage) {
+      // 尝试点击 iframe 内的"使用其他头像、昵称或账号"按钮
+      this.clickSwitchToNormalInIframe();
+      await new Promise(r => setTimeout(r, 2000));
+      // 返回二维码容器的位置信息，让 background 截图裁剪
+      const qrArea = document.querySelector('.qrcode-area') || document.querySelector('.login-qrcode-wrap');
+      if (qrArea) {
+        const rect = qrArea.getBoundingClientRect();
+        return { loggedIn: false, useScreenshot: true, cropArea: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) } };
+      }
+      return { loggedIn: false, useScreenshot: true, cropArea: null };
+    }
+    const publishForm = document.querySelector('[class*="post-create"], [class*="upload"], .publish-container');
+    if (publishForm) return { loggedIn: true };
+    // 可能被重定向到登录页但 URL 还没变
+    const loginIndicator = document.querySelector('.login-qrcode-wrap, .qrcode-area, [class*="login-panel"]');
+    if (loginIndicator) {
+      const rect = loginIndicator.getBoundingClientRect();
+      return { loggedIn: false, useScreenshot: true, cropArea: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) } };
+    }
+    return { loggedIn: true };
+  }
+
+  clickSwitchToNormalInIframe() {
+    try {
+      const iframe = document.querySelector('iframe[src*="open.weixin.qq.com"]');
+      if (!iframe) return;
+      // 尝试直接访问 iframe 内容（同源时有效）
+      const doc = iframe.contentDocument || iframe.contentWindow?.document;
+      if (doc) {
+        const btn = doc.querySelector('.js_switchToNormal');
+        if (btn) { btn.click(); return; }
+      }
+    } catch {}
+    // 跨域无法访问，用 postMessage 通知 background 通过 CDP 点击
+    chrome.runtime.sendMessage({ action: 'clickIframeButton', selector: '.js_switchToNormal' });
   }
 
   setupMutationObserver() {

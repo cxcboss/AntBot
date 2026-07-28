@@ -94,7 +94,39 @@ function createBrowserPublishBridge({ baseUrl = 'http://127.0.0.1:18321', pollIn
     throw new Error('浏览器插件发布超时');
   };
 
-  return { call, getStatus, getCapabilities, invoke, publish };
+  const checkLogin = async ({ platform = 'douyin', onProgress = () => {} } = {}) => {
+    const accepted = await invoke('platform.loginCheck', { platform });
+    const id = accepted.command?.id;
+    const startedAt = Date.now();
+    let cursor = 0;
+    let qrDataUrl = null;
+    const TIMEOUT = 60_000;
+
+    while (Date.now() - startedAt < TIMEOUT) {
+      const result = await call('GET', `/api/bridge/commands/${encodeURIComponent(id)}`);
+      for (const event of result.events || []) {
+        if (event.sequence > cursor) {
+          cursor = event.sequence;
+          if (event.type === 'login-qr' && event.qrDataUrl) {
+            qrDataUrl = event.qrDataUrl;
+            onProgress({ type: 'login-qr', qrDataUrl });
+          }
+        }
+      }
+      if (result.command?.status === 'completed' || result.command?.status === 'failed') {
+        const finalResult = result.command.result || {};
+        return {
+          loggedIn: Boolean(finalResult.loggedIn),
+          platform: finalResult.platform || platform,
+          qrDataUrl: finalResult.qrDataUrl || qrDataUrl
+        };
+      }
+      await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+    }
+    throw new Error('登录检测超时');
+  };
+
+  return { call, getStatus, getCapabilities, invoke, publish, checkLogin };
 }
 
 module.exports = { createBrowserPublishBridge, requestJson };

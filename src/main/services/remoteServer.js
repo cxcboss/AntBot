@@ -300,6 +300,23 @@ function startRemoteServer({ store, taskRunner, mainWindowRef, appLog }) {
         } catch { return sendJson(res, 200, { ok: true, styles: [] }); }
       }
 
+      // POST /remote/platform-login — 检测平台登录状态
+      if (method === 'POST' && pathname === '/remote/platform-login') {
+        const loginBody = await readBody(req);
+        const platform = loginBody?.platform || 'douyin';
+        try {
+          const { createBrowserPublishBridge } = require('./browserPublishBridge');
+          const settings = await _store.getSettings();
+          const config = settings.publish?.browserExtension || {};
+          if (!config.enabled) return sendJson(res, 200, { ok: false, error: '浏览器插件未启用，请先在桌面端启用浏览器插件发布' });
+          const bridge = createBrowserPublishBridge({ baseUrl: config.baseUrl, timeoutMs: 60000 });
+          const result = await bridge.checkLogin({ platform });
+          return sendJson(res, 200, { ok: true, ...result });
+        } catch (error) {
+          return sendJson(res, 200, { ok: false, error: error.message });
+        }
+      }
+
       // 404
       sendJson(res, 404, { ok: false, error: 'Not found' });
 

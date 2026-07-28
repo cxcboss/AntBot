@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "搬运蚁发布助手",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "搬运蚁默认浏览器视频发布助手，支持抖音和视频号",
   "permissions": [
     "activeTab",
@@ -17,6 +17,7 @@
   "host_permissions": [
     "https://creator.douyin.com/*",
     "https://channels.weixin.qq.com/*",
+    "https://open.weixin.qq.com/*",
     "http://localhost:18321/*",
     "https://api.xiaomi.com/*",
     "https://api.xiaomimimo.com/*",
