@@ -13,6 +13,8 @@ const SKIP_KEY = '_vpe_skip_names';
 const ABORT_KEY = '_vpe_abort';
 const BRIDGE_BASE_URL = 'http://localhost:18321';
 let bridgePollTimer = null;
+// 登录检测状态缓存，避免轮询时重复创建 tab
+let loginCheckTabs = { douyin: null, weixin: null };
 let bridgeBusy = false;
 let debuggerTargets = new Map();
 
@@ -45,28 +47,53 @@ const PLATFORM_LOGIN_URLS = {
 async function handleLoginCheck(platform, commandId) {
   const url = PLATFORM_LOGIN_URLS[platform];
   if (!url) throw new Error(`不支持的平台: ${platform}`);
-  const tab = await chrome.tabs.create({ url, active: true });
-  try {
-    // 等待页面加载完成
-    await waitForTabComplete(tab.id, 15000);
 
-    // 先通过 content script 检测是否已登录
-    let loggedIn = false;
+  // 如果已有该平台的登录 tab 且仍然存在，复用它
+  let tabId = loginCheckTabs[platform];
+  let tabExists = false;
+  if (tabId != null) {
     try {
-      const ping = await chrome.tabs.sendMessage(tab.id, { action: 'ping' });
+      const t = await chrome.tabs.get(tabId);
+      if (t) tabExists = true;
+    } catch {}
+  }
+
+  if (!tabExists) {
+    const tab = await chrome.tabs.create({ url, active: true });
+    tabId = tab.id;
+    loginCheckTabs[platform] = tabId;
+    await waitForTabComplete(tabId, 15000);
+  }
+
+  try {
+    // 先通过 content script 检测是否已登录
+    try {
+      const ping = await chrome.tabs.sendMessage(tabId, { action: 'ping' });
       if (ping?.ready) {
-        const loginResult = await chrome.tabs.sendMessage(tab.id, { action: 'loginCheck' });
-        if (loginResult?.loggedIn) return { loggedIn: true, platform };
+        const loginResult = await chrome.tabs.sendMessage(tabId, { action: 'loginCheck' });
+        if (loginResult?.loggedIn) {
+          closeLoginTab(platform);
+          return { loggedIn: true, platform };
+        }
       }
     } catch (e) {
-      console.log('[BG] content script 未就绪，使用截图方案:', e.message);
+      console.log('[BG] content script 未就绪:', e.message);
     }
+
+    // 检查 URL 是否已跳转到非登录页（说明已登录）
+    try {
+      const tabInfo = await chrome.tabs.get(tabId);
+      if (tabInfo?.url && !/login/i.test(tabInfo.url) && /platform\/post/i.test(tabInfo.url)) {
+        closeLoginTab(platform);
+        return { loggedIn: true, platform };
+      }
+    } catch {}
 
     // 未登录：尝试在 iframe 内点击"使用其他头像、昵称或账号"
     if (platform === 'weixin') {
       try {
         await chrome.scripting.executeScript({
-          target: { tabId: tab.id, allFrames: true },
+          target: { tabId, allFrames: true },
           func: () => {
             const btn = document.querySelector('.js_switchToNormal');
             if (btn) btn.click();
@@ -76,14 +103,13 @@ async function handleLoginCheck(platform, commandId) {
       await sleep(2000);
     }
 
-    // 截图获取二维码，使用 debugger API（不依赖当前窗口焦点）
+    // 截图获取二维码
     let qrDataUrl = null;
     try {
-      await chrome.debugger.attach({ tabId: tab.id }, '1.3');
+      await chrome.debugger.attach({ tabId }, '1.3');
       await sleep(500);
       const screenshot = await chrome.debugger.sendCommand(
-        { tabId: tab.id },
-        'Page.captureScreenshot',
+        { tabId }, 'Page.captureScreenshot',
         { format: 'jpeg', quality: 70, captureBeyondViewport: false }
       );
       if (screenshot?.data) {
@@ -93,24 +119,29 @@ async function handleLoginCheck(platform, commandId) {
       }
     } catch (e) {
       console.log('[BG] debugger 截图失败:', e.message);
-      // fallback: 尝试 captureVisibleTab
       try {
-        const raw = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 70 });
+        const tabInfo = await chrome.tabs.get(tabId);
+        const raw = await chrome.tabs.captureVisibleTab(tabInfo.windowId, { format: 'jpeg', quality: 70 });
         if (raw) qrDataUrl = await compressImage(raw, 600);
-      } catch (e2) {
-        console.log('[BG] fallback 截图也失败:', e2.message);
-      }
+      } catch {}
     } finally {
-      try { await chrome.debugger.detach({ tabId: tab.id }); } catch {}
+      try { await chrome.debugger.detach({ tabId }); } catch {}
     }
 
     if (commandId && qrDataUrl) {
       await bridgeEvent(commandId, { type: 'login-qr', platform, qrDataUrl });
     }
     return { loggedIn: false, platform, qrDataUrl };
-  } finally {
-    chrome.tabs.remove(tab.id).catch(() => {});
+  } catch (e) {
+    closeLoginTab(platform);
+    throw e;
   }
+}
+
+function closeLoginTab(platform) {
+  const tabId = loginCheckTabs[platform];
+  loginCheckTabs[platform] = null;
+  if (tabId != null) chrome.tabs.remove(tabId).catch(() => {});
 }
 
 function waitForTabComplete(tabId, timeoutMs = 10000) {
