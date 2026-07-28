@@ -308,12 +308,13 @@ function startRemoteServer({ store, taskRunner, mainWindowRef, appLog }) {
           const { createBrowserPublishBridge } = require('./browserPublishBridge');
           const settings = await _store.getSettings();
           const config = settings.publish?.browserExtension || {};
-          if (!config.enabled) return sendJson(res, 200, { ok: false, error: '浏览器插件未启用，请先在桌面端启用浏览器插件发布' });
+          if (!config.enabled) return sendJson(res, 200, { ok: false, error: '浏览器插件未启用，请先在桌面端设置中启用浏览器插件发布' });
           const bridge = createBrowserPublishBridge({ baseUrl: config.baseUrl, timeoutMs: 60000 });
           const result = await bridge.checkLogin({ platform });
           return sendJson(res, 200, { ok: true, ...result });
         } catch (error) {
-          return sendJson(res, 200, { ok: false, error: error.message });
+          const msg = /ECONNREFUSED/.test(error.message) ? '桥接服务未启动，请稍后重试（服务正在自动启动中）' : error.message;
+          return sendJson(res, 200, { ok: false, error: msg });
         }
       }
 

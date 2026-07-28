@@ -268,6 +268,28 @@ app.whenReady().then(async () => {
     appUpdater.cleanupPartialDownloads().catch(() => {});
   } catch {}
 
+  // 自动启动浏览器插件桥接服务，2 分钟内重试确保启动
+  try {
+    const { bridgeServiceManager } = require('./services/bridgeServiceManager');
+    const autoStartBridge = async () => {
+      const maxRetries = 12;
+      for (let i = 0; i < maxRetries; i++) {
+        try {
+          const started = await bridgeServiceManager.start();
+          if (started) {
+            console.log(`[BridgeService] 桥接服务已启动 (端口 ${bridgeServiceManager.port})`);
+            return;
+          }
+        } catch (e) {
+          console.log(`[BridgeService] 启动失败 (${i + 1}/${maxRetries}): ${e.message}`);
+        }
+        if (i < maxRetries - 1) await new Promise(r => setTimeout(r, 10000));
+      }
+      console.log('[BridgeService] 桥接服务启动超时，请手动在发布页面启动');
+    };
+    autoStartBridge();
+  } catch {}
+
   // 自动检查远程页面更新
   try {
     const updater = require('./services/remoteUpdater');
