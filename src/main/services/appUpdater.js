@@ -526,6 +526,23 @@ async function cleanupPartialDownloads() {
   } catch {}
 }
 
+// ─── 版本同步 ───
+
+async function syncAppVersion(binaryVersion) {
+  if (!binaryVersion) return;
+  try {
+    let localVersion = '0.0.0';
+    try {
+      const raw = await fs.readFile(APP_VERSION_FILE, 'utf-8');
+      localVersion = JSON.parse(raw)?.version || '0.0.0';
+    } catch {}
+    if (compareSemver(binaryVersion, localVersion) > 0) {
+      await fs.mkdir(path.dirname(APP_VERSION_FILE), { recursive: true });
+      await fs.writeFile(APP_VERSION_FILE, JSON.stringify({ version: binaryVersion, updatedAt: new Date().toISOString() }, null, 2));
+    }
+  } catch {}
+}
+
 // ─── 导出 ───
 
 module.exports = {
@@ -539,6 +556,7 @@ module.exports = {
   installPluginUpdate,
   getAppVersion,
   getPluginVersion,
+  syncAppVersion,
   clearCache,
   cleanupPartialDownloads,
   cancelDownload

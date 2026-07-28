@@ -71,7 +71,7 @@ gh release create v0.4.1 /tmp/antbot-macos-arm64.zip \
 - zip 文件名必须用 ASCII（`antbot-macos-arm64.zip`），中文文件名会导致 GitHub Release 资产名乱码
 - 打包前必须清理 `__MACOSX` 和 `.DS_Store`，这些是 macOS 系统垃圾文件
 - 发布后必须恢复本地版本号为测试版本（`npm version 0.3.7 --no-git-tag-version`），以便测试更新功能
-- 更新 `~/AntBot/app-version.json` 为测试版本号
+- `~/AntBot/app-version.json` 会由 app 启动时自动同步（如果二进制版本更新则写入），无需手动修改
 
 ---
 

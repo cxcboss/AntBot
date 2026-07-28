@@ -262,10 +262,11 @@ app.whenReady().then(async () => {
     createWindow();
   }
 
-  // 清理上次未完成的下载文件
+  // 清理上次未完成的下载文件 + 同步版本号
   try {
     const appUpdater = require('./services/appUpdater');
     appUpdater.cleanupPartialDownloads().catch(() => {});
+    appUpdater.syncAppVersion(app.getVersion()).catch(() => {});
   } catch {}
 
   // 自动检查远程页面更新
