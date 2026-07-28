@@ -2821,7 +2821,7 @@ async function initUpdatePage() {
       return r?.app || {hasUpdate: false};
     },
     downloadFn: async (url) => window.antbot.downloadAppUpdate(url),
-    installFn: async (zip) => window.antbot.installAppUpdate(zip),
+    installFn: async (zip, result) => window.antbot.installAppUpdate(zip, result?.latestVersion),
     noRestart: false,
   });
 
@@ -2831,6 +2831,16 @@ async function initUpdatePage() {
     pluginDirBtn._bound = true;
     pluginDirBtn.addEventListener('click', async () => {
       try { await window.antbot.openPluginDir(); }
+      catch (e) { toast('打开失败: ' + e.message, 'error'); }
+    });
+  }
+
+  // 打开下载目录按钮
+  const appDirBtn = document.getElementById('upd-app-dir-btn');
+  if (appDirBtn && !appDirBtn._bound) {
+    appDirBtn._bound = true;
+    appDirBtn.addEventListener('click', async () => {
+      try { await window.antbot.openDir(require('path').join(require('os').homedir(), 'Downloads')); }
       catch (e) { toast('打开失败: ' + e.message, 'error'); }
     });
   }
@@ -3028,7 +3038,7 @@ function showDownloadCompleteDialog(appPath, appDir) {
   document.body.appendChild(overlay);
   document.getElementById('restart-later-btn').addEventListener('click', () => overlay.remove());
   document.getElementById('restart-open-btn').addEventListener('click', async () => {
-    try { await window.antbot.openExternal(appDir || 'file://' + appPath.substring(0, appPath.lastIndexOf('/'))); } catch {}
+    try { await window.antbot.openDir(appDir || appPath.substring(0, appPath.lastIndexOf('/'))); } catch {}
     overlay.remove();
   });
 }

@@ -1087,6 +1087,12 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
     return { ok: true, path: dir };
   });
 
+  ipcMain.handle('open-dir', async (_event, dirPath) => {
+    await fs.mkdir(dirPath, { recursive: true }).catch(() => {});
+    await shell.openPath(dirPath);
+    return { ok: true };
+  });
+
   ipcMain.handle('remote:get-local-version', async () => {
     try {
       const updater = require('./services/remoteUpdater');
@@ -1128,8 +1134,8 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
     } catch (e) { return { ok: false, error: e.message }; }
   });
 
-  ipcMain.handle('update:install-app', async (_event, zipPath) => {
-    try { return await updater.installAppUpdate(zipPath); } catch (e) { return { ok: false, error: e.message }; }
+  ipcMain.handle('update:install-app', async (_event, zipPath, newVersion) => {
+    try { return await updater.installAppUpdate(zipPath, newVersion); } catch (e) { return { ok: false, error: e.message }; }
   });
 
   ipcMain.handle('update:cancel', async () => {

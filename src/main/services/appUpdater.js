@@ -366,12 +366,20 @@ async function downloadAppUpdate(assetUrl, onProgress) {
   return { ok: true, zipPath };
 }
 
-async function installAppUpdate(zipPath) {
+async function installAppUpdate(zipPath, newVersion) {
   if (_updating) return { ok: false, error: '更新进行中' };
   _updating = true;
 
   try {
+    // 清理之前的解压目录
     const downloadsDir = path.join(os.homedir(), 'Downloads');
+    const existingDirs = await fs.readdir(downloadsDir).catch(() => []);
+    for (const d of existingDirs) {
+      if (d.startsWith('antbot-update-')) {
+        await fs.rm(path.join(downloadsDir, d), { recursive: true, force: true }).catch(() => {});
+      }
+    }
+
     const tmpDir = path.join(downloadsDir, `antbot-update-${Date.now()}`);
     await fs.mkdir(tmpDir, { recursive: true });
 
@@ -382,6 +390,9 @@ async function installAppUpdate(zipPath) {
         resolve();
       });
     });
+
+    // 删除 __MACOSX 垃圾目录
+    await fs.rm(path.join(tmpDir, '__MACOSX'), { recursive: true, force: true }).catch(() => {});
 
     // 查找 .app 目录
     async function findApp(dir) {
@@ -398,6 +409,11 @@ async function installAppUpdate(zipPath) {
 
     const appPath = await findApp(tmpDir);
     if (!appPath) throw new Error('更新包中未找到 .app 文件');
+
+    // 更新本地版本号，避免重复下载
+    if (newVersion) {
+      await fs.writeFile(APP_VERSION_FILE, JSON.stringify({ version: newVersion, updatedAt: new Date().toISOString() }, null, 2));
+    }
 
     _log('info', `[更新] 已解压到: ${appPath}`);
     return { ok: true, appPath, appDir: tmpDir };

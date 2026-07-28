@@ -55,7 +55,7 @@ contextBridge.exposeInMainWorld('antbot', {
   // Update system
   checkAllUpdates: () => ipcRenderer.invoke('update:check-all'),
   downloadAppUpdate: (url) => ipcRenderer.invoke('update:download-app', url),
-  installAppUpdate: (zipPath) => ipcRenderer.invoke('update:install-app', zipPath),
+  installAppUpdate: (zipPath, newVersion) => ipcRenderer.invoke('update:install-app', zipPath, newVersion),
   cancelDownload: () => ipcRenderer.invoke('update:cancel'),
   downloadPluginUpdate: (url) => ipcRenderer.invoke('update:download-plugin', url),
   installPluginUpdate: (zipPath, newVersion) => ipcRenderer.invoke('update:install-plugin', zipPath, newVersion),
@@ -80,6 +80,7 @@ contextBridge.exposeInMainWorld('antbot', {
   revealInFolder: (filePath) => ipcRenderer.invoke('app:reveal-in-folder', filePath),
   openDataDir: () => ipcRenderer.invoke('app:open-data-dir'),
   openPluginDir: () => ipcRenderer.invoke('open-plugin-dir'),
+  openDir: (dirPath) => ipcRenderer.invoke('open-dir', dirPath),
   openDepDir: (toolKey) => ipcRenderer.invoke('deps:open-dir', toolKey),
   uninstallDep: (toolKey) => ipcRenderer.invoke('deps:uninstall', toolKey),
   reinstallDep: (toolKey) => ipcRenderer.invoke('deps:reinstall', toolKey),
