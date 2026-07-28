@@ -7,10 +7,11 @@ const https = require('node:https');
 const http = require('node:http');
 const { execFile } = require('node:child_process');
 
+const { app } = require('electron');
+
 // ─── 常量 ───
 
 const GITHUB_API = 'https://api.github.com/repos/cxcboss/AntBot/releases';
-const APP_VERSION_FILE = path.join(os.homedir(), 'AntBot', 'app-version.json');
 const PLUGIN_DIR = path.join(os.homedir(), 'AntBot', 'browser-plugin');
 const PLUGIN_VERSION_FILE = path.join(PLUGIN_DIR, 'version.json');
 const CACHE_TTL = 30 * 60 * 1000;
@@ -410,11 +411,6 @@ async function installAppUpdate(zipPath, newVersion) {
     const appPath = await findApp(tmpDir);
     if (!appPath) throw new Error('更新包中未找到 .app 文件');
 
-    // 更新本地版本号，避免重复下载
-    if (newVersion) {
-      await fs.writeFile(APP_VERSION_FILE, JSON.stringify({ version: newVersion, updatedAt: new Date().toISOString() }, null, 2));
-    }
-
     _log('info', `[更新] 已解压到: ${appPath}`);
     return { ok: true, appPath, appDir: tmpDir };
   } catch (e) {
@@ -496,12 +492,7 @@ async function installPluginUpdate(zipPath, newVersion) {
 // ─── 版本读取 ───
 
 async function getAppVersion() {
-  try {
-    const raw = await fs.readFile(APP_VERSION_FILE, 'utf-8');
-    return JSON.parse(raw);
-  } catch {
-    return { version: '0.0.0', updatedAt: '' };
-  }
+  return { version: app.getVersion() };
 }
 
 async function getPluginVersion() {
@@ -526,23 +517,6 @@ async function cleanupPartialDownloads() {
   } catch {}
 }
 
-// ─── 版本同步 ───
-
-async function syncAppVersion(binaryVersion) {
-  if (!binaryVersion) return;
-  try {
-    let localVersion = '0.0.0';
-    try {
-      const raw = await fs.readFile(APP_VERSION_FILE, 'utf-8');
-      localVersion = JSON.parse(raw)?.version || '0.0.0';
-    } catch {}
-    if (compareSemver(binaryVersion, localVersion) > 0) {
-      await fs.mkdir(path.dirname(APP_VERSION_FILE), { recursive: true });
-      await fs.writeFile(APP_VERSION_FILE, JSON.stringify({ version: binaryVersion, updatedAt: new Date().toISOString() }, null, 2));
-    }
-  } catch {}
-}
-
 // ─── 导出 ───
 
 module.exports = {
@@ -556,7 +530,6 @@ module.exports = {
   installPluginUpdate,
   getAppVersion,
   getPluginVersion,
-  syncAppVersion,
   clearCache,
   cleanupPartialDownloads,
   cancelDownload
