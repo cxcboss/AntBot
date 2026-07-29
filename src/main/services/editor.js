@@ -77,6 +77,7 @@ async function editVideo(taskContext) {
       voiceCloneSamplePath: settings.voiceClone.samplePath || '',
       voiceCloneReferenceText: settings.voiceClone.referenceText || '',
       voiceCloneLanguage: settings.voiceClone.language || 'zh',
+      voiceCloneGpuMode: settings.voiceClone.gpuMode || 'auto',
       voiceSpeed: settings.style.voiceSpeed,
       subtitleTextColor: settings.style.subtitleTextColor,
       subtitleStrokeColor: settings.style.subtitleStrokeColor,

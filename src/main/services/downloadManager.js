@@ -3,6 +3,7 @@ const fs = require('node:fs/promises');
 const fsSync = require('node:fs');
 const os = require('node:os');
 const { spawn } = require('node:child_process');
+const { buildRuntimePath } = require('./runtimeEnv');
 
 const DOWNLOAD_TIMEOUT_MS = 30 * 60 * 1000;
 const MAX_RETRIES = 2;
@@ -120,9 +121,14 @@ function generateFilename(prefix) {
 // ── ffmpeg resolution ──
 function resolveFfmpegDir() {
   const fsSync = require('node:fs');
-  const candidates = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin'];
+  const { getManagedBinDir } = require('./dependencyManager');
+  const managedBin = getManagedBinDir();
+  const candidates = process.platform === 'win32'
+    ? [managedBin, path.join(process.env.ProgramFiles || 'C:\\Program Files', 'ffmpeg', 'bin')]
+    : ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin'];
   for (const dir of candidates) {
-    if (fsSync.existsSync(path.join(dir, 'ffmpeg'))) return dir;
+    const name = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
+    if (fsSync.existsSync(path.join(dir, name))) return dir;
   }
   return '';
 }
@@ -164,8 +170,12 @@ class DownloadManager {
 
   // ── yt-dlp resolution ──
   async _resolveYtDlp() {
+    const { resolveDependencyPath } = require('./dependencyManager');
+    const resolved = await resolveDependencyPath('yt-dlp');
+    if (resolved) return resolved;
     const candidates = [
       path.join(os.homedir(), 'AntBot', 'tools', 'yt-dlp'),
+      path.join(os.homedir(), 'AntBot', 'tools', 'yt-dlp.exe'),
       '/opt/homebrew/bin/yt-dlp',
       '/usr/local/bin/yt-dlp',
       'yt-dlp'
@@ -181,8 +191,8 @@ class DownloadManager {
 
   async _canRun(cmd, args) {
     return new Promise((resolve, reject) => {
-      const env = { ...process.env, PATH: `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH || ''}` };
-      const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], env });
+      const env = { ...process.env, PATH: buildRuntimePath(process.env.PATH) };
+      const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], env, windowsHide: true });
       let output = '';
       child.stdout?.on('data', d => { output += d.toString(); });
       child.stderr?.on('data', d => { output += d.toString(); });
@@ -430,11 +440,12 @@ class DownloadManager {
 
   _spawnYtDlp(task, args) {
     return new Promise((resolve, reject) => {
-      const env = { ...process.env, PATH: `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH || ''}` };
+      const env = { ...process.env, PATH: buildRuntimePath(process.env.PATH) };
       const child = spawn(this._ytDlpPath, args, {
         stdio: ['ignore', 'pipe', 'pipe'],
         timeout: DOWNLOAD_TIMEOUT_MS,
-        env
+        env,
+        windowsHide: true
       });
       this.processes.set(task.id, child);
 

@@ -7,6 +7,65 @@ const { editVideo } = require('./editor');
 const { shutdownVoicebox } = require('./autoDubClient');
 const { recordUsage } = require('./usageTracker');
 const { createClipArtifactManager } = require('./clipArtifacts');
+const { resolveDependencyPath } = require('./dependencyManager');
+
+// 检测系统代理（用于 AI API 调用走 VPN）
+let _sysProxy = null, _sysProxyChecked = false;
+function getSystemProxy() {
+  if (_sysProxyChecked) return _sysProxy;
+  _sysProxyChecked = true;
+  try {
+    if (process.platform === 'win32') {
+      const { execSync } = require('node:child_process');
+      const out = execSync('reg query "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ProxyEnable', { encoding: 'utf-8', timeout: 3000, windowsHide: true });
+      if (/0x1/.test(out)) {
+        const s = execSync('reg query "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ProxyServer', { encoding: 'utf-8', timeout: 3000, windowsHide: true });
+        const m = s.match(/ProxyServer\s+REG_SZ\s+(.+)/);
+        if (m) { const a = m[1].trim(); _sysProxy = a.startsWith('http') ? a : `http://${a}`; }
+      }
+    } else if (process.platform === 'darwin') {
+      const { execFileSync } = require('node:child_process');
+      const out = execFileSync('networksetup', ['-getwebproxy', 'Wi-Fi'], { timeout: 3000, encoding: 'utf-8' });
+      if (/Enabled:\s*Yes/.test(out)) {
+        const h = out.match(/Server:\s*(.+)$/m)?.[1]?.trim();
+        const p = out.match(/Port:\s*(.+)$/m)?.[1]?.trim() || '80';
+        if (h) _sysProxy = `http://${h}:${p}`;
+      }
+    }
+  } catch {}
+  return _sysProxy;
+}
+
+// 通过代理发起 HTTPS 请求（CONNECT 隧道）
+function fetchViaProxy(url, bodyStr, headers) {
+  const proxy = new URL(getSystemProxy());
+  const target = new URL(url);
+  return new Promise((resolve, reject) => {
+    const conn = require('node:http').request({ host: proxy.hostname, port: parseInt(proxy.port) || 80, method: 'CONNECT', path: `${target.hostname}:443` });
+    conn.on('connect', (res, socket) => {
+      if (res.statusCode !== 200) { socket.destroy(); return reject(new Error(`代理拒绝: ${res.statusCode}`)); }
+      const tls = require('node:tls').connect({ socket, servername: target.hostname }, () => {
+        const reqLine = `POST ${target.pathname}${target.search} HTTP/1.1\r\nHost: ${target.hostname}\r\nConnection: close\r\nContent-Type: ${headers['Content-Type'] || 'application/json'}\r\nAuthorization: ${headers['Authorization'] || ''}\r\nContent-Length: ${Buffer.byteLength(bodyStr)}\r\n\r\n${bodyStr}`;
+        tls.write(reqLine);
+        const chunks = [];
+        tls.on('data', c => chunks.push(c));
+        tls.on('error', reject);
+        tls.on('end', () => {
+          const raw = Buffer.concat(chunks).toString('utf8');
+          const sep = raw.indexOf('\r\n\r\n');
+          const hdr = sep >= 0 ? raw.slice(0, sep) : raw;
+          const bod = sep >= 0 ? raw.slice(sep + 4) : '';
+          const sm = hdr.match(/^HTTP\/\d\.\d\s+(\d+)/);
+          const st = sm ? parseInt(sm[1]) : 0;
+          resolve({ ok: st >= 200 && st < 300, status: st, text: () => Promise.resolve(bod), json: () => Promise.resolve(JSON.parse(bod)) });
+        });
+      });
+      tls.on('error', reject);
+    });
+    conn.on('error', reject);
+    conn.end();
+  });
+}
 
 /* ── Subtitle text cleanup (professional subtitle standards) ── */
 
@@ -51,17 +110,16 @@ function cleanSubtitleText(text) {
 
 /* ── Helpers ── */
 
-function resolveFfmpegBin(name) {
-  for (const c of [path.join('/opt/homebrew/bin', name), path.join('/usr/local/bin', name), path.join('/usr/bin', name), name]) {
-    if (fsSync.existsSync(c)) return c;
-  }
+async function resolveFfmpegBin(name) {
+  const resolved = await resolveDependencyPath(name);
+  if (resolved) return resolved;
   return name;
 }
 
-function runFfmpeg(args, timeoutMs = 120000, abortSignal) {
-  const bin = resolveFfmpegBin('ffmpeg');
+async function runFfmpeg(args, timeoutMs = 120000, abortSignal) {
+  const bin = await resolveFfmpegBin('ffmpeg');
   return new Promise((resolve, reject) => {
-    const child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     let stderr = '';
     child.stderr.on('data', (d) => { stderr += d.toString(); });
     const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error('ffmpeg 超时')); }, timeoutMs);
@@ -73,12 +131,12 @@ function runFfmpeg(args, timeoutMs = 120000, abortSignal) {
 }
 
 async function getVideoInfo(videoPath) {
-  const bin = resolveFfmpegBin('ffprobe');
+  const bin = await resolveFfmpegBin('ffprobe');
   return new Promise((resolve, reject) => {
     const child = spawn(bin, [
       '-v', 'error', '-print_format', 'json',
       '-show_format', '-show_streams', videoPath
-    ], { stdio: ['ignore', 'pipe', 'pipe'] });
+    ], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     let stdout = '', stderr = '';
     child.stdout.on('data', (d) => { stdout += d.toString(); });
     child.stderr.on('data', (d) => { stderr += d.toString(); });
@@ -137,7 +195,14 @@ async function callApi(baseUrl, apiKey, modelId, messages, maxTokens = 4000, abo
   const bodySizeKB = Math.round(Buffer.byteLength(bodyStr, 'utf8') / 1024);
   const apiSignal = abortSignal || AbortSignal.timeout(120000);
   try {
-    const response = await fetch(url, { method: 'POST', headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, body: bodyStr, signal: apiSignal });
+    const proxy = getSystemProxy();
+    const headers = { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' };
+    let response;
+    if (proxy) {
+      response = await fetchViaProxy(url, bodyStr, headers);
+    } else {
+      response = await fetch(url, { method: 'POST', headers, body: bodyStr, signal: apiSignal });
+    }
     if (!response.ok) {
       const errText = await response.text().catch(() => '');
       const status = response.status;
@@ -1067,6 +1132,7 @@ async function composeEditVideo({
   subtitleStyle = {},
   voiceoverEnabled = true, subtitleEnabled = true,
   videoWidth = 0, videoHeight = 0,
+  gpuMode = 'auto',
   abortSignal,
   log = () => {}, progress = () => {}
 }) {
@@ -1095,6 +1161,7 @@ async function composeEditVideo({
           samplePath: '',
           referenceText: '',
           language: language || 'zh',
+          gpuMode,
         },
         paths: { editProjectPath: '' },
         commands: {},

@@ -1,6 +1,7 @@
 const { spawn } = require('node:child_process');
 const path = require('node:path');
 const net = require('node:net');
+const os = require('node:os');
 
 let _appLog = null;
 
@@ -58,35 +59,46 @@ class BridgeServiceManager {
     return false;
   }
 
-  getServerPath() {
+  getBundledServerDir() {
     const fs = require('node:fs');
-
-    // 打包后的路径（extraResources）
     if (process.resourcesPath) {
       const packagedPath = path.join(process.resourcesPath, 'publish-extension', 'local-server', 'server.js');
       if (fs.existsSync(packagedPath)) {
-        return packagedPath;
+        return path.join(process.resourcesPath, 'publish-extension', 'local-server');
       }
     }
-
-    // 开发环境路径（项目根目录）
-    const devPath = path.join(__dirname, '..', '..', '..', 'publish-extension', 'local-server', 'server.js');
-    if (fs.existsSync(devPath)) {
+    const devPath = path.join(__dirname, '..', '..', '..', 'publish-extension', 'local-server');
+    if (fs.existsSync(path.join(devPath, 'server.js'))) {
       return devPath;
     }
-
-    // 备用路径
-    const altPath = path.join(process.cwd(), 'publish-extension', 'local-server', 'server.js');
-    if (fs.existsSync(altPath)) {
-      return altPath;
-    }
-
-    return devPath; // 返回默认路径，让后续错误处理
+    return null;
   }
 
-  getLocalServerDir() {
-    const serverPath = this.getServerPath();
-    return path.dirname(serverPath);
+  getWritableServerDir() {
+    return path.join(os.homedir(), 'AntBot', 'local-server');
+  }
+
+  async ensureWritableServerDir() {
+    const fs = require('node:fs');
+    const writableDir = this.getWritableServerDir();
+    const serverJs = path.join(writableDir, 'server.js');
+
+    // 如果可写目录已有 server.js，直接用
+    if (fs.existsSync(serverJs)) {
+      return writableDir;
+    }
+
+    // 从 bundled 目录复制过来
+    const bundledDir = this.getBundledServerDir();
+    if (!bundledDir) {
+      log('error', `${this.logPrefix} 找不到打包的服务文件`);
+      return null;
+    }
+
+    log('info', `${this.logPrefix} 复制服务文件到可写目录...`);
+    await fs.promises.mkdir(writableDir, { recursive: true });
+    await fs.promises.cp(bundledDir, writableDir, { recursive: true });
+    return writableDir;
   }
 
   async start() {
@@ -108,8 +120,12 @@ class BridgeServiceManager {
       return true;
     }
 
-    const serverPath = this.getServerPath();
-    const localServerDir = this.getLocalServerDir();
+    const localServerDir = await this.ensureWritableServerDir();
+    if (!localServerDir) {
+      log('error', `${this.logPrefix} 无法准备服务目录`);
+      return false;
+    }
+    const serverPath = path.join(localServerDir, 'server.js');
     const fs = require('node:fs');
 
     if (!fs.existsSync(serverPath)) {
@@ -122,8 +138,19 @@ class BridgeServiceManager {
     if (!fs.existsSync(nodeModulesPath)) {
       log('info', `${this.logPrefix} 正在安装依赖...`);
       try {
-        const { execSync } = require('node:child_process');
-        execSync('npm install --production', { cwd: localServerDir, stdio: 'inherit' });
+        const { resolveDependencyPath } = require('./dependencyManager');
+        const npmBin = await resolveDependencyPath('npm') || (process.platform === 'win32' ? 'npm.cmd' : 'npm');
+        await new Promise((resolve, reject) => {
+          const child = spawn(npmBin, ['install', '--production'], {
+            cwd: localServerDir,
+            stdio: ['ignore', 'pipe', 'pipe'],
+            windowsHide: true,
+            shell: process.platform === 'win32'
+          });
+          child.stderr?.on('data', d => { if (d.toString().trim()) log('info', `${this.logPrefix} ${d.toString().trim()}`); });
+          child.once('close', (code) => code === 0 ? resolve() : reject(new Error(`npm install exit ${code}`)));
+          child.once('error', reject);
+        });
         log('info', `${this.logPrefix} 依赖安装完成`);
       } catch (error) {
         log('error', `${this.logPrefix} 依赖安装失败:`, error.message);
@@ -140,14 +167,17 @@ class BridgeServiceManager {
     }
 
     try {
-      this.process = spawn('node', [serverPath], {
+      const { resolveDependencyPath } = require('./dependencyManager');
+      const nodeBin = await resolveDependencyPath('node') || 'node';
+      this.process = spawn(nodeBin, [serverPath], {
         cwd: localServerDir,
         stdio: ['ignore', 'pipe', 'pipe'],
         env: {
           ...process.env,
           PORT: String(this.port)
         },
-        detached: false
+        detached: false,
+        windowsHide: true
       });
 
       this.process.stdout?.on('data', (data) => {
@@ -199,16 +229,24 @@ class BridgeServiceManager {
         log('info', `${this.logPrefix} 检测到外部进程占用端口，尝试停止...`);
         try {
           const { execSync } = require('node:child_process');
-          const result = execSync(`lsof -ti :${this.port}`, { encoding: 'utf8' }).trim();
-          if (result) {
-            const pids = result.split('\n');
-            for (const pid of pids) {
-              try {
-                process.kill(parseInt(pid), 'SIGTERM');
-                log('info', `${this.logPrefix} 已发送终止信号到进程 ${pid}`);
-              } catch (e) {
-                // 忽略权限错误
-              }
+          let pids = [];
+          if (process.platform === 'win32') {
+            const result = execSync(`netstat -ano -p tcp | findstr :${this.port}`, { encoding: 'utf8', shell: 'cmd.exe' }).trim();
+            for (const line of result.split('\n')) {
+              const parts = line.trim().split(/\s+/);
+              const pid = parts[parts.length - 1];
+              if (pid && pid !== '0') pids.push(pid);
+            }
+          } else {
+            const result = execSync(`lsof -ti :${this.port}`, { encoding: 'utf8' }).trim();
+            if (result) pids = result.split('\n');
+          }
+          for (const pid of pids) {
+            try {
+              process.kill(parseInt(pid), 'SIGTERM');
+              log('info', `${this.logPrefix} 已发送终止信号到进程 ${pid}`);
+            } catch (e) {
+              // 忽略权限错误
             }
           }
         } catch (e) {

@@ -31,13 +31,26 @@ function detectProxy() {
   // 2. macOS 系统代理
   try {
     const { execFileSync } = require('node:child_process');
-    const out = execFileSync('networksetup', ['-getwebproxy', 'Wi-Fi'], { timeout: 3000, encoding: 'utf-8' });
-    const enabled = /^Enabled:\s*Yes/m.test(out);
-    const hostMatch = out.match(/^Server:\s*(.+)$/m);
-    const portMatch = out.match(/^Port:\s*(.+)$/m);
-    if (enabled && hostMatch) {
-      const proxyUrl = `http://${hostMatch[1].trim()}:${(portMatch?.[1] || '80').trim()}`;
-      _proxyAgent = createProxyAgent(proxyUrl);
+    if (process.platform === 'darwin') {
+      const out = execFileSync('networksetup', ['-getwebproxy', 'Wi-Fi'], { timeout: 3000, encoding: 'utf-8' });
+      const enabled = /^Enabled:\s*Yes/m.test(out);
+      const hostMatch = out.match(/^Server:\s*(.+)$/m);
+      const portMatch = out.match(/^Port:\s*(.+)$/m);
+      if (enabled && hostMatch) {
+        const proxyUrl = `http://${hostMatch[1].trim()}:${(portMatch?.[1] || '80').trim()}`;
+        _proxyAgent = createProxyAgent(proxyUrl);
+      }
+    } else if (process.platform === 'win32') {
+      const { execSync } = require('node:child_process');
+      const out = execSync('reg query "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ProxyEnable', { encoding: 'utf-8', timeout: 3000 });
+      if (/0x1/.test(out)) {
+        const serverOut = execSync('reg query "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ProxyServer', { encoding: 'utf-8', timeout: 3000 });
+        const match = serverOut.match(/ProxyServer\s+REG_SZ\s+(.+)/);
+        if (match) {
+          const proxyAddr = match[1].trim();
+          _proxyAgent = createProxyAgent(proxyAddr.startsWith('http') ? proxyAddr : `http://${proxyAddr}`);
+        }
+      }
     }
   } catch {}
   return _proxyAgent;
@@ -294,6 +307,24 @@ async function checkAppUpdate() {
       return { hasUpdate: false, currentVersion, latestVersion };
     }
 
+    // Windows: 跳转浏览器让用户手动下载安装
+    if (process.platform === 'win32') {
+      const winAsset = release.assets.find((a) =>
+        String(a.name || '').includes('win') && String(a.name || '').endsWith('.exe')
+      );
+      const releaseUrl = winAsset
+        ? winAsset.browser_download_url
+        : `https://github.com/cxcboss/AntBot/releases/tag/${release.tag_name}`;
+      return {
+        hasUpdate: true,
+        currentVersion,
+        latestVersion,
+        changelog: release.body || '',
+        openBrowser: true,
+        releaseUrl
+      };
+    }
+
     const macAsset = release.assets.find((a) =>
       String(a.name || '').endsWith('.zip') && String(a.name || '').includes('mac')
     ) || release.assets.find((a) => String(a.name || '').endsWith('.zip')) || null;
@@ -452,10 +483,19 @@ async function installPluginUpdate(zipPath, newVersion) {
     await fs.mkdir(tmpExtract, { recursive: true });
 
     await new Promise((resolve, reject) => {
-      execFile('unzip', ['-o', '-q', zipPath, '-d', tmpExtract], { timeout: 60000 }, (err) => {
-        if (err) return reject(new Error(`解压失败: ${err.message}`));
-        resolve();
-      });
+      if (process.platform === 'win32') {
+        const { execFile: execFileCb } = require('node:child_process');
+        const esc = s => String(s||'').replace(/'/g, "''");
+        execFileCb('powershell.exe', ['-NoProfile', '-Command', `Expand-Archive -LiteralPath '${esc(zipPath)}' -DestinationPath '${esc(tmpExtract)}' -Force`], { timeout: 60000 }, (err) => {
+          if (err) return reject(new Error(`解压失败: ${err.message}`));
+          resolve();
+        });
+      } else {
+        execFile('unzip', ['-o', '-q', zipPath, '-d', tmpExtract], { timeout: 60000 }, (err) => {
+          if (err) return reject(new Error(`解压失败: ${err.message}`));
+          resolve();
+        });
+      }
     });
 
     // 检测嵌套目录（zip 内有单一根目录时剥离）

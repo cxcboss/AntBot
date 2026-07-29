@@ -24,9 +24,19 @@ class PyTorchTTSBackend:
         self.model_size = model_size
         self.device = self._get_device()
         self._current_model_size = None
-    
+
     def _get_device(self) -> str:
         """Get the best available device."""
+        # 允许通过环境变量强制指定设备（VOICEBOX_DEVICE=cpu 或 cuda）
+        forced = os.environ.get('VOICEBOX_DEVICE', '').strip().lower()
+        if forced == 'cpu':
+            return "cpu"
+        if forced == 'cuda':
+            if torch.cuda.is_available():
+                return "cuda"
+            print("[警告] VOICEBOX_DEVICE=cuda 但 CUDA 不可用，回退到 CPU")
+            return "cpu"
+        # 自动检测
         if torch.cuda.is_available():
             return "cuda"
         # Intel Arc / Intel Xe GPU via intel-extension-for-pytorch (IPEX)

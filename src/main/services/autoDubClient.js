@@ -263,7 +263,8 @@ async function resolvePythonBinary() {
   const getPythonVersion = (pythonPath) => {
     return new Promise((resolve) => {
       const child = spawn(pythonPath, ['-c', 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")'], {
-        stdio: ['ignore', 'pipe', 'ignore']
+        stdio: ['ignore', 'pipe', 'ignore'],
+        windowsHide: true
       });
       let stdout = '';
       child.stdout.on('data', (chunk) => {
@@ -359,7 +360,7 @@ async function resolvePythonBinary() {
 
 async function spawnDetachedProcess(command, args, options = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, options);
+    const child = spawn(command, args, { ...options, windowsHide: true });
     const onError = (error) => {
       reject(error);
     };
@@ -500,7 +501,8 @@ async function runScriptWithLogs(scriptPath, {
     const child = spawn(shellBinary, [scriptPath], {
       cwd,
       env: withRuntimeEnv(env),
-      stdio: ['ignore', 'pipe', 'pipe']
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true
     });
     const recentLines = [];
 
@@ -553,7 +555,8 @@ async function runCommandWithLogs(command, args, {
     const child = spawn(command, args, {
       cwd,
       env: withRuntimeEnv(env),
-      stdio: ['ignore', 'pipe', 'pipe']
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true
     });
     const recentLines = [];
 
@@ -600,7 +603,8 @@ async function canImportPythonModule(pythonBinary, moduleName, cwd) {
   return new Promise((resolve) => {
     const child = spawn(pythonBinary, ['-c', `import ${moduleName}`], {
       cwd,
-      stdio: 'ignore'
+      stdio: 'ignore',
+      windowsHide: true
     });
     child.once('error', () => resolve(false));
     child.once('close', (code) => resolve(code === 0));
@@ -612,7 +616,8 @@ async function readCommandStdout(command, args, options = {}) {
     const child = spawn(command, args, {
       cwd: options.cwd,
       env: withRuntimeEnv(options.env),
-      stdio: ['ignore', 'pipe', 'ignore']
+      stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true
     });
     let stdout = '';
     child.stdout.on('data', (chunk) => {
@@ -638,47 +643,120 @@ async function requestVoiceCloneShutdown() {
 }
 
 async function fetchVoiceboxApi(endpoint, options = {}) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), options.timeoutMs || 6000);
-  try {
-    const response = await fetch(`${VOICEBOX_BASE_URL}${endpoint}`, {
-      method: options.method || 'GET',
-      headers: options.headers,
-      body: options.body,
-      signal: controller.signal
-    });
+  const timeoutMs = options.timeoutMs || 6000;
+  const method = options.method || 'GET';
+  const isFormData = options.body != null && typeof options.body === 'object' && options.body.constructor?.name === 'FormData';
+  const url = `${VOICEBOX_BASE_URL}${endpoint}`;
 
-    const contentType = String(response.headers.get('content-type') || '').toLowerCase();
-    let payload = null;
+  // FormData 用 fetch()（原生支持 multipart），但需要手动设置 Content-Type
+  if (isFormData) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      if (contentType.includes('application/json')) {
-        payload = await response.json();
-      } else {
-        payload = await response.text();
+      // Node.js fetch 不自动为 FormData 设置正确的 Content-Type，需要手动处理
+      const boundary = '----VoiceboxFormBoundary' + Date.now().toString(36);
+      const parts = [];
+      for (const [key, value] of options.body.entries()) {
+        parts.push(`--${boundary}\r\n`);
+        if (value && typeof value === 'object' && 'arrayBuffer' in value) {
+          // Blob/File-like object
+          const buf = Buffer.from(await value.arrayBuffer());
+          const fname = value.name || 'file';
+          const ctype = value.type || 'application/octet-stream';
+          parts.push(`Content-Disposition: form-data; name="${key}"; filename="${fname}"\r\nContent-Type: ${ctype}\r\n\r\n`);
+          parts.push(buf);
+          parts.push('\r\n');
+        } else {
+          parts.push(`Content-Disposition: form-data; name="${key}"\r\n\r\n${String(value)}\r\n`);
+        }
       }
-    } catch {
-      payload = null;
-    }
+      parts.push(`--${boundary}--\r\n`);
+      const bodyBuf = Buffer.concat(parts.map(p => typeof p === 'string' ? Buffer.from(p) : p));
 
-    if (!response.ok) {
-      const detail = typeof payload === 'object' && payload
-        ? payload.detail || payload.error || JSON.stringify(payload)
-        : String(payload || '').trim();
-      throw new Error(`Voice clone 引擎请求失败 (${response.status}): ${detail || `HTTP ${response.status}`}`);
+      const resp = await fetch(url, {
+        method,
+        headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
+        body: bodyBuf,
+        signal: controller.signal
+      });
+      clearTimeout(timer);
+      const text = await resp.text();
+      let payload;
+      try { payload = JSON.parse(text); } catch { payload = text; }
+      if (!resp.ok) {
+        const detail = typeof payload === 'object' && payload ? JSON.stringify(payload.detail || payload.error || payload) : String(payload || '');
+        throw new Error(`Voice clone 引擎请求失败 (${resp.status}): ${detail.slice(0, 300)}`);
+      }
+      return payload;
+    } catch (e) {
+      clearTimeout(timer);
+      throw e;
     }
-
-    return payload;
-  } finally {
-    clearTimeout(timer);
   }
+
+  const headers = { ...(options.headers || {}) };
+  let bodyData = options.body;
+  if (bodyData && typeof bodyData === 'object' && !(bodyData instanceof Buffer)) {
+    bodyData = JSON.stringify(bodyData);
+    if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
+  }
+
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { req.destroy(); reject(new Error(`voicebox 请求超时(${timeoutMs}ms): ${endpoint}`)); }, timeoutMs);
+    const req = http.request({
+      hostname: '127.0.0.1', port: VOICEBOX_PORT, path: endpoint, method, headers, timeout: timeoutMs
+    }, (res) => {
+      const chunks = [];
+      res.on('data', c => chunks.push(c));
+      res.on('error', e => { clearTimeout(timer); reject(e); });
+      res.on('end', () => {
+        clearTimeout(timer);
+        const body = Buffer.concat(chunks).toString('utf8');
+        let payload;
+        try { payload = JSON.parse(body); } catch { payload = body; }
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          const detail = typeof payload === 'object' && payload ? JSON.stringify(payload.detail || payload.error || payload) : String(payload || '');
+          return reject(new Error(`Voice clone 引擎请求失败 (${res.statusCode}): ${detail.slice(0, 200)}`));
+        }
+        resolve(payload);
+      });
+    });
+    req.on('error', e => { clearTimeout(timer); reject(e); });
+    if (bodyData) req.write(bodyData);
+    req.end();
+  });
 }
 
 async function getVoiceCloneProfiles(timeoutMs = 20000) {
-  const payload = await fetchVoiceboxApi('/profiles', {
-    method: 'GET',
-    timeoutMs
-  });
-  return Array.isArray(payload) ? payload : [];
+  let lastError = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const payload = await fetchVoiceboxApi('/profiles', { method: 'GET', timeoutMs });
+      return Array.isArray(payload) ? payload : [];
+    } catch (e) {
+      lastError = e;
+      // 写入诊断日志
+      try {
+        const logDir = path.join(os.homedir(), 'AntBot', 'logs');
+        const files = require('node:fs').readdirSync(logDir).filter(f => f.startsWith('app-') && f.endsWith('.log')).sort();
+        if (files.length) {
+          const msg = `[voicebox] getVoiceCloneProfiles 失败(第${attempt}次): ${e.message}`;
+          require('node:fs').appendFileSync(path.join(logDir, files[files.length - 1]), msg + '\n');
+          // 读取 voicebox 后端日志尾部
+          try {
+            const vbLogDir = path.join(getRuntimeRoot(), 'logs');
+            const vbFiles = require('node:fs').readdirSync(vbLogDir).filter(f => f.includes('voicebox') && f.endsWith('.log')).sort();
+            if (vbFiles.length) {
+              const tail = require('node:fs').readFileSync(path.join(vbLogDir, vbFiles[vbFiles.length - 1]), 'utf8').split('\n').slice(-10).join('\n');
+              require('node:fs').appendFileSync(path.join(logDir, files[files.length - 1]), `[voicebox] 后端日志尾部:\n${tail}\n`);
+            }
+          } catch {}
+        }
+      } catch {}
+      if (attempt < 3) await sleep(2000);
+    }
+  }
+  throw lastError;
 }
 
 async function getVoiceCloneModelStatuses(timeoutMs = 15000) {
@@ -956,6 +1034,9 @@ async function resolveAutoDubProjectPath(explicitPath) {
   }
 
   if (await detectAutoDubProject(localVendorPath)) {
+    if (!await isAutoDubProjectWritable(localVendorPath)) {
+      return ensureWritableBundledAutoDub(localVendorPath);
+    }
     return localVendorPath;
   }
 
@@ -1143,6 +1224,17 @@ async function fetchVoiceCloneStatus(timeoutMs = 6000) {
       method: 'GET',
       timeoutMs
     });
+
+    // 必须等模型加载完成才算就绪，否则后续 API 调用会失败
+    if (!health.model_loaded) {
+      return {
+        available: false,
+        message: `模型加载中（${health.model_downloaded ? '已下载' : '未下载'}）`,
+        profiles: [],
+        health
+      };
+    }
+
     let profiles = [];
     let profileMessage = '';
     try {
@@ -1191,6 +1283,7 @@ async function waitForVoiceCloneReady(timeoutMs = 60000) {
 
 async function ensureVoiceCloneBackend(projectPath, logger = () => {}, progress = () => {}, options = {}) {
   const forceRepair = Boolean(options?.forceRepair);
+  const gpuMode = options?.gpuMode || 'auto';
   const tracked = startedVoiceboxBackends.get(projectPath);
   const trackedAlive = isStartedChildAlive(tracked);
   const logFilePath = tracked?.logFilePath || await getVoiceboxLogFilePath(projectPath);
@@ -1256,7 +1349,8 @@ async function ensureVoiceCloneBackend(projectPath, logger = () => {}, progress 
   const readPythonVersion = (pythonPath) => {
     return new Promise((resolve) => {
       const child = spawn(pythonPath, ['-c', 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")'], {
-        stdio: ['ignore', 'pipe', 'ignore']
+        stdio: ['ignore', 'pipe', 'ignore'],
+        windowsHide: true
       });
       let stdout = '';
       child.stdout.on('data', (chunk) => {
@@ -1308,10 +1402,12 @@ async function ensureVoiceCloneBackend(projectPath, logger = () => {}, progress 
       const launchArgs = process.platform === 'win32'
         ? ['-u', '-m', 'backend.main', '--host', '127.0.0.1', '--port', '17493', '--data-dir', voiceboxDataDir]
         : [startScript];
-      const env = { ...process.env, VOICEBOX_PYTHON: venvPython, VENV_DIR: venvDir, VOICEBOX_DATA_DIR: voiceboxDataDir, VOICEBOX_MODELS_DIR: path.join(voiceboxDataDir, 'models') };
+      const voiceboxDevice = gpuMode === 'cpu' ? 'cpu' : gpuMode === 'gpu' ? 'cuda' : '';
+      const env = { ...process.env, VOICEBOX_PYTHON: venvPython, VENV_DIR: venvDir, VOICEBOX_DATA_DIR: voiceboxDataDir, VOICEBOX_MODELS_DIR: path.join(voiceboxDataDir, 'models'), ...(voiceboxDevice ? { VOICEBOX_DEVICE: voiceboxDevice } : {}) };
       const logFilePath = await getVoiceboxLogFilePath(projectPath);
+      const voiceboxCwd = process.platform === 'win32' ? path.join(projectPath, 'vendor', 'voicebox') : projectPath;
       const child = await spawnLoggedDetachedProcess(launchCommand, launchArgs, {
-        cwd: projectPath, env, logFilePath, label: 'voicebox'
+        cwd: voiceboxCwd, env, logFilePath, label: 'voicebox'
       });
       startedVoiceboxBackends.set(projectPath, { child, logFilePath });
       progress({ status: 'running', step: '启动后端', percent: 80, message: '正在启动 voicebox 后端...' });
@@ -1477,7 +1573,9 @@ async function ensureVoiceCloneBackend(projectPath, logger = () => {}, progress 
     throw new Error(`语音克隆后端不可用。已尝试自动安装/启动。\n${details.join('\n')}`);
   }
   logger('voicebox 后端已就绪。');
+  logger('合成步骤2a: prewarmVoiceCloneModel...');
   await prewarmVoiceCloneModel('qwen-tts-1.7B', logger);
+  logger('合成步骤2a完成: prewarm done');
 }
 
 function toFileNameFromOutputUrl(outputUrl) {
@@ -1572,9 +1670,10 @@ async function createVoiceCloneProfileWithAutoDub({
   let finalSamplePath = samplePath;
   try {
     const { spawn: spawnTrim } = require('node:child_process');
-    const ffmpegBin = ['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg', 'ffmpeg'].find(p => { try { require('node:fs').accessSync(p); return true; } catch { return false; } }) || 'ffmpeg';
+    const { resolveDependencyPath } = require('./dependencyManager');
+    const ffmpegBin = await resolveDependencyPath('ffmpeg') || 'ffmpeg';
     await new Promise((resolve, reject) => {
-      const child = spawnTrim(ffmpegBin, ['-i', samplePath, '-t', '30', '-ar', '24000', '-ac', '1', '-y', trimmedPath]);
+      const child = spawnTrim(ffmpegBin, ['-i', samplePath, '-t', '30', '-ar', '24000', '-ac', '1', '-y', trimmedPath], { windowsHide: true });
       let stderr = '';
       child.stderr.on('data', d => { stderr += d.toString(); });
       child.on('close', code => code === 0 ? resolve() : reject(new Error(stderr.slice(0, 200))));
@@ -1664,6 +1763,7 @@ async function resolveVoiceCloneProfile({
   voiceCloneSamplePath,
   voiceCloneReferenceText,
   language = 'zh',
+  gpuMode = 'auto',
   log = () => {}
 }) {
   const desiredId = String(voiceCloneId || '').trim();
@@ -1679,8 +1779,11 @@ async function resolveVoiceCloneProfile({
     };
   }
 
-  await ensureVoiceCloneBackend(projectPath, log, () => {});
+  log('resolveVoiceCloneProfile: ensureVoiceCloneBackend...');
+  await ensureVoiceCloneBackend(projectPath, log, () => {}, { gpuMode });
+  log('resolveVoiceCloneProfile: getVoiceCloneProfiles...');
   const profiles = await getVoiceCloneProfiles();
+  log(`resolveVoiceCloneProfile: got ${Array.isArray(profiles) ? profiles.length : 0} profiles, desiredId=${desiredId}, desiredName=${desiredName}, samplePath=${samplePath ? 'set' : 'empty'}`);
   const normalizedProfiles = Array.isArray(profiles) ? profiles : [];
 
   if (desiredId) {
@@ -1760,8 +1863,36 @@ async function resolveVoiceCloneProfile({
     }
   }
 
+  // 预置音色自动注册：WAV 文件存在但 voicebox 数据库里没有，自动注册
+  if (desiredId) {
+    // 预置音色保存在 ~/AntBot/voicebox-data/profiles/<voiceId>/ref.wav
+    const wavPath = path.join(os.homedir(), 'AntBot', 'voicebox-data', 'profiles', desiredId, 'ref.wav');
+    try {
+      await fs.access(wavPath);
+      log(`预置音色 ${desiredId} 的 WAV 文件存在，自动注册到 voicebox...`);
+      const audioBuffer = await fs.readFile(wavPath);
+      const createdProfile = await createVoiceCloneProfileDirect({
+        profileName: desiredName || desiredId,
+        language: language || 'zh',
+        referenceText: '预置音色',
+        audioBuffer,
+        sampleFileName: 'ref.wav',
+        sampleMimeType: 'audio/wav'
+      });
+      log(`预置音色已注册：${createdProfile.name} (${createdProfile.id})`);
+      return {
+        useVoiceClone: true,
+        profileId: String(createdProfile.id || '').trim(),
+        profileName: createdProfile.name || desiredName,
+        language: createdProfile.language || language
+      };
+    } catch (e) {
+      if (e.code !== 'ENOENT') log(`预置音色注册失败：${e.message}`);
+    }
+  }
+
   throw new Error(
-    '当前保存的克隆音色已失效或不存在，请重新在“克隆”面板生成一次音色。'
+    '当前保存的克隆音色已失效或不存在，请重新在”克隆”面板生成一次音色。'
     + (availableNames.length ? ` 当前可用档案：${availableNames.join('、')}` : ' 当前后端未检测到可用档案。')
   );
 }
@@ -1783,13 +1914,17 @@ async function processWithAutoDub({
   subtitleStrokeColor,
   subtitlePositionPercent,
   subtitleFontSize = 0,
+  voiceCloneGpuMode,
   log = () => {}
 }) {
+  log('合成步骤1: ensureAutoDubServer...');
   await ensureAutoDubServer(projectPath, log);
+  log('合成步骤1完成: auto_dub_web 就绪');
   const voiceoverOn = voiceoverEnabled !== false;
   const subtitleOn = voiceoverOn && subtitleEnabled !== false;
   const needsSubtitleFile = voiceoverOn || subtitleOn;
 
+  log('合成步骤2: resolveVoiceCloneProfile...');
   const voiceClone = voiceoverOn
     ? await resolveVoiceCloneProfile({
       projectPath,
@@ -1798,6 +1933,7 @@ async function processWithAutoDub({
       voiceCloneSamplePath,
       voiceCloneReferenceText,
       language: voiceCloneLanguage || 'zh',
+      gpuMode: voiceCloneGpuMode || 'auto',
       log
     })
     : {
@@ -1805,6 +1941,7 @@ async function processWithAutoDub({
       profileId: '',
       language: voiceCloneLanguage || 'zh'
     };
+  log(`合成步骤2完成: useVoiceClone=${voiceClone.useVoiceClone}, profileId=${voiceClone.profileId}`);
 
   if (needsSubtitleFile && !subtitlePath) {
     throw new Error('缺少字幕文件，无法进行配音或字幕处理。');
@@ -1872,13 +2009,17 @@ async function processWithAutoDub({
       ]
     };
 
+  log(`合成步骤3: postAutoDubProcessRequest (video=${videoBuffer.length} bytes)...`);
+
   // 带重试的请求（处理并发任务时 auto_dub_web 忙的情况）
   let response;
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
       response = await postAutoDubProcessRequest(postArgs);
+      log(`合成步骤3完成: HTTP ${response.statusCode}`);
       break;
     } catch (error) {
+      log(`合成步骤3失败（第 ${attempt} 次）: ${error.message}`);
       if (attempt < 3) {
         log(`auto_dub_web 请求失败（第 ${attempt} 次），${attempt * 5} 秒后重试...`);
         await sleep(attempt * 5000);

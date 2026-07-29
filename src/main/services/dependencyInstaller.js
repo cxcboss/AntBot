@@ -29,7 +29,8 @@ async function parseRequirements(requirementsPath) {
 async function isPackageInstalled(venvPython, packageName) {
   return new Promise((resolve) => {
     const child = spawn(venvPython, ['-m', 'pip', 'show', packageName], {
-      stdio: ['ignore', 'ignore', 'ignore']
+      stdio: ['ignore', 'ignore', 'ignore'],
+      windowsHide: true
     });
     child.once('error', () => resolve(false));
     child.once('close', (code) => resolve(code === 0));
@@ -79,7 +80,8 @@ function installSinglePackage(venvPython, pkg, env, pushEvent, abortSignal) {
 
     const child = spawn(venvPython, ['-u', '-m', 'pip', 'install', '--no-cache-dir', '--progress-bar', 'on', spec], {
       env: { ...env, PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' },
-      stdio: ['ignore', 'pipe', 'pipe']
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true
     });
 
     let killed = false;

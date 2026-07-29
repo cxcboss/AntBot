@@ -93,10 +93,18 @@
       "gatekeeperAssess": false
     },
     "win": {
-      "artifactName": "搬运蚁-${version}-win-${arch}.${ext}",
+      "icon": "assets/icon.ico",
+      "artifactName": "AntBot-${version}-win-${arch}.${ext}",
       "target": [
         "nsis"
-      ]
+      ],
+      "executableName": "AntBot"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "unicode": true
     },
     "linux": {
       "target": [

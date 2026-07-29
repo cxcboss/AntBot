@@ -42,7 +42,7 @@ function configureBundledPlaywrightBrowsers() {
 
 configureBundledPlaywrightBrowsers();
 
-const { app, BrowserWindow, protocol, net } = require('electron');
+const { app, BrowserWindow, protocol, net, session } = require('electron');
 
 function resolveStableUserDataPath() {
   return path.join(app.getPath('appData'), 'antbot');
@@ -248,6 +248,14 @@ process.on('uncaughtException', (err) => {
 });
 
 app.whenReady().then(async () => {
+  // 配置系统代理（影响渲染进程和 net 模块的请求）
+  try {
+    await session.defaultSession.setProxy({
+      mode: 'system',
+      proxyBypassRules: 'localhost;127.0.0.1;192.168.*;10.*'
+    });
+  } catch {}
+
   // Register safe-file protocol handler
   protocol.handle('safe-file', (request) => {
     const filePath = decodeURIComponent(request.url.replace('safe-file://', ''));

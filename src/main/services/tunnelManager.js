@@ -15,12 +15,22 @@ const TUNNEL_DOMAIN = 'remote.onebugmanai.online';
 const CONFIG_PATH = path.join(os.homedir(), '.cloudflared', 'config.yml');
 
 function findCloudflared() {
-  const candidates = [
-    path.join(os.homedir(), 'AntBot', 'tools', 'cloudflared'),
-    '/opt/homebrew/bin/cloudflared',
-    '/usr/local/bin/cloudflared',
-    'cloudflared'
-  ];
+  const { getManagedBinDir } = require('./dependencyManager');
+  const managedBin = getManagedBinDir();
+  const candidates = process.platform === 'win32'
+    ? [
+        path.join(managedBin, 'cloudflared.exe'),
+        path.join(os.homedir(), 'AntBot', 'bin', 'cloudflared.exe'),
+        path.join(process.env.ProgramFiles || 'C:\\Program Files', 'cloudflared', 'cloudflared.exe'),
+        'cloudflared.exe'
+      ]
+    : [
+        path.join(managedBin, 'cloudflared'),
+        path.join(os.homedir(), 'AntBot', 'tools', 'cloudflared'),
+        '/opt/homebrew/bin/cloudflared',
+        '/usr/local/bin/cloudflared',
+        'cloudflared'
+      ];
   for (const bin of candidates) {
     try {
       fs.accessSync(bin, fs.constants.X_OK);
@@ -174,7 +184,7 @@ function startTunnel(port, { onUrl, onStatus, log, deviceName } = {}) {
 
     const cloudflared = findCloudflared();
     if (!cloudflared) {
-      return reject(new Error('cloudflared 未安装。请运行: brew install cloudflared'));
+      return reject(new Error('cloudflared 未安装。请在设置页面安装依赖。'));
     }
 
     // 检查是否有命名隧道配置
@@ -197,7 +207,8 @@ function startTunnel(port, { onUrl, onStatus, log, deviceName } = {}) {
 
     _tunnelProcess = spawn(cloudflared, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env }
+      env: { ...process.env },
+      windowsHide: true
     });
 
     let resolved = false;

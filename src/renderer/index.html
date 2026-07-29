@@ -505,9 +505,14 @@
         <div class="voicebox-items" id="voicebox-items"></div>
         <div id="voicebox-deps-list" class="voicebox-deps-list"></div>
         <div class="s-row"><span class="s-label">存储路径</span><div class="s-input-row"><span id="voicebox-path" class="s-path">-</span><button type="button" id="voicebox-open-btn" class="btn btn-sm btn-ghost"><span class="icon" data-icon="folderOpen"></span></button></div></div>
+        <div class="s-row" id="voicebox-gpu-mode-row" style="display:none"><span class="s-label">运行设备</span>
+          <select id="voicebox-gpu-mode"><option value="auto">自动检测</option><option value="gpu">GPU (CUDA)</option><option value="cpu">CPU</option></select>
+          <span style="font-size:10px;color:var(--muted-foreground);margin-top:2px">GPU 需安装 CUDA PyTorch（约2GB）</span>
+        </div>
       </div>
       <div class="dlg-actions">
         <button type="button" id="voicebox-reset-btn" class="btn btn-ghost"><span class="icon" data-icon="trash"></span>重置环境</button>
+        <button type="button" id="voicebox-gpu-btn" class="btn btn-ghost" style="display:none"><span class="icon" data-icon="download"></span>安装 GPU 加速</button>
         <button type="button" id="voicebox-install-btn" class="btn btn-primary"><span class="icon" data-icon="download"></span>安装依赖</button>
       </div>
 

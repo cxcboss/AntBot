@@ -4,6 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { app, dialog, ipcMain, shell } = require('electron');
 const { parseTaskInput, parsePublishDebugInput } = require('./services/parser');
+const { resolveDependencyPath } = require('./services/dependencyManager');
 
 // ── App logger ──
 let _logStream = null;
@@ -244,7 +245,7 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
 
   // 下载预置音色
   ipcMain.handle('voice:download-preset', async (_event, { voiceId, voiceName, downloadUrl }) => {
-    const extractZip = (await import('extract-zip')).default;
+    const { execFile } = require('node:child_process');
     const dataDir = path.join(os.homedir(), 'AntBot');
     const profilesDir = path.join(dataDir, 'voicebox-data', 'profiles');
     const profileDir = path.join(profilesDir, voiceId);
@@ -261,8 +262,15 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
       const buf = Buffer.from(await res.arrayBuffer());
       await fs.writeFile(zipPath, buf);
 
-      // 解压
-      await extractZip(zipPath, { dir: tmpDir });
+      // 解压（跨平台）
+      await new Promise((resolve, reject) => {
+        if (process.platform === 'win32') {
+          const esc = s => String(s||'').replace(/'/g, "''");
+          execFile('powershell.exe', ['-NoProfile', '-Command', `Expand-Archive -LiteralPath '${esc(zipPath)}' -DestinationPath '${esc(tmpDir)}' -Force`], { timeout: 30000 }, (err) => err ? reject(err) : resolve());
+        } else {
+          execFile('unzip', ['-o', '-q', zipPath, '-d', tmpDir], { timeout: 30000 }, (err) => err ? reject(err) : resolve());
+        }
+      });
 
       // 复制 WAV 到 profile 目录
       const wavFile = (await fs.readdir(tmpDir)).find(f => f.endsWith('.wav'));
@@ -371,9 +379,14 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
   ipcMain.handle('publish:bridge-start', async () => {
     appLog('info', '[publish] 启动桥接服务');
     const { bridgeServiceManager } = require('./services/bridgeServiceManager');
-    const started = await bridgeServiceManager.start();
-    appLog('info', `[publish] 桥接服务启动结果: ${started}`);
-    return { ok: started, status: bridgeServiceManager.getStatus() };
+    try {
+      const started = await bridgeServiceManager.start();
+      appLog('info', `[publish] 桥接服务启动结果: ${started}`);
+      return { ok: started, status: bridgeServiceManager.getStatus(), error: started ? '' : '服务启动超时，请检查日志' };
+    } catch (e) {
+      appLog('error', `[publish] 桥接服务启动异常: ${e.message}`);
+      return { ok: false, status: null, error: e.message };
+    }
   });
 
   ipcMain.handle('publish:bridge-stop', async () => {
@@ -575,7 +588,7 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
   ipcMain.handle('deps:check', async (_event, tool) => {
     const { spawn } = require('node:child_process');
     const check = (cmd, args, timeoutMs = 10000) => new Promise((resolve) => {
-      const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
       let out = '', done = false;
       const timer = setTimeout(() => { if (!done) { done = true; child.kill(); resolve({ ok: false, version: '' }); } }, timeoutMs);
       child.stdout.on('data', d => { out += d.toString(); });
@@ -583,11 +596,11 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
       child.on('close', () => { if (!done) { done = true; clearTimeout(timer); resolve({ ok: true, version: out.trim().split('\n')[0].slice(0, 80) }); } });
       child.on('error', () => { if (!done) { done = true; clearTimeout(timer); resolve({ ok: false, version: '' }); } });
     });
-    if (tool === 'ffmpeg') return check('ffmpeg', ['-version']);
-    if (tool === 'python') return check('python3', ['--version']);
+    if (tool === 'ffmpeg') return check(await resolveDependencyPath('ffmpeg') || 'ffmpeg', ['-version']);
+    if (tool === 'python') return check(await resolveDependencyPath('python') || 'python3', ['--version']);
     if (tool === 'whisper') {
-      // Quick check: just see if whisper module exists without importing torch
-      const r = await check('python3', ['-c', 'import importlib; importlib.import_module("whisper"); print("ok")'], 15000);
+      const pythonBin = await resolveDependencyPath('python') || 'python3';
+      const r = await check(pythonBin, ['-c', 'import importlib; importlib.import_module("whisper"); print("ok")'], 15000);
       return { ok: r.ok, version: r.ok ? 'whisper (已安装)' : '' };
     }
     return { ok: false, version: '' };
@@ -600,8 +613,12 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
 
     if (tool === 'whisper') {
       send({ tool, status: 'installing', message: '正在安装 whisper...' });
+      const pythonBin = await resolveDependencyPath('python') || 'python3';
+      const pipArgs = process.platform === 'win32'
+        ? [pythonBin, '-m', 'pip', 'install', 'openai-whisper']
+        : [pythonBin, '-m', 'pip', 'install', '--break-system-packages', 'openai-whisper'];
       return new Promise((resolve) => {
-        const child = spawn('python3', ['-m', 'pip', 'install', '--break-system-packages', 'openai-whisper'], { stdio: ['ignore', 'pipe', 'pipe'] });
+        const child = spawn(pipArgs[0], pipArgs.slice(1), { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
         let stderr = '';
         child.stdout.on('data', d => {
           const msg = d.toString().trim();
@@ -630,14 +647,17 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
   async function getVoiceboxVenvPath() {
     const { resolveAutoDubProjectPath } = require('./services/autoDubClient');
     const settings = await store.getSettings();
-    const projectPath = await resolveAutoDubProjectPath(settings?.paths?.editProjectPath || '');
-    if (!projectPath) return null;
     const dataDir = settings.dataDir || path.join(os.homedir(), 'AntBot');
     const voiceboxEnvDir = path.join(dataDir, 'voicebox-env');
+    const venvDir = path.join(voiceboxEnvDir, '.venv-voicebox');
+    const venvPython = process.platform === 'win32'
+      ? path.join(venvDir, 'Scripts', 'python.exe')
+      : path.join(venvDir, 'bin', 'python3');
+    const projectPath = await resolveAutoDubProjectPath(settings?.paths?.editProjectPath || '');
     return {
-      projectPath,
-      venvDir: path.join(voiceboxEnvDir, '.venv-voicebox'),
-      venvPython: path.join(voiceboxEnvDir, '.venv-voicebox', 'bin', 'python3'),
+      projectPath: projectPath || '',
+      venvDir,
+      venvPython,
       markerPath: path.join(voiceboxEnvDir, '.voicebox-setup-done'),
       dataDir: path.join(dataDir, 'voicebox-data')
     };
@@ -651,7 +671,7 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
     const items = [];
     const check = (name, pythonCode) => new Promise((resolve) => {
       try {
-        const child = spawn(info.venvPython, ['-c', pythonCode], { stdio: ['ignore', 'pipe', 'pipe'], timeout: 15000 });
+        const child = spawn(info.venvPython, ['-c', pythonCode], { stdio: ['ignore', 'pipe', 'pipe'], timeout: 15000, windowsHide: true });
         let out = '';
         child.stdout.on('data', d => { out += d.toString(); });
         child.on('close', code => resolve({ name, ok: code === 0, version: out.trim().split('\n')[0].slice(0, 60) }));
@@ -688,23 +708,30 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
     const send = (p) => { if (win && !win.isDestroyed()) win.webContents.send('voicebox:progress', p); };
     const sendDeps = (p) => { if (win && !win.isDestroyed()) win.webContents.send('voicebox:deps-progress', { ...p, timestamp: new Date().toISOString() }); };
     const info = await getVoiceboxVenvPath();
-    if (!info) return { ok: false, message: 'auto_dub_web 目录未找到' };
+    if (!info) return { ok: false, message: '无法获取 voicebox 环境信息' };
 
     send({ status: 'installing', message: '正在准备安装环境...' });
     appLog('info', '开始安装 voicebox 依赖');
 
-    // 1. 确保 voicebox 源码存在
-    const requirementsPath = path.join(info.projectPath, 'vendor', 'voicebox', 'backend', 'requirements.txt');
-    const hasReqs = await fs.access(requirementsPath).then(() => true).catch(() => false);
+    // 1. 确保 voicebox 源码存在（需要 projectPath）
+    const requirementsPath = info.projectPath
+      ? path.join(info.projectPath, 'vendor', 'voicebox', 'backend', 'requirements.txt')
+      : '';
+    const hasReqs = requirementsPath
+      ? await fs.access(requirementsPath).then(() => true).catch(() => false)
+      : false;
     if (!hasReqs) {
       const setupScript = path.join(info.projectPath, 'scripts', 'setup_voicebox_backend.sh');
       try { await fs.access(setupScript); } catch { return { ok: false, message: '缺少 setup_voicebox_backend.sh 和 requirements.txt' }; }
       send({ status: 'installing', message: '正在下载 voicebox 源码...' });
+      const bashBin = await resolveDependencyPath('bash') || 'bash';
+      const pythonBin = await resolveDependencyPath('python') || 'python3';
       await new Promise((resolve) => {
-        const child = spawn('bash', [setupScript], {
+        const child = spawn(bashBin, [setupScript], {
           cwd: info.projectPath,
-          env: { ...process.env, PYTHON_BIN: 'python3.12' },
-          stdio: ['ignore', 'pipe', 'pipe']
+          env: { ...process.env, PYTHON_BIN: pythonBin },
+          stdio: ['ignore', 'pipe', 'pipe'],
+          windowsHide: true
         });
         child.stdout.on('data', d => { const m = d.toString().trim(); if (m) send({ status: 'installing', message: m.slice(0, 120) }); });
         child.stderr.on('data', () => {});
@@ -717,24 +744,38 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
     const venvExists = await fs.access(info.venvPython).then(() => true).catch(() => false);
     if (!venvExists) {
       send({ status: 'installing', message: '正在创建虚拟环境...' });
+      const pythonBin = await resolveDependencyPath('python') || 'python3';
       await new Promise((resolve) => {
-        const child = spawn('python3.12', ['-m', 'venv', info.venvDir], {
-          cwd: info.projectPath, stdio: ['ignore', 'pipe', 'pipe']
+        const child = spawn(pythonBin, ['-m', 'venv', info.venvDir], {
+          cwd: info.projectPath, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true
         });
         child.on('close', () => resolve());
         child.on('error', () => resolve());
       });
     }
 
-    // 3. 升级 pip
+    // 3. 升级 pip + 预装基础依赖
     send({ status: 'installing', message: '正在升级 pip...' });
     await new Promise((resolve) => {
-      const child = spawn(info.venvPython, ['-m', 'pip', 'install', '--upgrade', 'pip', 'wheel', 'setuptools'], {
-        cwd: info.projectPath, stdio: ['ignore', 'pipe', 'pipe']
+      const child = spawn(info.venvPython, ['-m', 'pip', 'install', '--upgrade', 'pip', 'wheel', 'setuptools', 'huggingface_hub'], {
+        cwd: info.projectPath, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true
       });
       child.on('close', () => resolve());
       child.on('error', () => resolve());
     });
+
+    // 3.5确保基础依赖已安装
+    const basePackages = ['huggingface_hub', 'transformers', 'qwen_tts'];
+    for (const pkg of basePackages) {
+      send({ status: 'installing', message: `检查 ${pkg}...` });
+      await new Promise((resolve) => {
+        const child = spawn(info.venvPython, ['-m', 'pip', 'install', '-q', pkg], {
+          cwd: info.projectPath, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true
+        });
+        child.on('close', () => resolve());
+        child.on('error', () => resolve());
+      });
+    }
 
     // 4. 逐包安装依赖，发送粒度进度
     const hasReqsNow = await fs.access(requirementsPath).then(() => true).catch(() => false);
@@ -753,6 +794,77 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
       abortControllers: activeVoiceboxAbortControllers
     });
 
+    // 4.5 Windows GPU：requirements.txt 装完后再装 CUDA PyTorch（避免被覆盖）
+    if (process.platform === 'win32') {
+      const fsSync = require('node:fs');
+      const logFile = (() => { try {
+        const logDir = path.join(os.homedir(), 'AntBot', 'logs');
+        const files = fsSync.readdirSync(logDir).filter(f => f.startsWith('app-') && f.endsWith('.log')).sort();
+        return files.length ? path.join(logDir, files[files.length - 1]) : null;
+      } catch { return null; } })();
+      const gpuLog = (msg) => { if (logFile) try { fsSync.appendFileSync(logFile, `[GPU] ${msg}\n`); } catch {} };
+
+      gpuLog('开始 GPU 检测...');
+      // 检查 CUDA 是否已可用
+      const cudaOk = await new Promise(resolve => {
+        const c = spawn(info.venvPython, ['-c', 'import torch; v=torch.cuda.is_available(); print(f"CUDA={v}"); exit(0 if v else 1)'], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+        let out = '';
+        c.stdout?.on('data', d => { out += d.toString(); });
+        c.on('close', code => { gpuLog(`CUDA检测: exit=${code}, output=${out.trim()}`); resolve(code === 0); });
+        c.on('error', e => { gpuLog(`CUDA检测错误: ${e.message}`); resolve(false); });
+      });
+      if (cudaOk) {
+        gpuLog('CUDA 已可用，跳过安装');
+        send({ status: 'installing', message: 'GPU (CUDA) 已可用' });
+      } else {
+        // 检测 NVIDIA GPU
+        const gpuName = await new Promise(resolve => {
+          const c = spawn('nvidia-smi', ['--query-gpu=name', '--format=csv,noheader'], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+          let out = '', err = '';
+          c.stdout?.on('data', d => { out += d.toString(); });
+          c.stderr?.on('data', d => { err += d.toString(); });
+          c.on('close', code => { gpuLog(`nvidia-smi: exit=${code}, gpu="${out.trim()}", err="${err.trim()}"`); resolve(code === 0 ? out.trim() : ''); });
+          c.on('error', e => { gpuLog(`nvidia-smi 错误: ${e.message}`); resolve(''); });
+        });
+        if (gpuName) {
+          gpuLog(`检测到 GPU: ${gpuName}，开始安装 CUDA PyTorch...`);
+          send({ status: 'installing', message: `检测到 ${gpuName}，正在安装 CUDA PyTorch...` });
+          await new Promise((resolve) => {
+            const child = spawn(info.venvPython, [
+              '-m', 'pip', 'install', 'torch', 'torchaudio',
+              '--index-url', 'https://download.pytorch.org/whl/cu121',
+              '--force-reinstall', '--no-deps'
+            ], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+            let lastGpuMsg = '';
+            const onGpuLine = (chunk) => {
+              const lines = chunk.toString().split(/\r?\n/).filter(Boolean);
+              const line = lines[lines.length - 1]?.trim();
+              if (line && line !== lastGpuMsg) {
+                lastGpuMsg = line;
+                send({ status: 'installing', message: line.slice(0, 150) });
+              }
+            };
+            child.stdout?.on('data', onGpuLine);
+            child.stderr?.on('data', onGpuLine);
+            child.on('close', code => { gpuLog(`CUDA PyTorch 安装完成: exit=${code}`); resolve(); });
+            child.on('error', e => { gpuLog(`CUDA PyTorch 安装错误: ${e.message}`); resolve(); });
+          });
+          // 验证安装结果
+          const gpuOk = await new Promise(resolve => {
+            const c = spawn(info.venvPython, ['-c', 'import torch; print(f"torch={torch.__version__}, cuda={torch.cuda.is_available()}")'], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+            let out = '';
+            c.stdout?.on('data', d => { out += d.toString(); });
+            c.on('close', () => { gpuLog(`安装后验证: ${out.trim()}`); resolve(/cuda=True/.test(out)); });
+            c.on('error', () => resolve(false));
+          });
+          send({ status: 'installing', message: gpuOk ? 'GPU 加速已就绪' : 'CUDA PyTorch 安装完成，但 CUDA 不可用，请检查显卡驱动' });
+        } else {
+          gpuLog('未检测到 NVIDIA GPU');
+          send({ status: 'installing', message: '未检测到 NVIDIA GPU，使用 CPU 模式' });
+        }
+      }
+    }
+
     // 5. 安装完成后验证
     send({ status: 'installing', message: '正在验证安装结果...' });
 
@@ -760,7 +872,7 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
     const verifyImport = (moduleName) => new Promise((resolve) => {
       try {
         const child = spawnCheck(info.venvPython, ['-c', `import ${moduleName}; print("ok")`], {
-          stdio: ['ignore', 'pipe', 'pipe'], timeout: 30000
+          stdio: ['ignore', 'pipe', 'pipe'], timeout: 30000, windowsHide: true
         });
         let out = '';
         child.stdout.on('data', d => { out += d.toString(); });
@@ -811,6 +923,63 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
     }
     for (const [, ctrl] of activeVoiceboxAbortControllers) ctrl.abort();
     return { ok: true };
+  });
+
+  // Windows GPU：独立安装 CUDA PyTorch
+  ipcMain.handle('voicebox:install-gpu', async () => {
+    if (process.platform !== 'win32') return { ok: false, message: '仅支持 Windows' };
+    const { spawn: sp } = require('node:child_process');
+    const info = await getVoiceboxVenvPath();
+    if (!info) return { ok: false, message: 'venv 不存在，请先安装依赖' };
+    const win = mainWindowRef();
+    const send = (p) => { if (win && !win.isDestroyed()) win.webContents.send('voicebox:progress', p); };
+
+    // 检测 GPU
+    send({ status: 'installing', message: '正在检测显卡...' });
+    const gpuName = await new Promise(resolve => {
+      const c = sp('nvidia-smi', ['--query-gpu=name', '--format=csv,noheader'], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+      let out = '';
+      c.stdout?.on('data', d => { out += d.toString(); });
+      c.on('close', code => resolve(code === 0 ? out.trim() : ''));
+      c.on('error', () => resolve(''));
+    });
+    if (!gpuName) return { ok: false, message: '未检测到 NVIDIA 显卡' };
+
+    send({ status: 'installing', message: `检测到 ${gpuName}，正在下载 CUDA PyTorch（约2GB）...` });
+    const exitCode = await new Promise(resolve => {
+      const c = sp(info.venvPython, [
+        '-m', 'pip', 'install', 'torch', 'torchaudio',
+        '--index-url', 'https://download.pytorch.org/whl/cu121',
+        '--force-reinstall', '--no-deps'
+      ], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+      let lastMsg = '';
+      const onLine = (chunk) => {
+        // pip 进度用 \r 覆盖同一行，取最后一段
+        const lines = chunk.toString().split(/\r?\n/).filter(Boolean);
+        const line = lines[lines.length - 1]?.trim();
+        if (line && line !== lastMsg) {
+          lastMsg = line;
+          send({ status: 'installing', message: line.slice(0, 150) });
+        }
+      };
+      c.stdout?.on('data', onLine);
+      c.stderr?.on('data', onLine);
+      c.on('close', code => resolve(code));
+      c.on('error', () => resolve(1));
+    });
+    if (exitCode !== 0) return { ok: false, message: '安装失败，请检查网络' };
+
+    // 验证
+    const gpuOk = await new Promise(resolve => {
+      const c = sp(info.venvPython, ['-c', 'import torch; print(torch.cuda.is_available())'], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+      let out = '';
+      c.stdout?.on('data', d => { out += d.toString(); });
+      c.on('close', () => resolve(out.trim() === 'True'));
+      c.on('error', () => resolve(false));
+    });
+    return gpuOk
+      ? { ok: true, message: `${gpuName} GPU 加速已就绪` }
+      : { ok: false, message: '安装完成但 CUDA 不可用，请更新显卡驱动后重试' };
   });
 
   ipcMain.handle('voicebox:open-dir', async () => {
@@ -894,13 +1063,7 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
       // Check if thumbnail already exists, if not extract it
       const exists = await fs.access(thumbnailPath).then(() => true).catch(() => false);
       if (!exists) {
-        // Resolve ffmpeg binary
-        const resolveBin = (name) => {
-          const candidates = [path.join('/opt/homebrew/bin', name), path.join('/usr/local/bin', name), path.join('/usr/bin', name), name];
-          for (const c of candidates) { try { if (require('node:fs').existsSync(c)) return c; } catch {} }
-          return name;
-        };
-        const ffmpegBin = resolveBin('ffmpeg');
+        const ffmpegBin = await resolveDependencyPath('ffmpeg') || 'ffmpeg';
 
         // Extract frame at 1 second using ffmpeg
         const { spawn } = require('node:child_process');
@@ -913,7 +1076,7 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
             '-q:v', '5',
             '-y',
             thumbnailPath
-          ]);
+          ], { windowsHide: true });
           child.on('close', (code) => code === 0 ? resolve() : reject(new Error('ffmpeg failed')));
           child.on('error', reject);
         });
@@ -1253,8 +1416,9 @@ except Exception as e:
     sys.exit(1)
 `, 'utf-8');
 
+        const _pythonBin = await resolveDependencyPath('python') || 'python3';
         await new Promise((resolve, reject) => {
-          const child = spawn('python3', [scriptPath], { stdio: ['ignore', 'pipe', 'pipe'] });
+          const child = spawn(_pythonBin, [scriptPath], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
           let stderr = '';
           let lastProgress = Date.now();
           child.stderr.on('data', d => { stderr += d.toString(); });
@@ -1370,11 +1534,7 @@ except Exception as e:
     const sendProgress = (p) => { if (win && !win.isDestroyed()) win.webContents.send('style:progress', p); };
 
     // ffmpeg/ffprobe 路径解析
-    const resolveBin = (name) => {
-      const candidates = [path.join('/opt/homebrew/bin', name), path.join('/usr/local/bin', name), path.join('/usr/bin', name), name];
-      for (const c of candidates) { try { if (require('node:fs').existsSync(c)) return c; } catch {} }
-      return name;
-    };
+    const resolveBin = async (name) => await resolveDependencyPath(name) || name;
 
     const tempFiles = [];
     const cleanup = async () => { for (const f of tempFiles) { await fsPromises.unlink(f).catch(() => {}); } };
@@ -1383,12 +1543,12 @@ except Exception as e:
       appLog('info', `[style-learn] 开始学习: ${name || '(未命名)'}, video=${videoPath}`);
       sendProgress({ status: 'converting', message: '正在转换音频...' });
 
-      const ffmpegBin = resolveBin('ffmpeg');
+      const ffmpegBin = await resolveBin('ffmpeg');
       const audioPath = path.join(cacheDir, `style-${Date.now()}.mp3`);
       tempFiles.push(audioPath);
 
       await new Promise((resolve, reject) => {
-        const child = spawn(ffmpegBin, ['-i', videoPath, '-vn', '-acodec', 'libmp3lame', '-q:a', '2', '-y', audioPath]);
+        const child = spawn(ffmpegBin, ['-i', videoPath, '-vn', '-acodec', 'libmp3lame', '-q:a', '2', '-y', audioPath], { windowsHide: true });
         let stderr = '';
         child.stderr.on('data', d => { stderr += d.toString(); });
         child.on('close', code => {
@@ -1446,9 +1606,9 @@ except Exception as e:
     sys.exit(1)
 `, 'utf-8');
 
-      const pythonBin = resolveBin('python3');
+      const pythonBin = await resolveBin('python');
       const text = await new Promise((resolve, reject) => {
-        const child = spawn(pythonBin, [pyScript], { stdio: ['ignore', 'pipe', 'pipe'] });
+        const child = spawn(pythonBin, [pyScript], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
         let stdout = '', stderr = '';
         child.stdout.on('data', d => { stdout += d.toString(); });
         child.stderr.on('data', d => { stderr += d.toString(); });
@@ -1913,9 +2073,8 @@ except Exception as e:
     catch (e) { return { ok: false, error: e.message }; }
   });
   ipcMain.handle('download:check-ffmpeg', async () => {
-    const { resolveFfmpegDir } = require('./services/downloadManager');
-    const dir = resolveFfmpegDir();
-    return { available: !!dir, path: dir };
+    const resolved = await resolveDependencyPath('ffmpeg');
+    return { available: !!resolved, path: resolved ? require('node:path').dirname(resolved) : '' };
   });
   ipcMain.handle('download:open-folder', async () => {
     const dir = downloadManager.downloadDir;

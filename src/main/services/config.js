@@ -77,7 +77,7 @@ const BASE_DEFAULT_SETTINGS = {
     tempDir: path.join(os.homedir(), 'Desktop', '视频', '_临时'),
     outputBaseDir: path.join(os.homedir(), 'Desktop', '视频'),
     youtubeProjectPath: '',
-    editProjectPath: path.resolve(process.cwd(), 'vendors', 'auto_dub_web'),
+    editProjectPath: '',
     publishProjectPath: ''
   },
   browser: {
@@ -135,7 +135,8 @@ const BASE_DEFAULT_SETTINGS = {
     referenceText: '',
     profileName: '',
     language: 'zh',
-    lastUpdatedAt: ''
+    lastUpdatedAt: '',
+    gpuMode: 'auto'
   },
   api: {
     provider: 'agnes',

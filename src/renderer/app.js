@@ -1815,7 +1815,7 @@ function bindPublishPage(){
       } else {
         const result = await window.antbot.publishBridgeStart();
         if (result.ok) setResult('服务已启动', 'success');
-        else setResult('启动失败', 'error');
+        else setResult('启动失败: ' + (result.error || '未知错误'), 'error');
       }
       await refreshBridge();
     } catch(e) { setResult(e.message, 'error'); }
@@ -2281,10 +2281,43 @@ function bind(){
     try { await window.antbot.voiceboxReset(); toast('环境已重置', 'info'); await checkVoicebox(); }
     catch (e) { toast(e.message, 'error'); }
   });
+  // Windows GPU 按钮：仅在 Windows 上显示
+  const gpuBtn = document.getElementById('voicebox-gpu-btn');
+  if (gpuBtn && navigator.platform?.includes('Win')) {
+    gpuBtn.style.display = '';
+    gpuBtn.addEventListener('click', async () => {
+      gpuBtn.disabled = true;
+      gpuBtn.innerHTML = `<span class="icon">${ICONS.loader}</span>安装中...`;
+      try {
+        const r = await window.antbot.voiceboxInstallGpu();
+        toast(r.message || (r.ok ? 'GPU 加速安装成功' : '安装失败'), r.ok ? 'success' : 'error');
+        if (r.ok) await checkVoicebox();
+      } catch (e) { toast(e.message, 'error'); }
+      gpuBtn.disabled = false;
+      gpuBtn.innerHTML = `<span class="icon" data-icon="download"></span>安装 GPU 加速`;
+      injectIcons();
+    });
+  }
   document.getElementById('voicebox-open-btn')?.addEventListener('click', async () => {
     try { const r = await window.antbot.voiceboxOpenDir(); if (r.path) toast(`已打开: ${r.path}`, 'info'); }
     catch (e) { toast(e.message, 'error'); }
   });
+
+  // Windows GPU/CPU 模式选择
+  const gpuModeRow = document.getElementById('voicebox-gpu-mode-row');
+  const gpuModeSelect = document.getElementById('voicebox-gpu-mode');
+  if (gpuModeRow && gpuModeSelect && navigator.platform?.includes('Win')) {
+    gpuModeRow.style.display = '';
+    // 加载已保存的设置
+    const savedMode = S.settings?.voiceClone?.gpuMode || 'auto';
+    gpuModeSelect.value = savedMode;
+    gpuModeSelect.addEventListener('change', async () => {
+      try {
+        await window.antbot.updateSettings({ voiceClone: { ...(S.settings?.voiceClone || {}), gpuMode: gpuModeSelect.value } });
+        toast(`运行设备已切换为：${gpuModeSelect.options[gpuModeSelect.selectedIndex].text}，重启后生效`, 'info');
+      } catch (e) { toast(e.message, 'error'); }
+    });
+  }
 
   // Listen for voicebox install progress
   window.antbot.onVoiceboxProgress?.((p) => {
@@ -2349,7 +2382,7 @@ async function initDownloadPage() {
       setup.classList.add('hidden');
       list.style.display = '';
       if (!ffmpeg.available) {
-        toast('未检测到 ffmpeg，高清视频合并需要它。请运行: brew install ffmpeg', 'warning');
+        toast('未检测到 ffmpeg，请在设置页面安装依赖', 'warning');
       }
       // 检查 YouTube cookies，没有才显示登录提示
       try {
@@ -2920,9 +2953,21 @@ function setupUpdater(key, { checkFn, downloadFn, installFn, noRestart }) {
         const dlBtn = $t(`upd-${key}-download-btn`);
         if (dlBtn) {
           dlBtn.disabled = false;
-          dlBtn.textContent = '下载并安装';
           const newBtn = dlBtn.cloneNode(true);
           dlBtn.parentNode.replaceChild(newBtn, dlBtn);
+
+          // Windows: 跳转浏览器下载
+          if (result.openBrowser && result.releaseUrl) {
+            newBtn.textContent = '前往下载';
+            newBtn.addEventListener('click', async () => {
+              try {
+                await window.antbot.openExternal(result.releaseUrl);
+                log('已打开下载页面，请下载后手动安装', 'info');
+                toast('已打开浏览器，请下载新版本后手动安装', 'info');
+              } catch (e) { toast('打开浏览器失败: ' + e.message, 'error'); }
+            });
+          } else {
+          newBtn.textContent = '下载并安装';
           newBtn.addEventListener('click', async () => {
             newBtn.disabled = true;
             newBtn.textContent = '下载中...';
@@ -3006,6 +3051,7 @@ function setupUpdater(key, { checkFn, downloadFn, installFn, noRestart }) {
               newBtn.textContent = '重试';
             }
           });
+          } // end else (not openBrowser)
         }
       } else {
         log('已是最新版本', 'success');

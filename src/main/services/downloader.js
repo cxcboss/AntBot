@@ -278,20 +278,32 @@ function getYtDlpBinaryCandidates() {
 }
 
 function getPythonCandidates() {
-  const candidates = [
-    process.env.ANTBOT_PYTHON_BIN,
-    '/opt/homebrew/bin/python3.12',
-    '/opt/homebrew/bin/python3.11',
-    '/opt/homebrew/bin/python3.10',
-    '/usr/local/bin/python3.12',
-    '/usr/local/bin/python3.11',
-    '/usr/local/bin/python3.10',
-    '/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12',
-    '/Library/Frameworks/Python.framework/Versions/3.11/bin/python3.11',
-    '/Library/Frameworks/Python.framework/Versions/3.10/bin/python3.10'
-  ];
+  const candidates = [process.env.ANTBOT_PYTHON_BIN];
 
-  const names = ['python3.12', 'python3.11', 'python3.10', 'python3', 'python'];
+  if (process.platform === 'win32') {
+    const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
+    const versions = ['312', '311', '310'];
+    for (const v of versions) {
+      candidates.push(path.join(localAppData, 'Programs', 'Python', `Python${v}`, 'python.exe'));
+    }
+    candidates.push('py', 'python');
+  } else {
+    candidates.push(
+      '/opt/homebrew/bin/python3.12',
+      '/opt/homebrew/bin/python3.11',
+      '/opt/homebrew/bin/python3.10',
+      '/usr/local/bin/python3.12',
+      '/usr/local/bin/python3.11',
+      '/usr/local/bin/python3.10',
+      '/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12',
+      '/Library/Frameworks/Python.framework/Versions/3.11/bin/python3.11',
+      '/Library/Frameworks/Python.framework/Versions/3.10/bin/python3.10'
+    );
+  }
+
+  const names = process.platform === 'win32'
+    ? ['python.exe', 'python']
+    : ['python3.12', 'python3.11', 'python3.10', 'python3', 'python'];
   const pathEntries = String(process.env.PATH || '')
     .split(path.delimiter)
     .map((entry) => entry.trim())
@@ -302,7 +314,10 @@ function getPythonCandidates() {
     }
   }
 
-  candidates.push('/opt/homebrew/bin/python3', '/usr/local/bin/python3', '/usr/bin/python3', 'python3', 'python');
+  if (process.platform !== 'win32') {
+    candidates.push('/opt/homebrew/bin/python3', '/usr/local/bin/python3', '/usr/bin/python3', 'python3');
+  }
+  candidates.push('python');
   return uniq(candidates);
 }
 
@@ -392,13 +407,19 @@ async function resolveYtDlpLauncher({ settings, log }) {
   }
 
   throw new Error(
-    '未找到可用下载器。请安装 yt-dlp（例如：brew install yt-dlp），或在设置中填写“下载命令”。'
+    '未找到可用下载器。请在设置页面安装依赖，或在设置中填写”下载命令”。'
   );
 }
 
 function resolveFfmpegDir() {
-  for (const dir of ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin']) {
-    try { require('node:fs').accessSync(path.join(dir, 'ffmpeg')); return dir; } catch {}
+  const { getManagedBinDir } = require('./dependencyManager');
+  const managedBin = getManagedBinDir();
+  const candidates = process.platform === 'win32'
+    ? [managedBin, path.join(process.env.ProgramFiles || 'C:\\Program Files', 'ffmpeg', 'bin')]
+    : ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin'];
+  const name = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
+  for (const dir of candidates) {
+    try { require('node:fs').accessSync(path.join(dir, name)); return dir; } catch {}
   }
   return '';
 }

@@ -89,6 +89,7 @@ contextBridge.exposeInMainWorld('antbot', {
   voiceboxCheck: () => ipcRenderer.invoke('voicebox:check'),
   voiceboxInstall: () => ipcRenderer.invoke('voicebox:install'),
   voiceboxInstallCancel: (packageName) => ipcRenderer.invoke('voicebox:install-cancel', packageName),
+  voiceboxInstallGpu: () => ipcRenderer.invoke('voicebox:install-gpu'),
   voiceboxOpenDir: () => ipcRenderer.invoke('voicebox:open-dir'),
   voiceboxReset: () => ipcRenderer.invoke('voicebox:reset'),
   getDataInfo: () => ipcRenderer.invoke('app:get-data-info'),

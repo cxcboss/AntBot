@@ -1,12 +1,8 @@
 const path = require('node:path');
 
-const COMMON_BIN_DIRS = [
-  '/opt/homebrew/bin',
-  '/usr/local/bin',
-  '/usr/bin',
-  '/bin',
-  '/opt/local/bin'
-];
+const COMMON_BIN_DIRS = process.platform === 'win32'
+  ? []
+  : ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin', '/opt/local/bin'];
 
 function buildRuntimePath(...pathValues) {
   const items = [];

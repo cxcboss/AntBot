@@ -135,7 +135,7 @@ function canRunBinary(command, args) {
         // noop
       }
       resolve(false);
-    }, 5000);
+    }, 2000);
 
     child.once('error', () => {
       clearTimeout(timer);
@@ -149,14 +149,20 @@ function canRunBinary(command, args) {
 }
 
 async function resolveExistingBinary(candidates, tool) {
-  for (const candidate of unique(candidates)) {
-    const looksLikePath = candidate.includes(path.sep) || candidate.includes('/') || candidate.includes('\\');
-    if (looksLikePath && !(await pathExists(candidate))) {
-      continue;
-    }
-    if (await canRunBinary(candidate, getVersionArgs(tool))) {
-      return candidate;
-    }
+  const uniqueList = unique(candidates);
+  const CONCURRENCY = 8;
+  const args = getVersionArgs(tool);
+
+  for (let i = 0; i < uniqueList.length; i += CONCURRENCY) {
+    const batch = uniqueList.slice(i, i + CONCURRENCY);
+    const results = await Promise.all(batch.map(async (candidate) => {
+      const looksLikePath = candidate.includes(path.sep) || candidate.includes('/') || candidate.includes('\\');
+      if (looksLikePath && !(await pathExists(candidate))) return null;
+      if (await canRunBinary(candidate, args)) return candidate;
+      return null;
+    }));
+    const found = results.find(Boolean);
+    if (found) return found;
   }
   return '';
 }
@@ -486,8 +492,11 @@ async function getDependencyState() {
   ];
 
   const items = {};
-  for (const [key, label, required, autoInstallSupported] of checks) {
+  const results = await Promise.all(checks.map(async ([key, label, required, autoInstallSupported]) => {
     const resolved = await resolveDependencyPath(key);
+    return { key, label, required, autoInstallSupported, resolved };
+  }));
+  for (const { key, label, required, autoInstallSupported, resolved } of results) {
     items[key] = {
       key,
       label,

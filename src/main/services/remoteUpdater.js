@@ -18,12 +18,25 @@ function detectProxy() {
   const envProxy = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy;
   if (envProxy) { _proxyAgent = createProxyAgent(envProxy); return _proxyAgent; }
   try {
-    const out = require('node:child_process').execFileSync('networksetup', ['-getwebproxy', 'Wi-Fi'], { timeout: 3000, encoding: 'utf-8' });
-    const enabled = /^Enabled:\s*Yes/m.test(out);
-    const hostMatch = out.match(/^Server:\s*(.+)$/m);
-    const portMatch = out.match(/^Port:\s*(.+)$/m);
-    if (enabled && hostMatch) {
-      _proxyAgent = createProxyAgent(`http://${hostMatch[1].trim()}:${(portMatch?.[1] || '80').trim()}`);
+    if (process.platform === 'darwin') {
+      const out = require('node:child_process').execFileSync('networksetup', ['-getwebproxy', 'Wi-Fi'], { timeout: 3000, encoding: 'utf-8' });
+      const enabled = /^Enabled:\s*Yes/m.test(out);
+      const hostMatch = out.match(/^Server:\s*(.+)$/m);
+      const portMatch = out.match(/^Port:\s*(.+)$/m);
+      if (enabled && hostMatch) {
+        _proxyAgent = createProxyAgent(`http://${hostMatch[1].trim()}:${(portMatch?.[1] || '80').trim()}`);
+      }
+    } else if (process.platform === 'win32') {
+      const { execSync } = require('node:child_process');
+      const out = execSync('reg query "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ProxyEnable', { encoding: 'utf-8', timeout: 3000 });
+      if (/0x1/.test(out)) {
+        const serverOut = execSync('reg query "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ProxyServer', { encoding: 'utf-8', timeout: 3000 });
+        const match = serverOut.match(/ProxyServer\s+REG_SZ\s+(.+)/);
+        if (match) {
+          const proxyAddr = match[1].trim();
+          _proxyAgent = createProxyAgent(proxyAddr.startsWith('http') ? proxyAddr : `http://${proxyAddr}`);
+        }
+      }
     }
   } catch {}
   return _proxyAgent;

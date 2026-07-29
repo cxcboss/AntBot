@@ -54,7 +54,8 @@ function runCommand(templateOrCommand, options = {}) {
       cwd,
       env: withRuntimeEnv(env),
       shell,
-      stdio: ['ignore', 'pipe', 'pipe']
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true
     });
 
     let stdout = '';
@@ -117,7 +118,8 @@ function runCommandArgs(command, args = [], options = {}) {
       cwd,
       env: withRuntimeEnv(env),
       shell,
-      stdio: ['ignore', 'pipe', 'pipe']
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true
     });
 
     let stdout = '';

@@ -215,7 +215,44 @@ composeEditVideo (smartEditor.js)     →  { outputPath }
 - ❌ 不使用 `@media(prefers-color-scheme:dark)`（用 `.dark` class）
 - ❌ 不使用废弃别名 `--brand` / `--bg` / `--surface` / `--t2` / `--t3` / `--r-sm` 等
 
-## Agent skills
+## Windows 适配要点
+
+**安装目录只读**：Windows 上 App 默认装在 `C:\Program Files\AntBot\`，该目录及 `process.resourcesPath` 对非管理员用户**只读**。任何写操作（npm install、创建目录、写文件）都不能指向安装目录。
+
+**写入位置规则**：
+- 所有用户数据写入 `~/AntBot/`（`os.homedir() + 'AntBot'`）
+- 依赖工具下载到 `app.getPath('userData')/bin/`（通过 `dependencyManager`）
+- 需要写入的 bundled 资源必须先复制到 `~/AntBot/` 再使用（如 `bridgeServiceManager` 的 local-server）
+
+**spawn/exec 规则**：
+- 所有 `spawn()` 必须加 `windowsHide: true`，否则会闪命令窗口并阻塞主进程
+- `execSync()` 同样需要 `windowsHide: true`
+- 不要用 `execSync('npm install', { stdio: 'inherit' })` — 用 `spawn` + `windowsHide`
+
+**工具路径解析**：
+- 不要写死 macOS 路径（`/opt/homebrew/bin`、`/usr/local/bin`）
+- 统一用 `dependencyManager.resolveDependencyPath(name)` 解析工具路径（异步，必须 `await`）
+- `resolveDependencyPath` 返回 Promise，不加 `await` 会传给 spawn 一个 `[object Promise]`
+- Windows 上 `python3` 不存在，用 `python` 或 `py`
+- Windows 上 `unzip` 不存在，用 `powershell Expand-Archive`
+
+**PATH 处理**：
+- 路径拼接用 `path.join()`，不要用 `/` 硬编码
+- PATH 分隔符用 `path.delimiter`（Windows 是 `;`，Unix 是 `:`）
+- 不要往 PATH 加 Unix 路径（`/opt/homebrew/bin`）在 Windows 上
+
+**平台判断**：
+- `process.platform === 'win32'` 表示所有 Windows（包括 64 位），不是 32 位
+- `process.platform === 'darwin'` 表示 macOS
+
+**NSIS 安装器**：
+- `win.productName` 不是合法配置，用 `win.executableName` 控制 exe 文件名
+- Windows 的 `productName` 用英文避免中文路径编码问题
+- 需要 `.ico` 格式图标（从 1024x1024 PNG 生成，包含 16-256 尺寸）
+
+**更新机制**：
+- Windows 不支持 zip 解压替换 exe（文件锁定），更新走浏览器下载 NSIS 安装器
+- `checkAppUpdate()` 在 Windows 返回 `openBrowser: true` + 下载链接
 
 ### Issue tracker
 
