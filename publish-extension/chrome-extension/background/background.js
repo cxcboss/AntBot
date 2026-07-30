@@ -41,7 +41,7 @@ async function bridgeResult(commandId, result) {
 
 const PLATFORM_LOGIN_URLS = {
   douyin: 'https://creator.douyin.com/creator-micro/content/publish',
-  weixin: 'https://channels.weixin.qq.com/login.html'
+  weixin: 'https://channels.weixin.qq.com/platform/'
 };
 
 async function handleLoginCheck(platform, commandId) {
