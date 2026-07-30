@@ -340,25 +340,47 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
     try {
       const { publishVideo } = require('./services/publisher');
       const settings = await store.getSettings();
-      // 找到任务信息
       const row = taskRunner.progressRows?.find(r => r.id === taskId);
       const historyItem = (await store.getHistory())?.flatMap(h => h.items || []).find(i => i.id === taskId);
-      const outputPath = row?.outputPath || historyItem?.outputPath;
+      const persistedTasks = await taskRunner.loadPersistedTasks();
+      const persistedItem = persistedTasks.find(t => t.id === taskId);
+      const outputPath = row?.outputPath || historyItem?.outputPath || persistedItem?.outputPath;
       if (!outputPath) return { ok: false, error: '未找到视频文件路径' };
+
+      // 检查视频文件是否存在
+      const fsSync = require('node:fs');
+      let fileExists = false;
+      try { const stat = fsSync.statSync(outputPath); fileExists = stat.isFile() && stat.size > 0; } catch {}
+      if (!fileExists) {
+        return { ok: false, error: 'FILE_DELETED', outputPath, rawLine: row?.rawLine || historyItem?.rawLine || persistedItem?.rawLine || '' };
+      }
+
       const publishEnabled = settings?.publish?.enabled !== false;
       if (!publishEnabled) return { ok: false, error: '自动发布已关闭' };
-      // 更新状态
       taskRunner.setTaskState(taskId, { status: 'running', step: '发布', progress: 95, message: '重新发布中...' });
-      const task = { id: taskId, rawLine: row?.rawLine || historyItem?.rawLine || '', publishCopy: row?.publishCopy || historyItem?.publishCopy || '', publishTopics: row?.publishTopics || historyItem?.publishTopics || [], platforms: row?.platforms || historyItem?.platforms || [] };
+      const task = { id: taskId, rawLine: row?.rawLine || historyItem?.rawLine || persistedItem?.rawLine || '', publishCopy: row?.publishCopy || historyItem?.publishCopy || persistedItem?.publishCopy || '', publishTopics: row?.publishTopics || historyItem?.publishTopics || persistedItem?.publishTopics || [], platforms: row?.platforms || historyItem?.platforms || persistedItem?.platforms || [] };
       const result = await publishVideo({ task, settings, outputPath, log: (msg) => appLog('info', `[republish] ${msg}`) });
       const publishedPlatforms = result?.platforms || [];
       const platformNames = publishedPlatforms.map(p => p === 'videoChannel' ? '视频号' : '抖音').join('、');
       taskRunner.setTaskState(taskId, { status: 'completed', progress: 100, step: '完成', message: platformNames ? `已发布到 ${platformNames}` : '发布完成' });
+      await taskRunner.removePersistedTask(taskId);
       return { ok: true };
     } catch (e) {
       taskRunner.setTaskState(taskId, { status: 'warning', step: '部分完成', message: `发布失败: ${e.message}` });
       return { ok: false, error: e.message };
     }
+  });
+
+  ipcMain.handle('task:get-persisted', async () => {
+    return await taskRunner.loadPersistedTasks();
+  });
+
+  ipcMain.handle('task:reexecute', async (_event, rawLine) => {
+    try {
+      if (!rawLine) return { ok: false, error: '无任务内容' };
+      const result = await taskRunner.startTasks(rawLine);
+      return result;
+    } catch (e) { return { ok: false, error: e.message }; }
   });
 
   ipcMain.handle('publish:bridge-status', async () => {
@@ -597,9 +619,9 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
       child.on('error', () => { if (!done) { done = true; clearTimeout(timer); resolve({ ok: false, version: '' }); } });
     });
     if (tool === 'ffmpeg') return check(await resolveDependencyPath('ffmpeg') || 'ffmpeg', ['-version']);
-    if (tool === 'python') return check(await resolveDependencyPath('python') || 'python3', ['--version']);
+    if (tool === 'python') return check(await resolveDependencyPath('python') || (process.platform === 'win32' ? 'python' : 'python3'), ['--version']);
     if (tool === 'whisper') {
-      const pythonBin = await resolveDependencyPath('python') || 'python3';
+      const pythonBin = await resolveDependencyPath('python') || (process.platform === 'win32' ? 'python' : 'python3');
       const r = await check(pythonBin, ['-c', 'import importlib; importlib.import_module("whisper"); print("ok")'], 15000);
       return { ok: r.ok, version: r.ok ? 'whisper (已安装)' : '' };
     }
@@ -744,13 +766,21 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
     const venvExists = await fs.access(info.venvPython).then(() => true).catch(() => false);
     if (!venvExists) {
       send({ status: 'installing', message: '正在创建虚拟环境...' });
-      const pythonBin = await resolveDependencyPath('python') || 'python3';
+      const pythonBin = await resolveDependencyPath('python') || (process.platform === 'win32' ? 'python' : 'python3');
       await new Promise((resolve) => {
         const child = spawn(pythonBin, ['-m', 'venv', info.venvDir], {
           cwd: info.projectPath, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true
         });
-        child.on('close', () => resolve());
-        child.on('error', () => resolve());
+        let stderr = '';
+        child.stderr?.on('data', d => { stderr += d.toString(); });
+        child.on('close', (code) => {
+          if (code !== 0) send({ status: 'installing', message: `venv 创建失败 (exit ${code}): ${stderr.slice(0, 200)}` });
+          resolve();
+        });
+        child.on('error', (e) => {
+          send({ status: 'installing', message: `venv 创建错误: ${e.message}` });
+          resolve();
+        });
       });
     }
 

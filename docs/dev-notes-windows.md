@@ -94,3 +94,60 @@
 - voicebox 启动时通过 `VOICEBOX_DEVICE` 环境变量传递设备偏好
 - Python 后端 `_get_device()` 检查该变量，优先级：环境变量 > CUDA 自动检测 > CPU
 - 设置页面提供"运行设备"下拉框（仅 Windows）：自动/GPU/CPU
+
+---
+
+## 日期：2026-07-30/31
+
+### 15. `python3` 在 Windows 上不存在
+**问题**：`resolveDependencyPath('python')` 返回空时 fallback 到 `'python3'`，但 Windows 上没有 `python3` 命令。导致 venv 创建静默失败，所有 pip 命令返回 -4058。
+
+**修复**：fallback 改为平台感知 `|| (process.platform === 'win32' ? 'python' : 'python3')`。
+
+### 16. venv 创建失败静默吞掉错误
+**问题**：`child.on('error', () => resolve())` 把 venv 创建错误吞掉了，用户看不到任何失败信息。
+
+**修复**：加 stderr 捕获和错误日志输出。
+
+### 17. `pytorch_backend.py` 缺少 `import os`
+**问题**：`_get_device()` 里用了 `os.environ.get('VOICEBOX_DEVICE', ...)` 但没 import `os`。voicebox 启动直接崩溃，Mac 和 Windows 都受影响。
+
+**修复**：加 `import os`。教训：改 Python 文件时一定要验证 import 完整性。
+
+### 18. voicebox 崩溃后重试不等就绪
+**问题**：合成 500 错误后重启 voicebox，但没等模型加载完就重试，auto_dub_web 再次检查 voicebox 还是不可用。
+
+**修复**：重启后循环等待 `getVoiceCloneProfiles()` 成功（最多60秒），确认 voicebox 真正就绪再重试。
+
+### 19. 持久化主控任务状态
+**问题**：`warning`（发布失败但视频已生成）状态存在 `progressRows` 内存中，重启后丢失，"重新发布"按钮消失。
+
+**修复**：
+- `warning`/`completed` 状态的任务保存到 `~/AntBot/main-control-tasks.json`
+- 重启后加载并合并到主控界面显示
+- 发布成功后自动清理持久化记录
+
+### 20. 视频文件被删后点击重新发布
+**问题**：用户在其他地方删除了成品视频，点击"重新发布"时报错。
+
+**修复**：`task:republish` 检查 `outputPath` 是否存在，不存在时提示用户选择重新执行整个任务。
+
+### 21. 发布时间过期显示
+**问题**：定时发布时间已过的任务没有任何提示。
+
+**修复**：`taskCard` 渲染时检查 `publishAt`，过期显示红色"发布时间已过期"标签。
+
+### 22. 视频号登录检测 URL
+**问题**：`login.html` 即使已登录也显示未登录。
+
+**修复**：浏览器插件 `PLATFORM_LOGIN_URLS.weixin` 从 `login.html` 改为 `platform/`。发布 plugin v1.1.2。
+
+### 23. 更新检查按钮次数限制
+**问题**：检查到有更新后按钮一直 disabled，无法重新检查。
+
+**修复**：发现更新后立即 `checkBtn.disabled = false`，按钮变为"重新检查"。
+
+### 24. auto_dub_web HTTP 500 不检查状态码
+**问题**：`postAutoDubProcessRequest` 返回后不检查 HTTP 状态码，500 错误被忽略。
+
+**修复**：检查 `response.statusCode`，非 2xx 时解析响应体中的错误信息并抛出。

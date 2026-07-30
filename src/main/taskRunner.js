@@ -36,6 +36,7 @@ class TaskRunner {
     this.queue = [];
     this.jobSequence = 0;
     this.currentJob = null;
+    this.persistedTasksFile = path.join(os.homedir(), 'AntBot', 'main-control-tasks.json');
   }
 
   buildRunId() {
@@ -616,6 +617,55 @@ class TaskRunner {
     }
   }
 
+  async savePersistedTask(row) {
+    try {
+      const fsSync = require('node:fs');
+      await fs.mkdir(path.dirname(this.persistedTasksFile), { recursive: true });
+      let tasks = [];
+      try { tasks = JSON.parse(await fs.readFile(this.persistedTasksFile, 'utf-8')); } catch {}
+      const idx = tasks.findIndex(t => t.id === row.id);
+      const entry = {
+        id: row.id,
+        taskName: row.taskName,
+        rawLine: row.rawLine,
+        inputText: row.inputText,
+        status: row.status,
+        step: row.step,
+        message: row.message,
+        outputPath: row.outputPath,
+        publishAt: row.publishAt || '',
+        platforms: row.platforms || [],
+        publishCopy: row.publishCopy || '',
+        publishTopics: row.publishTopics || [],
+        batchRunId: row.batchRunId,
+        submittedAt: row.submittedAt,
+        updatedAt: nowIso()
+      };
+      if (idx >= 0) tasks[idx] = entry;
+      else tasks.push(entry);
+      // 最多保留100条
+      if (tasks.length > 100) tasks = tasks.slice(-100);
+      await fs.writeFile(this.persistedTasksFile, JSON.stringify(tasks, null, 2));
+    } catch {}
+  }
+
+  async loadPersistedTasks() {
+    try {
+      const data = await fs.readFile(this.persistedTasksFile, 'utf-8');
+      return JSON.parse(data);
+    } catch {
+      return [];
+    }
+  }
+
+  async removePersistedTask(taskId) {
+    try {
+      let tasks = await this.loadPersistedTasks();
+      tasks = tasks.filter(t => t.id !== taskId);
+      await fs.writeFile(this.persistedTasksFile, JSON.stringify(tasks, null, 2));
+    } catch {}
+  }
+
   isEncryptedDownloadError(error) {
     const message = String(error?.message || error || '');
     return /(drm|encrypted|widevine|fairplay|playready|受保护|已加密|加密视频|加密源)/i.test(message);
@@ -966,6 +1016,7 @@ class TaskRunner {
           const platformNames = publishedPlatforms.map(p => p === 'videoChannel' ? '视频号' : '抖音').join('、');
           const completionMsg = platformNames ? `已发布到 ${platformNames}` : '任务完成';
           this.setTaskState(task.id, { status: 'completed', progress: 100, step: '完成', message: completionMsg, attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit, outputPath: outPath });
+          this.savePersistedTask(this.progressRows.find(r => r.id === task.id));
 
           runRecord.items.push(this.buildRunItem(job, task, row, 'completed', {
             outputPath: outPath, publishAt: task.publishAt ? task.publishAt.toISOString() : '',
@@ -986,6 +1037,7 @@ class TaskRunner {
           if (outputReady) {
             this.log(task.id, `发布失败但视频已生成: ${error.message}`, 'warn');
             this.setTaskState(task.id, { status: 'warning', progress: 100, step: '部分完成', message: publishEnabled ? `发布失败: ${error.message}` : '成品视频已输出', attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit, outputPath: outPath });
+            this.savePersistedTask(this.progressRows.find(r => r.id === task.id));
             runRecord.items.push(this.buildRunItem(job, task, row, 'completed', { outputPath: outPath, publishAt: task.publishAt ? task.publishAt.toISOString() : '', publishedPlatforms: [], publishMode: publishEnabled ? 'failed' : 'disabled', finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, message: publishEnabled ? '发布失败，但视频已生成' : '成品视频已输出' }));
             return { status: 'completed', retryable: false };
           }

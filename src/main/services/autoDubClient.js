@@ -1782,6 +1782,8 @@ async function resolveVoiceCloneProfile({
   log('resolveVoiceCloneProfile: ensureVoiceCloneBackend...');
   await ensureVoiceCloneBackend(projectPath, log, () => {}, { gpuMode });
   log('resolveVoiceCloneProfile: getVoiceCloneProfiles...');
+  // 等待 voicebox 稳定（模型加载后可能需要时间初始化）
+  await sleep(3000);
   const profiles = await getVoiceCloneProfiles();
   log(`resolveVoiceCloneProfile: got ${Array.isArray(profiles) ? profiles.length : 0} profiles, desiredId=${desiredId}, desiredName=${desiredName}, samplePath=${samplePath ? 'set' : 'empty'}`);
   const normalizedProfiles = Array.isArray(profiles) ? profiles : [];
@@ -2021,9 +2023,22 @@ async function processWithAutoDub({
     } catch (error) {
       log(`合成步骤3失败（第 ${attempt} 次）: ${error.message}`);
       if (attempt < 3) {
+        // 500/后端不可用 → voicebox 可能崩溃，重启并等待完全就绪
+        if (error.message.includes('500') || error.message.includes('不可用') || error.message.includes('后端')) {
+          log('voicebox 可能崩溃，正在重启...');
+          try { await shutdownVoicebox(() => {}); } catch {}
+          await sleep(3000);
+          // 等待 voicebox 完全就绪（含模型加载）
+          for (let w = 0; w < 30; w++) {
+            try {
+              const profiles = await getVoiceCloneProfiles(5000);
+              if (Array.isArray(profiles)) { log(`voicebox 已恢复（${profiles.length} 个音色）`); break; }
+            } catch {}
+            await sleep(2000);
+          }
+        }
         log(`auto_dub_web 请求失败（第 ${attempt} 次），${attempt * 5} 秒后重试...`);
         await sleep(attempt * 5000);
-        // 确保服务还在运行
         await ensureAutoDubServer(projectPath, log);
       } else {
         const details = await buildAutoDubFailureDetails();

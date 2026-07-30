@@ -73,6 +73,8 @@ contextBridge.exposeInMainWorld('antbot', {
   stopTask: (taskId) => ipcRenderer.invoke('task:stop-one', taskId),
   resumeTask: (payload) => ipcRenderer.invoke('task:resume-one', payload),
   republishTask: (taskId) => ipcRenderer.invoke('task:republish', taskId),
+  getPersistedTasks: () => ipcRenderer.invoke('task:get-persisted'),
+  reexecuteTask: (rawLine) => ipcRenderer.invoke('task:reexecute', rawLine),
   getHistory: () => ipcRenderer.invoke('history:get'),
   getDependencyState: () => ipcRenderer.invoke('deps:get-state'),
   repairDependencies: () => ipcRenderer.invoke('deps:repair'),

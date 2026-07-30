@@ -39,7 +39,7 @@ const S = {
   preview:{count:0,items:[],error:'',empty:true},
   vc:{running:false,status:'idle',step:'等待',pct:0,logs:[]},
   pending:[], chatCount:20, sidebarOpen:window.innerWidth>720, statPeriod:'day',
-  currentFeat:'main', selectedStyle:'',
+  currentFeat:'main', selectedStyle:'', persistedTasks:[],
 };
 let previewTimer=null,previewSeq=0,setQueue=Promise.resolve(),startupSeq=0;
 
@@ -235,7 +235,7 @@ function taskCard(t,live=false){
 
   const tags=[];
   if(t.isOriginal)tags.push('<span class="task-tag task-tag-accent">原创</span>');
-  if(t.publishAt){const d=new Date(t.publishAt);if(!isNaN(d)){const pad=n=>String(n).padStart(2,'0');tags.push(`<span class="task-tag">定时 ${d.getMonth()+1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}</span>`)}}
+  if(t.publishAt){const d=new Date(t.publishAt);if(!isNaN(d)){const pad=n=>String(n).padStart(2,'0');const isExpired=d.getTime()<Date.now();if(isExpired&&st!=='running'&&st!=='queued'){tags.push(`<span class="task-tag" style="color:var(--destructive)">发布时间已过期 ${d.getMonth()+1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}</span>`)}else{tags.push(`<span class="task-tag">定时 ${d.getMonth()+1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}</span>`)}}}
   const tagsHtml=tags.length?`<div class="task-tags">${tags.join('')}</div>`:'';
 
   const showProgress=st==='running'||st==='preparing'||st==='pending'||st==='queued';
@@ -256,6 +256,14 @@ function renderChat(opts={}){
   if(!el.stream)return;const stick=opts.stick,vis=(S.history||[]).slice(0,S.chatCount).reverse(),lg=liveGroups();
   const parts=[];let day='';
   for(const r of vis){const d=fmtDay(r.startedAt);if(d&&d!==day){day=d;parts.push(`<div class="chat-day">${esc(d)}</div>`)}const txt=r.inputText||(r.items||[]).map(i=>i.rawLine||i.taskName).filter(Boolean).join('\n');parts.push(`<div class="msg-time">${esc(fmtDate(r.startedAt))}</div>`);if(txt)parts.push(`<div class="msg msg-user">${makeBubbleHtml(txt)}</div>`);parts.push(`<div class="msg-sys"><div class="task-stack">${(r.items||[]).map(i=>taskCard(i)).join('')}</div></div>`)}
+  // 持久化的主控任务（重新发布状态，重启后保留）
+  const historyIds=new Set((S.history||[]).flatMap(r=>(r.items||[]).map(i=>i.id)));
+  const persisted=(S.persistedTasks||[]).filter(t=>!historyIds.has(t.id)&&(t.status==='warning'||t.status==='completed'));
+  if(persisted.length){
+    const byRun={};
+    for(const t of persisted){const key=t.batchRunId||'persisted';if(!byRun[key])byRun[key]={tasks:[],at:t.submittedAt||t.updatedAt,inputText:t.inputText||''};byRun[key].tasks.push(t);}
+    for(const [,g] of Object.entries(byRun)){const d=fmtDay(g.at);if(d&&d!==day){day=d;parts.push(`<div class="chat-day">${esc(d)}</div>`)}parts.push(`<div class="msg-time">${esc(fmtDate(g.at))}</div>`);if(g.inputText)parts.push(`<div class="msg msg-user">${makeBubbleHtml(g.inputText)}</div>`);parts.push(`<div class="msg-sys"><div class="task-stack">${g.tasks.map(t=>taskCard(t)).join('')}</div></div>`)}
+  }
   for(const g of lg){const d=fmtDay(g.at);if(d&&d!==day){day=d;parts.push(`<div class="chat-day">${esc(d)}</div>`)}parts.push(`<div class="msg-time">${esc(fmtDate(g.at))}</div>`);if(g.txt)parts.push(`<div class="msg msg-user">${makeBubbleHtml(g.txt)}</div>`);parts.push(`<div class="msg-sys"><div class="task-stack">${g.tasks.map(t=>taskCard(t,true)).join('')}</div></div>`)}
   el.stream.innerHTML=parts.length?parts.join(''):'<div class="chat-empty">还没有任务。</div>';
   if(stick)requestAnimationFrame(()=>{el.scroll.scrollTop=el.scroll.scrollHeight});
@@ -2125,6 +2133,22 @@ function bind(){
       republishBtn.disabled=true;republishBtn.textContent='发布中...';
       window.antbot.republishTask(tid).then(r=>{
         if(r?.ok)toast('已重新发布','success');
+        else if(r?.error==='FILE_DELETED'){
+          const rawLine=r.rawLine||'';
+          if(window.confirm(`视频文件已被删除：\n${r.outputPath||''}\n\n是否需要重新执行这个任务（下载→剪辑→发布）？`)){
+            if(rawLine){
+              republishBtn.textContent='重新执行中...';
+              window.antbot.reexecuteTask(rawLine).then(r2=>{
+                if(r2?.ok)toast('已重新提交任务','success');
+                else toast(r2?.error||'重新执行失败','error');
+              }).catch(err=>toast(err.message,'error')).finally(()=>{
+                republishBtn.disabled=false;republishBtn.textContent='重新发布';
+              });
+              return;
+            }
+          }
+          republishBtn.disabled=false;republishBtn.textContent='重新发布';
+        }
         else toast(r?.error||'发布失败','error');
       }).catch(err=>toast(err.message,'error')).finally(()=>{
         republishBtn.disabled=false;republishBtn.textContent='重新发布';
@@ -2159,7 +2183,7 @@ function bind(){
     if(animText&&(p?.step||p?.message)) animText.textContent=p.message||p.step||'';
   });
   window.antbot.onStartupStatus(p=>{S.startup=p});
-  window.antbot.onHistoryChanged(h=>{const pin=el.scroll&&(el.scroll.scrollHeight-el.scroll.scrollTop-el.scroll.clientHeight<80);S.history=h||[];reconcile();renderChat({stick:pin});renderStats()});
+  window.antbot.onHistoryChanged(h=>{const pin=el.scroll&&(el.scroll.scrollHeight-el.scroll.scrollTop-el.scroll.clientHeight<80);S.history=h||[];reconcile();renderChat({stick:pin});renderStats();window.antbot.getPersistedTasks().then(t=>{S.persistedTasks=t||[]}).catch(()=>{})});
   window.antbot.onAppState(p=>{const pin=el.scroll&&(el.scroll.scrollHeight-el.scroll.scrollTop-el.scroll.clientHeight<80);applySnap(p||{});renderAll({stick:pin})});
   window.antbot.onDepProgress(p=>{toast(p?.message||'',p?.status==='failed'?'error':'info')});
   // Model management events
@@ -2948,6 +2972,8 @@ function setupUpdater(key, { checkFn, downloadFn, installFn, noRestart }) {
         if (sizeEl && result.fileSize) sizeEl.textContent = (result.fileSize/1024/1024).toFixed(1) + ' MB';
         $t(`upd-${key}-actions`)?.classList.remove('hidden');
         log(`发现新版本 ${result.latestVersion || result.remoteVersion}`, 'success');
+        checkBtn.disabled = false;
+        checkBtn.textContent = '重新检查';
 
         // 绑定下载按钮（每次检查更新重新绑定）
         const dlBtn = $t(`upd-${key}-download-btn`);
@@ -3152,6 +3178,10 @@ async function init(){
   await loadData();
   await loadModels();
   loadEditTasks();
+
+  // 加载持久化的主控任务（重新发布状态）
+  try { S.persistedTasks = await window.antbot.getPersistedTasks() || []; } catch { S.persistedTasks = []; }
+  renderChat();
 
   // 自动启动远程访问（如果开启）
   try {

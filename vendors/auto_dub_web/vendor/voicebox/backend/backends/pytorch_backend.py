@@ -3,6 +3,7 @@ PyTorch backend implementation for TTS and STT.
 """
 
 from typing import Optional, List, Tuple
+import os
 import asyncio
 import torch
 import numpy as np
