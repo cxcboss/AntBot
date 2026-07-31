@@ -618,6 +618,7 @@ class TaskRunner {
   }
 
   async savePersistedTask(row) {
+    if (!row || (row.status !== 'warning' && row.status !== 'completed')) return;
     try {
       const fsSync = require('node:fs');
       await fs.mkdir(path.dirname(this.persistedTasksFile), { recursive: true });
