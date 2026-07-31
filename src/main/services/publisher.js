@@ -1,7 +1,6 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const dayjs = require('dayjs');
-const { runCommand } = require('./commandRunner');
 const { createBrowserPublishBridge } = require('./browserPublishBridge');
 
 const PLATFORM_CONFIG = {
@@ -151,29 +150,6 @@ async function publishVideo(taskContext) {
     } catch (error) {
       throw error;
     }
-  }
-
-  if (settings.commands.publish) {
-    for (const platform of platforms) {
-      await runCommand(settings.commands.publish, {
-        cwd: settings.paths.publishProjectPath || undefined,
-        log,
-        timeoutMs: 25 * 60 * 1000,
-        variables: {
-          video: outputPath,
-          scheduleAt,
-          taskName: task.taskName,
-          platform,
-          original: task.isOriginal ? '1' : '0'
-        }
-      });
-    }
-
-    return {
-      mode: 'custom-command',
-      scheduleAt,
-      platforms
-    };
   }
 
   throw new Error('发布桥接服务未运行，请在发布页面启动服务后重试');

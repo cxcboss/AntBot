@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>搬运蚁</title>
+  <link rel="stylesheet" href="./output.css" />
   <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
@@ -62,7 +63,7 @@
 
       <!-- 底部设置 -->
       <div class="sidebar-foot">
-        <button class="sb-btn" id="open-settings-btn" type="button"><span class="icon" data-icon="settings"></span><span>设置</span></button>
+        <button class="sb-btn sb-feat" data-feat="settings" type="button"><span class="icon" data-icon="settings"></span><span>设置</span></button>
       </div>
     </nav>
 
@@ -117,7 +118,7 @@
               <div class="edit-bar-left">
                 <button class="btn btn-ghost" id="edit-add-btn" type="button"><span class="icon" data-icon="plus"></span>添加</button>
                 <button class="btn btn-primary" id="edit-start-btn" type="button"><span class="icon" data-icon="play"></span>开始剪辑</button>
-                <button class="btn btn-ghost" id="edit-batch-btn" type="button" onclick="showBatchActions()">批量操作</button>
+                <button class="btn btn-ghost" id="edit-batch-btn" type="button">批量操作</button>
               </div>
               <div class="edit-bar-right">
                 <button class="edit-default-btn" data-edit-default="style" type="button"><span class="edit-default-label">风格</span><span class="edit-default-val" id="default-style-val">默认</span></button>
@@ -444,6 +445,111 @@
             </div>
           </div>
         </div>
+
+        <!-- 设置页面 -->
+        <div class="feat-view" id="view-settings">
+          <div class="settings-page">
+
+            <!-- 路径配置 -->
+            <div class="card bg-base-100 border-base-300 card-border mb-4">
+              <div class="card-body">
+                <h2 class="card-title text-base">路径配置</h2>
+                <fieldset class="fieldset">
+                  <label class="label">数据目录</label>
+                  <div class="join w-full">
+                    <input id="s-dataDir" type="text" class="input input-bordered join-item flex-1" placeholder="~/AntBot" />
+                    <button type="button" id="open-data-dir-setting-btn" class="btn btn-ghost join-item"><span class="icon" data-icon="folderOpen"></span></button>
+                  </div>
+                  <label class="label mt-2">输出根目录</label>
+                  <div class="join w-full">
+                    <input id="s-outputBaseDir" type="text" class="input input-bordered join-item flex-1" />
+                    <button type="button" id="open-output-dir-btn" class="btn btn-ghost join-item"><span class="icon" data-icon="folderOpen"></span></button>
+                  </div>
+                  <button type="button" id="migrate-old-btn" class="btn btn-ghost btn-sm mt-2"><span class="icon" data-icon="package"></span>迁移旧版数据</button>
+                </fieldset>
+              </div>
+            </div>
+
+            <!-- 剪辑设置 -->
+            <div class="card bg-base-100 border-base-300 card-border mb-4">
+              <div class="card-body">
+                <h2 class="card-title text-base">剪辑设置</h2>
+                <label class="label">抽帧精细度</label>
+                <select id="s-frameRate" class="select select-bordered w-full max-w-xs">
+                  <option value="3">粗糙（3秒/帧）</option>
+                  <option value="2">普通（2秒/帧）</option>
+                  <option value="1" selected>均衡（1秒/帧）</option>
+                  <option value="0.5">精细（1秒/2帧）</option>
+                  <option value="0.125">还原（1秒/8帧）</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- AI 模型 -->
+            <div class="card bg-base-100 border-base-300 card-border mb-4">
+              <div class="card-body">
+                <h2 class="card-title text-base">AI 模型</h2>
+                <fieldset class="fieldset">
+                  <label class="label">API Keys</label>
+                  <div id="api-keys-list"><div class="join w-full mb-1"><input name="apiKey" type="password" class="input input-bordered join-item flex-1" placeholder="Key 1" /><button type="button" class="btn btn-ghost join-item s-key-del" title="删除">✕</button></div></div>
+                  <button type="button" id="add-api-key-btn" class="btn btn-ghost btn-sm">+ 添加 Key</button>
+                  <div id="api-usage-box" class="mt-2"></div>
+                  <div class="flex items-center gap-2 mt-2">
+                    <label class="label mb-0">Base URL</label>
+                    <button type="button" id="fetch-models-btn" class="btn btn-ghost btn-xs">获取模型</button>
+                  </div>
+                  <input id="s-apiBaseUrl" type="text" class="input input-bordered w-full" placeholder="https://apihub.agnes-ai.com/v1" />
+                  <label class="label mt-2">选择模型 <span class="text-xs text-base-content/50">需要选取支持识别图片的模型</span></label>
+                  <select id="s-apiModelId" class="select select-bordered w-full max-w-xs"><option value="">请先获取模型</option></select>
+                </fieldset>
+              </div>
+            </div>
+
+            <!-- 依赖与环境 -->
+            <div class="card bg-base-100 border-base-300 card-border mb-4">
+              <div class="card-body">
+                <h2 class="card-title text-base">依赖与环境</h2>
+                <h3 class="font-semibold text-sm mb-2">基础工具</h3>
+                <div class="deps-check-list" id="deps-check-list"></div>
+                <div class="divider"></div>
+                <h3 class="font-semibold text-sm mb-2">AI 模型</h3>
+                <div class="flex items-center gap-2 mb-3">
+                  <span class="text-sm text-base-content/70">模型存储</span>
+                  <span id="models-dir-path" class="text-xs text-base-content/50">-</span>
+                  <button type="button" id="models-open-dir-btn" class="btn btn-ghost btn-xs"><span class="icon" data-icon="folderOpen"></span></button>
+                </div>
+                <div class="models-list" id="models-list"></div>
+              </div>
+            </div>
+
+            <!-- 语音克隆环境 -->
+            <div class="card bg-base-100 border-base-300 card-border mb-4">
+              <div class="card-body">
+                <h2 class="card-title text-base">语音克隆环境</h2>
+                <div class="voicebox-status" id="voicebox-status">
+                  <div class="voicebox-items" id="voicebox-items"></div>
+                  <div id="voicebox-deps-list" class="voicebox-deps-list"></div>
+                  <div class="flex items-center gap-2 mt-2">
+                    <span class="text-sm text-base-content/70">存储路径</span>
+                    <span id="voicebox-path" class="text-xs text-base-content/50">-</span>
+                    <button type="button" id="voicebox-open-btn" class="btn btn-ghost btn-xs"><span class="icon" data-icon="folderOpen"></span></button>
+                  </div>
+                  <div class="flex items-center gap-2 mt-2" id="voicebox-gpu-mode-row" style="display:none">
+                    <span class="text-sm text-base-content/70">运行设备</span>
+                    <select id="voicebox-gpu-mode" class="select select-bordered select-sm"><option value="auto">自动检测</option><option value="gpu">GPU (CUDA)</option><option value="cpu">CPU</option></select>
+                    <span class="text-xs text-base-content/40">GPU 需安装 CUDA PyTorch（约2GB）</span>
+                  </div>
+                </div>
+                <div class="flex gap-2 mt-4">
+                  <button type="button" id="voicebox-reset-btn" class="btn btn-ghost btn-sm"><span class="icon" data-icon="trash"></span>重置环境</button>
+                  <button type="button" id="voicebox-gpu-btn" class="btn btn-ghost btn-sm" style="display:none"><span class="icon" data-icon="download"></span>安装 GPU 加速</button>
+                  <button type="button" id="voicebox-install-btn" class="btn btn-primary btn-sm"><span class="icon" data-icon="download"></span>安装依赖</button>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
       </div>
     </main>
   </div>
@@ -452,73 +558,6 @@
   <div class="ctx-menu hidden" id="ctx-menu">
     <button class="ctx-item" data-ctx="delete" type="button">删除此任务</button>
   </div>
-
-  <!-- 设置弹窗 -->
-  <dialog id="settings-dialog" class="dlg dlg-wide"><div class="dlg-box">
-    <div class="dlg-head"><h3>设置</h3><button type="button" aria-label="关闭" class="dlg-close" id="close-settings-btn"><span class="icon" data-icon="x"></span></button></div>
-    <div class="dlg-body dlg-scroll" id="settings-body">
-
-      <div class="s-section-label">路径配置</div>
-      <div class="s-row"><span class="s-label">数据目录</span><div class="s-input-row"><input id="s-dataDir" type="text" placeholder="~/AntBot" /><button type="button" id="open-data-dir-setting-btn" class="btn btn-sm btn-ghost"><span class="icon" data-icon="folderOpen"></span></button></div></div>
-      <div class="s-row"><span class="s-label">输出根目录</span><div class="s-input-row"><input id="s-outputBaseDir" type="text" /><button type="button" id="open-output-dir-btn" class="btn btn-sm btn-ghost"><span class="icon" data-icon="folderOpen"></span></button></div></div>
-      <div class="s-row"><button type="button" id="migrate-old-btn" class="btn btn-ghost"><span class="icon" data-icon="package"></span>迁移旧版数据</button></div>
-
-      <div class="s-divider"></div>
-
-      <div class="s-section-label">剪辑设置</div>
-      <div class="s-row"><span class="s-label">抽帧精细度</span>
-        <select id="s-frameRate">
-          <option value="3">粗糙（3秒/帧）</option>
-          <option value="2">普通（2秒/帧）</option>
-          <option value="1" selected>均衡（1秒/帧）</option>
-          <option value="0.5">精细（1秒/2帧）</option>
-          <option value="0.125">还原（1秒/8帧）</option>
-        </select>
-      </div>
-
-      <div class="s-divider"></div>
-
-      <div class="s-section-label">AI 模型</div>
-      <div class="s-row"><span class="s-label">API Keys</span><div class="s-input-col"><div id="api-keys-list"><div class="s-input-row"><input name="apiKey" type="password" placeholder="Key 1" /><button type="button" class="btn btn-sm btn-ghost s-key-del" title="删除">✕</button></div></div><button type="button" id="add-api-key-btn" class="btn btn-sm btn-ghost">+ 添加 Key</button></div></div>
-      <div id="api-usage-box" class="api-usage-box"></div>
-      <div class="s-row"><button type="button" id="fetch-models-btn" class="btn btn-sm btn-ghost">获取模型</button></div>
-      <div class="s-hint">需要选取支持识别图片的模型</div>
-      <div class="s-row"><span class="s-label">Base URL</span><input id="s-apiBaseUrl" type="text" placeholder="https://apihub.agnes-ai.com/v1" /></div>
-      <div class="s-row"><span class="s-label">选择模型</span><select id="s-apiModelId"><option value="">请先获取模型</option></select></div>
-
-      <div class="s-divider"></div>
-
-      <div class="s-section-label">风格与音色</div>
-      <div class="s-row"><button type="button" id="reload-default-styles-btn" class="btn btn-ghost"><span class="icon" data-icon="refresh"></span>重新加载内置风格</button></div>
-
-      <div class="s-divider"></div>
-
-      <div class="s-section-label">安装依赖</div>
-      <div class="deps-check-list" id="deps-check-list"></div>
-      <div class="s-row"><span class="s-label">模型存储</span><div class="s-input-row"><span id="models-dir-path" class="s-path">-</span><button type="button" id="models-open-dir-btn" class="btn btn-sm btn-ghost"><span class="icon" data-icon="folderOpen"></span></button></div></div>
-      <div class="models-list" id="models-list"></div>
-
-      <div class="s-divider"></div>
-
-      <div class="s-section-label">语音克隆环境</div>
-      <div class="voicebox-status" id="voicebox-status">
-        <div class="voicebox-items" id="voicebox-items"></div>
-        <div id="voicebox-deps-list" class="voicebox-deps-list"></div>
-        <div class="s-row"><span class="s-label">存储路径</span><div class="s-input-row"><span id="voicebox-path" class="s-path">-</span><button type="button" id="voicebox-open-btn" class="btn btn-sm btn-ghost"><span class="icon" data-icon="folderOpen"></span></button></div></div>
-        <div class="s-row" id="voicebox-gpu-mode-row" style="display:none"><span class="s-label">运行设备</span>
-          <select id="voicebox-gpu-mode"><option value="auto">自动检测</option><option value="gpu">GPU (CUDA)</option><option value="cpu">CPU</option></select>
-          <span style="font-size:10px;color:var(--muted-foreground);margin-top:2px">GPU 需安装 CUDA PyTorch（约2GB）</span>
-        </div>
-      </div>
-      <div class="dlg-actions">
-        <button type="button" id="voicebox-reset-btn" class="btn btn-ghost"><span class="icon" data-icon="trash"></span>重置环境</button>
-        <button type="button" id="voicebox-gpu-btn" class="btn btn-ghost" style="display:none"><span class="icon" data-icon="download"></span>安装 GPU 加速</button>
-        <button type="button" id="voicebox-install-btn" class="btn btn-primary"><span class="icon" data-icon="download"></span>安装依赖</button>
-      </div>
-
-    </div>
-  </div></dialog>
-  </div></dialog>
 
   <!-- 语音克隆弹窗 -->
   <dialog id="voice-clone-dialog" class="dlg"><div class="dlg-box">

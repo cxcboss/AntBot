@@ -24,28 +24,22 @@ video-publish-extension/
 │   │   ├── douyin.js          # 抖音创作者平台
 │   │   └── weixin.js          # 视频号发布平台
 │   └── icons/
-├── local-server/              # Node.js 本地服务
-│   ├── server.js              # Express，视频文件读取 + 发布历史
+├── local-server/              # Node.js 本地服务（由 Electron 主 App 启动）
+│   ├── server.js              # Express，视频文件读取 + 发布桥接
 │   └── package.json
-├── mac-app/                   # Mac 原生桌面工具（Swift/SwiftUI）
-│   ├── Package.swift
-│   └── Sources/
-├── win_app/                   # Windows 桌面工具（Flutter）
-│   └── lib/main.dart
-├── shared/                    # AI 服务模块
-└── .github/workflows/         # CI/CD 自动构建
+└── .github/                   # 插件仓库 CI/CD 配置
 ```
 
 ## 快速开始
 
-### 方式一：桌面 App（推荐）
+### 方式一：通过搬运蚁 App（推荐）
 
-1. 下载对应平台的桌面工具（Mac / Windows）
-2. 打开 App → 点击「安装环境」（安装 Node.js 依赖）
-3. 点击「安装插件」→ 按教程在 Chrome 加载扩展
-4. 点击「启动服务」
+1. 在 Chrome 扩展管理页开启开发者模式
+2. 选择「加载已解压的扩展程序」，指向 `chrome-extension/`
+3. 启动搬运蚁 App，在发布页启动桥接服务
+4. 保持 Chrome 扩展启用，通过搬运蚁发布页提交任务
 
-### 方式二：手动安装
+### 方式二：独立调试
 
 ```bash
 # 1. 启动本地服务

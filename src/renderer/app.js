@@ -1,4 +1,8 @@
 import { ICONS } from './icons.js';
+import { createDownloadPage } from './app/download-page.js';
+import { createPublishPage } from './app/publish-page.js';
+import { createRemotePage } from './app/remote-page.js';
+import { createUpdatePage } from './app/update-page.js';
 
 /* ── DOM ── */
 const $ = (s) => document.querySelector(s);
@@ -11,10 +15,7 @@ const el = {
   editAddBtn:$('#edit-add-btn'), editStartBtn:$('#edit-start-btn'),
   resizeHandle:$('#resize-handle'), composer:$('#composer'), chatArea:$('#chat-area'),
   status:$('#startup-status'),
-  openSettingsBtn:$('#open-settings-btn'),
   openVideoBtn:$('#open-video-channel'), openDouyinBtn:$('#open-douyin'),
-  setDlg:$('#settings-dialog'), setForm:$('#settings-form'),
-  setSave:$('#save-settings-btn'), setClose:$('#close-settings-btn'),
   vcDlg:$('#voice-clone-dialog'), vcForm:$('#voice-clone-form'),
   vcRun:$('#voice-clone-run-btn'), vcClose:$('#voice-clone-close-btn'),
   vcPick:$('#voice-clone-pick-sample-btn'),
@@ -57,9 +58,20 @@ function injectIcons(){document.querySelectorAll('[data-icon]').forEach(e=>{cons
 function closeDlg(dlg){if(!dlg)return;dlg.classList.add('closing');setTimeout(()=>{dlg.close();dlg.classList.remove('closing');},180);}
 
 /* ── Toast ── */
-function toast(msg,type='info',ms=3000){const c=$('#toast-container');if(!c)return;const t=document.createElement('div');t.className=`toast ${type}`;const im={success:ICONS.check,error:ICONS.alertCircle,info:ICONS.alertCircle};t.innerHTML=`<span class="icon">${im[type]||''}</span><span>${esc(msg)}</span>`;c.appendChild(t);setTimeout(()=>{t.classList.add('out');setTimeout(()=>t.remove(),200);},ms);}
+function toast(msg,type='info',ms=3000){const c=$('#toast-container');if(!c)return;const t=document.createElement('div');t.className=`toast ${type}`;const im={success:ICONS.check,error:ICONS.alertCircle,warning:ICONS.alertTriangle,info:ICONS.alertCircle};t.innerHTML=`<span class="icon">${im[type]||''}</span><span>${esc(msg)}</span>`;c.appendChild(t);setTimeout(()=>{t.classList.add('out');setTimeout(()=>t.remove(),200);},ms);}
 
-function showLoading(containerId){const el=document.getElementById(containerId);if(el)el.innerHTML='<div class="loading-box"><div class="spinner"></div><span>加载中...</span></div>';}
+function showLoading(containerId){const el=document.getElementById(containerId);if(el)el.innerHTML='<div class="loading-box"><span class="loading loading-spinner loading-sm"></span><span>加载中...</span></div>';}
+
+/* ── Feature modules ── */
+const downloadPage = createDownloadPage({ state: S, toast, esc, injectIcons });
+const publishPage = createPublishPage({ state: S, esc });
+const remotePage = createRemotePage({ toast, injectIcons });
+const updatePage = createUpdatePage({ toast });
+const initDownloadPage = downloadPage.init;
+const initRemotePage = remotePage.init;
+const initUpdatePage = updatePage.init;
+const handleDownloadTaskUpdate = downloadPage.handleTaskUpdate;
+
 /* ── Persist UI state ── */
 function saveUI(){
   const ui={
@@ -86,23 +98,28 @@ function switchFeature(feat){
   const btn=$(`.sb-feat[data-feat="${feat}"]`);
   if(view)view.classList.add('active');
   if(btn)btn.classList.add('active');
-  const titles={main:'主控',edit:'剪辑',publish:'发布',download:'下载',remote:'远程','style-ref':'风格参考','subtitle-voice':'字幕与音色',update:'更新'};
+  const titles={main:'主控',edit:'剪辑',publish:'发布',download:'下载',remote:'远程','style-ref':'风格参考','subtitle-voice':'字幕与音色',update:'更新',settings:'设置'};
   if(el.pageTitle)el.pageTitle.textContent=titles[feat]||feat;
   renderStatus();
   if(feat==='subtitle-voice') loadPresetVoices();
   if(feat==='download') initDownloadPage();
   if(feat==='remote') initRemotePage();
   if(feat==='update') initUpdatePage();
+  if(feat==='settings') { fillForm(); checkDeps(); loadModels(); checkVoicebox(); loadApiUsage(); }
   // 清理下载页定时器
-  if(feat!=='download' && _dlDotsTimer){clearInterval(_dlDotsTimer);_dlDotsTimer=null;}
+  if(feat!=='download') downloadPage.stopAnimations();
   if(isMobile())closeSidebar();
 }
 
 /* ── Theme: auto-follow system ── */
 function initTheme(){
   const mq=window.matchMedia('(prefers-color-scheme:dark)');
-  document.documentElement.classList.toggle('dark',mq.matches);
-  mq.addEventListener('change',e=>{document.documentElement.classList.toggle('dark',e.matches)});
+  const apply=(dark)=>{
+    document.documentElement.classList.toggle('dark',dark);
+    document.documentElement.setAttribute('data-theme',dark?'antbot-dark':'antbot-light');
+  };
+  apply(mq.matches);
+  mq.addEventListener('change',e=>apply(e.matches));
 }
 
 /* ── Resize handle ── */
@@ -257,8 +274,8 @@ function renderChat(opts={}){
   const parts=[];let day='';
   for(const r of vis){const d=fmtDay(r.startedAt);if(d&&d!==day){day=d;parts.push(`<div class="chat-day">${esc(d)}</div>`)}const txt=r.inputText||(r.items||[]).map(i=>i.rawLine||i.taskName).filter(Boolean).join('\n');parts.push(`<div class="msg-time">${esc(fmtDate(r.startedAt))}</div>`);if(txt)parts.push(`<div class="msg msg-user">${makeBubbleHtml(txt)}</div>`);parts.push(`<div class="msg-sys"><div class="task-stack">${(r.items||[]).map(i=>taskCard(i)).join('')}</div></div>`)}
   // 持久化的主控任务（重新发布状态，重启后保留）
-  const historyIds=new Set((S.history||[]).flatMap(r=>(r.items||[]).map(i=>i.id)));
-  const persisted=(S.persistedTasks||[]).filter(t=>!historyIds.has(t.id)&&(t.status==='warning'||t.status==='completed'));
+  const historyIds=new Set((S.history||[]).flatMap(r=>(r.items||[]).map(i=>i.taskId)));
+  const persisted=(S.persistedTasks||[]).filter(t=>!historyIds.has(t.taskId)&&(t.status==='warning'||t.status==='completed'));
   if(persisted.length){
     const byRun={};
     for(const t of persisted){const key=t.batchRunId||'persisted';if(!byRun[key])byRun[key]={tasks:[],at:t.submittedAt||t.updatedAt,inputText:t.inputText||''};byRun[key].tasks.push(t);}
@@ -400,7 +417,7 @@ function fillForm(){
 function readForm(){
   const get=(id)=>{const e=document.getElementById(id);return e?.value?.trim()||'';};
   const apiKeys=[...document.querySelectorAll('#api-keys-list input[name="apiKey"]')].map(e=>e.value.trim()).filter(Boolean);
-  return{dataDir:get('s-dataDir'),paths:{outputBaseDir:get('s-outputBaseDir')},style:S.settings?.style||{},voiceClone:S.settings?.voiceClone||{},commands:S.settings?.commands||{},edit:{frameRate:parseFloat(get('s-frameRate'))||1},api:{baseUrl:get('s-apiBaseUrl')||'https://apihub.agnes-ai.com/v1',apiKeys,apiKey:apiKeys[0]||'',modelId:get('s-apiModelId'),availableModels:S.settings?.api?.availableModels||[]}};
+  return{dataDir:get('s-dataDir'),paths:{outputBaseDir:get('s-outputBaseDir')},style:S.settings?.style||{},voiceClone:S.settings?.voiceClone||{},edit:{frameRate:parseFloat(get('s-frameRate'))||1},api:{baseUrl:get('s-apiBaseUrl')||'https://apihub.agnes-ai.com/v1',apiKeys,apiKey:apiKeys[0]||'',modelId:get('s-apiModelId'),availableModels:S.settings?.api?.availableModels||[]}};
 }
 
 async function loadApiUsage() {
@@ -656,8 +673,8 @@ function renderEditCards() {
   container.innerHTML = S.editVideos.map(v => {
     const st = v.status || 'pending';
     const pct = Math.max(0, Math.min(100, v.progress || 0));
-    const icons = { pending: '⏳', preparing: '🔧', ready: '📋', composing: '🎬', paused: '⏸', completed: '✅', failed: '❌', cancelled: '🚫', cancelling: '⏳' };
-    const icon = icons[st] || '';
+    const icons = { pending: 'clock', preparing: 'loader', ready: 'film', composing: 'scissors', paused: 'pause', completed: 'check', failed: 'alertCircle', cancelled: 'x', cancelling: 'loader' };
+    const icon = `<span class="icon" data-icon="${icons[st] || 'clock'}"></span>`;
     const txt = st === 'preparing' ? `${v.step || '准备中'} ${pct}%` : st === 'ready' ? `待合成 · ${v.videoName || ''}` : st === 'composing' ? `合成中 ${pct}%` : st === 'completed' ? `完成 ${fmtDur(v.duration)}` : st === 'failed' ? `失败` : st === 'paused' ? '已暂停' : st === 'cancelled' ? '已取消' : st === 'cancelling' ? '取消中...' : '等待中';
     const selectedClass = v.selected ? ' selected' : '';
     let acts = '';
@@ -674,7 +691,7 @@ function renderEditCards() {
     const etaText = v.eta ? ` · 预计${v.eta}` : '';
     const errorDetail = st === 'failed' && v.error ? `<div class="edit-card-error" data-error-toggle="${esc(v.id)}"><span class="error-summary">${esc(v.error.slice(0, 50))}${v.error.length > 50 ? '...' : ''}</span><span class="error-expand">展开</span></div><div class="edit-card-error-full hidden" data-error-full="${esc(v.id)}">${esc(v.error)}</div>` : '';
     const optDisabled = ['completed', 'composing', 'cancelling'].includes(st) ? ' disabled' : '';
-    const thumbnailHtml = v.thumbnailUrl ? `<img src="${v.thumbnailUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:var(--r-sm)" />` : `<span class="icon" data-icon="film"></span>`;
+    const thumbnailHtml = v.thumbnailUrl ? `<img src="${v.thumbnailUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:var(--radius-sm)" />` : `<span class="icon" data-icon="film"></span>`;
     return `<div class="edit-card ${st}${selectedClass}" data-video-id="${esc(v.id)}">
       <div class="edit-card-select"><input type="checkbox" ${v.selected ? 'checked' : ''} data-select="${esc(v.id)}"></div>
       <div class="edit-card-icon" data-vid="${esc(v.id)}">${thumbnailHtml}</div>
@@ -803,7 +820,7 @@ function renderEditHistory(container) {
   }
 
   // 获取已添加到发布队列的视频路径
-  const addedPaths = new Set(S.publish.videos.map(v => v.path));
+  const addedPaths = new Set((S.publish?.videos || []).map(v => v.path));
 
   const groupKeys = Object.keys(groups);
   container.innerHTML = groupKeys.map((label, gi) => {
@@ -821,7 +838,7 @@ function renderEditHistory(container) {
       const isAdded = ok && h.outputPath && addedPaths.has(h.outputPath);
       return `<div class="edit-hist-item ${h.status}">
         <div class="edit-hist-info">
-          <div class="edit-hist-name">${ok ? '✅' : '❌'} ${esc(displayName)}</div>
+          <div class="edit-hist-name"><span class="icon" data-icon="${ok ? 'check' : 'alertCircle'}" style="color:var(--${ok ? 'success' : 'destructive'})"></span> ${esc(displayName)}</div>
           <div class="edit-hist-detail">${esc(detail)}</div>
           <div class="edit-hist-time">${esc(time)}</div>
         </div>
@@ -865,14 +882,12 @@ function renderEditHistory(container) {
     }
     else if (act === 'publish') {
       const h = S.editHistory.find(x => x.id === hid);
-      if (h?.outputPath) {
+      if (h?.outputPath && S.publish) {
         const existingIndex = S.publish.videos.findIndex(v => v.path === h.outputPath);
         if (existingIndex >= 0) {
-          // 撤销添加
           S.publish.videos.splice(existingIndex, 1);
           toast(`已从发布队列移除`, 'info');
         } else {
-          // 添加到发布队列
           const video = { path: h.outputPath, name: h.outputPath.split(/[/\\]/).pop(), size: 0, status: 'pending' };
           try {
             const info = await window.antbot.getVideoInfo(h.outputPath);
@@ -1145,33 +1160,35 @@ async function checkDeps() {
     { key: 'python', name: 'Python', desc: '运行环境' },
     { key: 'whisper', name: 'Whisper', desc: '语音识别' },
   ];
-  list.innerHTML = deps.map(d => `<div class="dep-check-item" data-dep-key="${d.key}"><div><span class="dep-check-name">${d.name}</span> <span class="dep-check-status">检查中...</span></div></div>`).join('');
+  list.innerHTML = `<table class="table table-sm"><thead><tr><th>工具</th><th>用途</th><th>状态</th><th></th></tr></thead><tbody>` +
+    deps.map(d => `<tr data-dep-key="${d.key}"><td class="font-semibold">${d.name}</td><td class="text-base-content/60">${d.desc}</td><td><span class="flex items-center gap-1"><span class="loading loading-spinner loading-xs"></span>检查中...</span></td><td></td></tr>`).join('') +
+    '</tbody></table>';
   for (const d of deps) {
     try {
       const r = await window.antbot.checkDep(d.key);
-      const item = list.querySelector(`[data-dep-key="${d.key}"]`);
-      if (item) {
-        item.className = `dep-check-item ${r.ok ? 'ok' : 'missing'}`;
-        item.innerHTML = `<div><span class="dep-check-name">${d.name}</span> <span class="dep-check-status">${r.ok ? (r.version || '已安装') : '未安装'}</span></div>
-          <div class="dep-acts">${r.ok
-            ? '<span style="color:var(--green);font-weight:600">✓</span>'
-            : '<button class="btn btn-sm btn-primary" data-dep-install="' + d.key + '" type="button">安装</button>'
-          }</div>`;
+      const row = list.querySelector(`[data-dep-key="${d.key}"]`);
+      if (row) {
+        const cells = row.querySelectorAll('td');
+        cells[2].innerHTML = r.ok
+          ? `<span class="flex items-center gap-1"><span class="icon" data-icon="check" style="color:var(--success)"></span>${r.version || '已安装'}</span>`
+          : '<span class="text-base-content/50">未安装</span>';
+        cells[3].innerHTML = r.ok
+          ? ''
+          : '<button class="btn btn-xs btn-primary" data-dep-install="' + d.key + '" type="button">安装</button>';
       }
     } catch {}
   }
   list.querySelectorAll('[data-dep-install]').forEach(btn => {
     btn.addEventListener('click', async () => {
       const tool = btn.dataset.depInstall;
-      const item = btn.closest('.dep-check-item');
+      const row = btn.closest('tr');
       const origHtml = btn.innerHTML;
       btn.disabled = true;
-      btn.innerHTML = '<span style="animation:spin .8s linear infinite;display:inline-block">⟳</span> 安装中...';
+      btn.innerHTML = '<span class="loading loading-spinner loading-xs"></span> 安装中...';
       try {
         const r = await window.antbot.installDep(tool);
         if (r.ok) {
-          if (item) { item.className = 'dep-check-item ok'; const s = item.querySelector('.dep-check-status'); if (s) s.textContent = '已安装'; }
-          btn.outerHTML = '<span style="color:var(--green);font-weight:600">✓</span>';
+          if (row) { const cells = row.querySelectorAll('td'); cells[2].innerHTML = '<span class="flex items-center gap-1"><span class="icon" data-icon="check" style="color:var(--success)"></span>已安装</span>'; cells[3].innerHTML = ''; }
           toast(tool + ' 安装完成', 'success');
         } else {
           toast(r.message || '安装失败', 'error');
@@ -1202,21 +1219,26 @@ function renderModels() {
   if (!list) return;
   const entries = Object.entries(S.models);
   if (!entries.length) { list.innerHTML = '<div class="helper-text">暂无可用模型</div>'; return; }
-  list.innerHTML = entries.map(([key, m]) => `
-    <div class="model-item ${m.downloaded ? 'downloaded' : ''}" data-model-key="${esc(key)}">
-      <div class="model-info">
-        <div class="model-name">${esc(m.name)}</div>
-        <div class="model-meta">${esc(m.size)} · ${m.downloaded ? '已下载' : '未下载'}</div>
-        <div class="model-progress" id="model-progress-${esc(key)}"></div>
-      </div>
-      <div class="model-actions">
+  list.innerHTML = `<table class="table table-sm"><thead><tr><th>模型</th><th>大小</th><th>状态</th><th></th></tr></thead><tbody>` +
+    entries.map(([key, m]) => {
+    const isHf = !!m.hfDownload;
+    const useMirror = S.settings?.models?.useHfMirror;
+    return `<tr data-model-key="${esc(key)}">
+      <td><div class="font-semibold text-sm">${esc(m.name)}</div><div class="model-progress" id="model-progress-${esc(key)}"></div></td>
+      <td class="text-base-content/60">${esc(m.size)}</td>
+      <td>${m.downloaded ? '<span class="flex items-center gap-1"><span class="icon" data-icon="check" style="color:var(--success)"></span>已下载</span>' : '<span class="text-base-content/40">未下载</span>'}</td>
+      <td><div class="flex items-center gap-1">
         ${m.downloaded
-          ? `<button class="btn btn-sm btn-danger" data-model-delete="${esc(key)}" type="button"><span class="icon" data-icon="trash"></span>删除</button>`
-          : `<button class="btn btn-sm btn-primary" data-model-download="${esc(key)}" type="button"><span class="icon" data-icon="download"></span>下载</button>`
+          ? `<button class="btn btn-xs btn-ghost" data-model-delete="${esc(key)}" type="button">删除</button>`
+          : `<button class="btn btn-xs btn-primary" data-model-download="${esc(key)}" type="button">下载</button>
+             ${!isHf ? `<button class="btn btn-xs btn-ghost" data-model-browser="${esc(key)}" type="button">浏览器</button>
+             <button class="btn btn-xs btn-ghost" data-model-import="${esc(key)}" type="button">导入</button>` : ''}
+             ${isHf ? `<label class="flex items-center gap-1 text-xs cursor-pointer"><input type="checkbox" class="checkbox checkbox-xs" data-model-mirror ${useMirror ? 'checked' : ''} /> 国内镜像</label>` : ''}
+             `
         }
-      </div>
-    </div>
-  `).join('');
+      </div></td>
+    </tr>`;
+  }).join('') + '</tbody></table>';
   injectIcons();
 }
 
@@ -1225,7 +1247,7 @@ async function checkVoicebox() {
   const container = document.getElementById('voicebox-items');
   const pathEl = document.getElementById('voicebox-path');
   if (!container) return;
-  container.innerHTML = '<div class="voicebox-item"><span class="voicebox-name">检测中...</span></div>';
+  container.innerHTML = '<div class="voicebox-item flex items-center gap-2"><span class="loading loading-spinner loading-sm"></span><span class="voicebox-name">检测中...</span></div>';
   try {
     const result = await window.antbot.voiceboxCheck();
     if (pathEl) pathEl.textContent = result.venvPath || '-';
@@ -1236,7 +1258,7 @@ async function checkVoicebox() {
     container.innerHTML = result.items.map(item => `
       <div class="voicebox-item ${item.ok ? 'ok' : 'fail'}">
         <span class="voicebox-name">${esc(item.name)}</span>
-        <span class="voicebox-ver">${item.ok ? (item.version || '✓') : '缺失'}</span>
+        <span class="voicebox-ver">${item.ok ? (item.version || '<span class="icon" data-icon="check"></span>') : '缺失'}</span>
       </div>
     `).join('');
   } catch {
@@ -1300,7 +1322,7 @@ function renderVoiceList() {
       </div>
       <div class="voice-item-actions">
         <button class="btn btn-sm btn-ghost" data-voice-rename="${esc(v.id)}" type="button">重命名</button>
-        <button class="btn btn-sm btn-ghost" data-voice-delete="${esc(v.id)}" type="button" style="color:var(--red)">删除</button>
+        <button class="btn btn-sm btn-ghost" data-voice-delete="${esc(v.id)}" type="button" style="color:var(--destructive)">删除</button>
       </div>
     </div>
   `).join('');
@@ -1383,7 +1405,7 @@ function renderPresetVoices() {
       </div>
       <div class="voice-item-actions">
         ${installed
-          ? '<span style="color:var(--success);font-size:12px;font-weight:500">✓ 已安装</span>'
+          ? '<span class="icon" data-icon="check" style="color:var(--success);width:14px;height:14px"></span> 已安装'
           : `<button class="btn btn-sm btn-primary" data-preset-download="${esc(v.id)}" type="button">下载</button>`}
       </div>
     </div>`;
@@ -1531,436 +1553,6 @@ function bindSubtitleVoiceEvents() {
   });
 }
 
-function bindPublishPage(){
-  const pick = document.getElementById('publish-pick-videos-btn');
-  const platformBtns = document.querySelectorAll('.ps-platform-btn');
-  const originalToggle = document.getElementById('publish-original-toggle');
-  const scheduledToggle = document.getElementById('publish-scheduled-toggle');
-  const scheduleWrapper = document.getElementById('publish-schedule-wrapper');
-  const scheduleMonth = document.getElementById('publish-schedule-month');
-  const scheduleDay = document.getElementById('publish-schedule-day');
-  const scheduleTime = document.getElementById('publish-schedule-time');
-  const mainBtn = document.getElementById('publish-main-btn');
-  const publishView = document.getElementById('view-publish');
-  const videoList = document.getElementById('publish-video-list');
-  const historyList = document.getElementById('publish-history-list');
-  const tabPending = document.getElementById('publish-tab-pending');
-  const tabDone = document.getElementById('publish-tab-done');
-  const pendingCount = document.getElementById('publish-pending-count');
-  const doneCount = document.getElementById('publish-done-count');
-  const bridgeToggleBtn = document.getElementById('publish-bridge-toggle-btn');
-  let draggedItem = null;
-  let draggedIndex = -1;
-  let currentTab = 'pending';
-  let publishProgress = {};
-  let serviceRunning = false;
-
-  S.publish = { videos: [], requestId: '', running: false, history: [] };
-  const formatSize = bytes => { const n=Number(bytes||0); if(n===0) return ''; return n>1024*1024?`${(n/1024/1024).toFixed(1)}MB`:`${Math.round(n/1024)}KB`; };
-  const formatTime = (d) => { const date=new Date(d); return `${date.getMonth()+1}/${date.getDate()} ${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}`; };
-  const getFileName = (path) => path.split(/[\\/]/).pop();
-
-  // 加载已发布的记录
-  const loadPublishHistory = async () => {
-    try {
-      const records = await window.antbot.publishGetRecords();
-      S.publish.history = records || [];
-      render();
-    } catch (e) {
-      console.error('加载发布记录失败:', e);
-    }
-  };
-
-  // 保存发布记录到本地
-  const savePublishRecord = async (record) => {
-    try {
-      await window.antbot.publishSaveRecord(record);
-    } catch (e) {
-      console.error('保存发布记录失败:', e);
-    }
-  };
-
-  const getDaysInMonth = (year, month) => new Date(year, month, 0).getDate();
-
-  const isFutureDateTime = (month, day, time) => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const [hours, minutes] = (time || '10:30').split(':').map(Number);
-    const selected = new Date(year, month - 1, day, hours, minutes);
-    return selected > now;
-  };
-
-  const updateDaysSelect = () => {
-    const month = parseInt(scheduleMonth.value);
-    const now = new Date();
-    const daysInMonth = getDaysInMonth(now.getFullYear(), month);
-    const currentDay = parseInt(scheduleDay.value) || now.getDate();
-    scheduleDay.innerHTML = '';
-    for(let i = 1; i <= daysInMonth; i++) {
-      const option = document.createElement('option');
-      option.value = i;
-      option.textContent = `${i}日`;
-      if(i === Math.min(currentDay, daysInMonth)) option.selected = true;
-      scheduleDay.appendChild(option);
-    }
-  };
-
-  const setDefaultSchedule = () => {
-    const now = new Date();
-    scheduleMonth.value = now.getMonth() + 1;
-    const nextHour = now.getHours() + 1;
-    scheduleTime.value = `${String(nextHour >= 24 ? 0 : nextHour).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-    updateDaysSelect();
-    scheduleDay.value = now.getDate();
-  };
-
-  const validateSchedule = () => {
-    if (!scheduledToggle.classList.contains('on')) return true;
-    const month = parseInt(scheduleMonth.value);
-    const day = parseInt(scheduleDay.value);
-    return isFutureDateTime(month, day, scheduleTime.value);
-  };
-
-  const addVideos = async (filePaths) => {
-    const newVideos = filePaths.map(path => ({
-      path, name: getFileName(path), size: 0, status: 'pending'
-    }));
-    S.publish.videos = [...S.publish.videos, ...newVideos];
-    render();
-    for(let i = S.publish.videos.length - newVideos.length; i < S.publish.videos.length; i++) {
-      try {
-        const info = await window.antbot.getVideoInfo(S.publish.videos[i].path);
-        S.publish.videos[i].size = info.size || 0;
-      } catch {}
-    }
-    render();
-  };
-
-  const render = () => {
-    pendingCount.textContent = S.publish.videos.filter(v => v.status === 'pending' || v.status === 'publishing').length;
-    doneCount.textContent = S.publish.history.length;
-
-    if (currentTab === 'pending') {
-      videoList.classList.remove('hidden');
-      historyList.classList.add('hidden');
-      renderPendingList();
-    } else {
-      videoList.classList.add('hidden');
-      historyList.classList.remove('hidden');
-      renderHistoryList();
-    }
-
-    if (S.publish.running) {
-      mainBtn.textContent = '停止发布';
-      mainBtn.className = 'btn btn-danger';
-      mainBtn.disabled = false;
-    } else if (S.publish.videos.some(v => v.status === 'pending')) {
-      mainBtn.textContent = '通过浏览器发布';
-      mainBtn.className = 'btn btn-primary';
-      mainBtn.disabled = !validateSchedule() || !serviceRunning;
-    } else {
-      mainBtn.textContent = '通过浏览器发布';
-      mainBtn.className = 'btn btn-primary';
-      mainBtn.disabled = true;
-    }
-  };
-
-  const renderPendingList = () => {
-    const allVideos = S.publish.videos;
-    const hasPublishing = allVideos.some(v => v.status === 'publishing');
-
-    if (!allVideos.length) {
-      videoList.innerHTML = '<div class="publish-empty">拖拽视频文件到此处，或点击"添加视频"</div>';
-      return;
-    }
-
-    videoList.innerHTML = allVideos.map((v,i) => {
-      const publishing = v.status === 'publishing';
-      const statusText = publishProgress[v.path] || (publishing ? '发布中...' : '');
-      return `<div class="publish-video-item ${publishing ? 'publishing' : ''}" draggable="${!publishing}" data-path="${esc(v.path)}">
-        ${publishing ? '' : '<span class="publish-video-drag-handle">⋮⋮</span>'}
-        <span class="publish-video-index">${publishing ? '⏳' : i+1}</span>
-        <span class="publish-video-name" title="${esc(v.path)}">${esc(v.name)}</span>
-        ${statusText ? `<span class="publish-video-status">${esc(statusText)}</span>` : ''}
-        <span class="publish-video-meta">${formatSize(v.size)}</span>
-        ${publishing ? '' : `<button class="publish-video-remove" data-path="${esc(v.path)}" title="移除">×</button>`}
-      </div>`;
-    }).join('');
-    setupDragAndDrop();
-  };
-
-  const renderHistoryList = () => {
-    if (!S.publish.history.length) {
-      historyList.innerHTML = '<div class="publish-empty">暂无发布记录</div>';
-      return;
-    }
-
-    // 按日期分组
-    const today = new Date(); today.setHours(0,0,0,0);
-    const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
-    const groups = {};
-    for (const h of S.publish.history) {
-      const d = h.time ? new Date(h.time) : new Date();
-      const dayStart = new Date(d); dayStart.setHours(0,0,0,0);
-      let label;
-      if (dayStart.getTime() === today.getTime()) label = '今天';
-      else if (dayStart.getTime() === yesterday.getTime()) label = '昨天';
-      else label = `${d.getMonth()+1}月${d.getDate()}日`;
-      if (!groups[label]) groups[label] = [];
-      groups[label].push(h);
-    }
-
-    const groupKeys = Object.keys(groups);
-    historyList.innerHTML = groupKeys.map((label, gi) => {
-      const isToday = gi === 0;
-      const items = groups[label];
-      const rows = items.map(h => `
-        <div class="publish-history-item">
-          <span class="publish-history-icon ${h.success ? 'success' : 'failed'}">${h.success ? '✓' : '✗'}</span>
-          <span class="publish-history-name" title="${esc(h.path)}">${esc(h.name)}</span>
-          <span class="publish-history-time">${formatTime(h.time)}</span>
-          <button class="publish-history-open" data-path="${esc(h.path)}" title="在文件管理器中显示">打开</button>
-        </div>`).join('');
-
-      if (groupKeys.length === 1 && isToday) return rows;
-      return `<div class="publish-history-group${isToday ? ' expanded' : ''}" data-group="${esc(label)}">
-        <div class="publish-history-group-head" data-toggle-publish-group="${esc(label)}">
-          <span class="publish-history-group-label">${esc(label)}</span>
-          <span class="publish-history-group-count">${items.length}</span>
-          <span class="publish-history-group-arrow">›</span>
-        </div>
-        <div class="publish-history-group-body">${rows}</div>
-      </div>`;
-    }).join('');
-
-    // 折叠/展开
-    historyList.querySelectorAll('[data-toggle-publish-group]').forEach(head => {
-      head.addEventListener('click', () => {
-        const group = head.closest('.publish-history-group');
-        if (group) group.classList.toggle('expanded');
-      });
-    });
-
-    historyList.querySelectorAll('.publish-history-open').forEach(btn => {
-      btn.addEventListener('click', () => window.antbot.revealInFolder(btn.dataset.path));
-    });
-  };
-
-  const setupDragAndDrop = () => {
-    const items = videoList.querySelectorAll('.publish-video-item[draggable="true"]');
-    items.forEach((item) => {
-      item.addEventListener('dragstart', (e) => {
-        draggedItem = item;
-        draggedIndex = S.publish.videos.findIndex(v => v.path === item.dataset.path);
-        item.classList.add('dragging');
-        e.dataTransfer.effectAllowed = 'move';
-      });
-
-      item.addEventListener('dragend', () => {
-        item.classList.remove('dragging');
-        draggedItem = null;
-        draggedIndex = -1;
-        videoList.querySelectorAll('.publish-video-item').forEach(i => i.classList.remove('drag-over'));
-      });
-
-      item.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
-        if (item !== draggedItem) item.classList.add('drag-over');
-      });
-
-      item.addEventListener('dragleave', () => item.classList.remove('drag-over'));
-
-      item.addEventListener('drop', (e) => {
-        e.preventDefault();
-        item.classList.remove('drag-over');
-        const targetIndex = S.publish.videos.findIndex(v => v.path === item.dataset.path);
-        if (draggedIndex !== -1 && draggedIndex !== targetIndex) {
-          const draggedVideo = S.publish.videos[draggedIndex];
-          S.publish.videos.splice(draggedIndex, 1);
-          S.publish.videos.splice(targetIndex, 0, draggedVideo);
-          render();
-        }
-      });
-    });
-
-    videoList.querySelectorAll('.publish-video-remove').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        S.publish.videos = S.publish.videos.filter(v => v.path !== btn.dataset.path);
-        render();
-      });
-    });
-  };
-
-  const setResult = (text, type='') => { const result=document.getElementById('publish-result'); result.textContent=text; result.className=`publish-result ${type}`; };
-
-  const refreshBridge = async () => {
-    const status = document.getElementById('publish-bridge-status');
-    try {
-      const r=await window.antbot.publishBridgeStatus();
-      serviceRunning = r.status==='ready'||r.status==='busy';
-      status.className=`publish-bridge-status ${serviceRunning?'ready':'offline'}`;
-      status.querySelector('span:last-child').textContent=serviceRunning?'已连接':'未连接';
-      bridgeToggleBtn.textContent = serviceRunning ? '停止服务' : '启动服务';
-      bridgeToggleBtn.className = serviceRunning ? 'btn btn-ghost' : 'btn btn-ghost';
-    } catch {
-      serviceRunning = false;
-      status.className='publish-bridge-status offline';
-      status.querySelector('span:last-child').textContent='未连接';
-      bridgeToggleBtn.textContent = '启动服务';
-    }
-    render();
-  };
-
-  bridgeToggleBtn?.addEventListener('click', async () => {
-    bridgeToggleBtn.disabled = true;
-    bridgeToggleBtn.textContent = '处理中...';
-    try {
-      if (serviceRunning) {
-        await window.antbot.publishBridgeStop();
-        setResult('服务已停止', 'success');
-      } else {
-        const result = await window.antbot.publishBridgeStart();
-        if (result.ok) setResult('服务已启动', 'success');
-        else setResult('启动失败: ' + (result.error || '未知错误'), 'error');
-      }
-      await refreshBridge();
-    } catch(e) { setResult(e.message, 'error'); }
-    finally { bridgeToggleBtn.disabled = false; }
-  });
-
-  pick?.addEventListener('click', async () => {
-    try {
-      const paths = await window.antbot.pickVideoFiles();
-      if (paths && paths.length) await addVideos(paths);
-    } catch(e) { setResult(e.message, 'error'); }
-  });
-
-  tabPending?.addEventListener('click', () => { currentTab = 'pending'; tabPending.classList.add('active'); tabDone.classList.remove('active'); render(); });
-  tabDone?.addEventListener('click', () => { currentTab = 'done'; tabDone.classList.add('active'); tabPending.classList.remove('active'); render(); });
-
-  publishView?.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); publishView.classList.add('drag-over'); });
-  publishView?.addEventListener('dragleave', (e) => { if (!publishView.contains(e.relatedTarget)) publishView.classList.remove('drag-over'); });
-  publishView?.addEventListener('drop', async (e) => {
-    e.preventDefault(); e.stopPropagation(); publishView.classList.remove('drag-over');
-    const filePaths = [];
-    for (const f of e.dataTransfer?.files || []) {
-      try {
-        const p = window.antbot.getPathForFile(f);
-        if (p && /\.(mp4|mov|m4v|webm|mkv|avi|flv|wmv|ts)$/i.test(f.name)) filePaths.push(p);
-      } catch {}
-    }
-    if (filePaths.length) await addVideos(filePaths);
-  });
-
-  // 填充月份下拉
-  scheduleMonth.innerHTML = '';
-  for(let m=1;m<=12;m++){const o=document.createElement('option');o.value=m;o.textContent=m+'月';scheduleMonth.appendChild(o)}
-
-  // 平台按钮
-  let selectedPlatform = 'videoChannel';
-  platformBtns.forEach(btn => {
-    btn.addEventListener('click', () => {
-      platformBtns.forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      selectedPlatform = btn.dataset.platform;
-    });
-  });
-
-  // 开关切换
-  function bindToggle(el, onChange){
-    el.addEventListener('click', () => { el.classList.toggle('on'); onChange(el.classList.contains('on')); });
-  }
-  bindToggle(originalToggle, () => {});
-  bindToggle(scheduledToggle, (on) => {
-    scheduleWrapper.classList.toggle('hidden', !on);
-    scheduleMonth.disabled = !on;
-    scheduleDay.disabled = !on;
-    scheduleTime.disabled = !on;
-    if(on && !scheduleDay.value) setDefaultSchedule();
-    render();
-  });
-
-  scheduleMonth?.addEventListener('change', () => { updateDaysSelect(); render(); });
-  scheduleDay?.addEventListener('change', render);
-  scheduleTime?.addEventListener('change', render);
-
-  mainBtn?.addEventListener('click', async () => {
-    if (S.publish.running) {
-      // 立即更新状态
-      S.publish.running = false;
-      publishProgress = {};
-      render();
-      setResult('正在停止...', 'success');
-      try {
-        await window.antbot.publishStop(S.publish.requestId);
-        setResult('已停止', 'success');
-      } catch(e) {
-        setResult(e.message, 'error');
-      }
-    } else {
-      const pendingVideos = S.publish.videos.filter(v => v.status === 'pending');
-      if (!pendingVideos.length) return;
-      S.publish.running = true;
-      S.publish.requestId = `antbot-${Date.now()}`;
-      pendingVideos.forEach(v => { v.status = 'publishing'; publishProgress[v.path] = '等待中...'; });
-      render();
-      setResult('正在发布...');
-      const topics = (document.getElementById('publish-topics').value || '').split(/[ ,，]+/).filter(Boolean);
-      let scheduleTimeValue = '';
-      if (scheduledToggle.classList.contains('on') && scheduleDay.value) {
-        const year = new Date().getFullYear();
-        const month = String(scheduleMonth.value).padStart(2, '0');
-        const day = String(scheduleDay.value).padStart(2, '0');
-        scheduleTimeValue = `${year}-${month}-${day}T${scheduleTime.value || '10:30'}`;
-      }
-      try {
-        for (const video of pendingVideos) {
-          if (!S.publish.running) break;
-          publishProgress[video.path] = '发布中...';
-          render();
-          try {
-            await window.antbot.publishStart({
-              requestId: S.publish.requestId + '-' + Date.now(),
-              videos: [video],
-              videoPath: '',
-              platform: selectedPlatform,
-              settings: {
-                publishCopy: document.getElementById('publish-copy').value,
-                publishTopics: topics,
-                isOriginal: originalToggle.classList.contains('on'),
-                scheduledPublish: scheduledToggle.classList.contains('on'),
-                scheduleTime: scheduleTimeValue
-              }
-            });
-            const record = { path: video.path, name: video.name, success: true, time: new Date(), platform: selectedPlatform };
-            S.publish.history.unshift(record);
-            await savePublishRecord(record);
-          } catch(e) {
-            const record = { path: video.path, name: video.name, success: false, time: new Date(), platform: selectedPlatform, error: e.message };
-            S.publish.history.unshift(record);
-            await savePublishRecord(record);
-          }
-          delete publishProgress[video.path];
-        }
-        S.publish.videos = S.publish.videos.filter(v => v.status === 'pending');
-        setResult(S.publish.running ? '发布完成' : '已停止', 'success');
-      } catch(e) { setResult(e.message, 'error'); }
-      finally { S.publish.running = false; publishProgress = {}; render(); refreshBridge(); }
-    }
-  });
-
-  setDefaultSchedule();
-  refreshBridge();
-  if(!S._bridgeInterval)S._bridgeInterval=setInterval(refreshBridge, 3000);
-  loadPublishHistory();
-  render();
-
-  // 暴露 refreshPublishPage 函数供剪辑页面调用
-  window.refreshPublishPage = render;
-}
-
 function bind(){
   el.sidebarToggle?.addEventListener('click',()=>{S.sidebarOpen?closeSidebar():openSidebar()});
   el.overlay?.addEventListener('click',closeSidebar);
@@ -2001,6 +1593,7 @@ function bind(){
   el.editStartBtn?.addEventListener('click', async () => {
     await window.antbot.editStartAll();
   });
+  document.getElementById('edit-batch-btn')?.addEventListener('click', () => showBatchActions());
 
   // Edit tab switching
   document.querySelectorAll('.edit-tab-btn').forEach(btn => {
@@ -2025,29 +1618,9 @@ function bind(){
   // Platform buttons
   el.openVideoBtn?.addEventListener('click',()=>void window.antbot.openExternal('https://channels.weixin.qq.com/platform').catch(e=>toast(e.message,'error')));
   el.openDouyinBtn?.addEventListener('click',()=>void window.antbot.openExternal('https://creator.douyin.com/creator-micro/home').catch(e=>toast(e.message,'error')));
-  // Settings
-  el.openSettingsBtn?.addEventListener('click',()=>{fillForm();el.setDlg?.showModal();if(isMobile())closeSidebar();checkDeps();loadModels();checkVoicebox();loadApiUsage();});
-  el.setClose?.addEventListener('click',()=>closeDlg(el.setDlg));
-  // Auto-save on settings input change
-  document.getElementById('settings-body')?.addEventListener('change',()=>{void saveSettings();});
-  document.getElementById('settings-body')?.addEventListener('input',(e)=>{if(e.target.matches('input[type=password],input[type=text],input[type=number]')){clearTimeout(S._settingsSaveTimer);S._settingsSaveTimer=setTimeout(()=>void saveSettings(),800);}});
-  // Reload default styles
-  document.getElementById('reload-default-styles-btn')?.addEventListener('click',async()=>{
-    const btn=document.getElementById('reload-default-styles-btn');
-    if(btn){btn.disabled=true;btn.textContent='加载中...';}
-    try{
-      const result=await window.antbot.reloadDefaultStyles();
-      if(result.ok){
-        toast(`已加载 ${result.count} 个内置风格`,'success');
-        await loadStyles();
-      }else{
-        toast('加载失败: '+result.error,'error');
-      }
-    }catch(e){
-      toast('加载失败: '+e.message,'error');
-    }
-    if(btn){btn.disabled=false;btn.innerHTML='<span class="icon" data-icon="refresh"></span>重新加载内置风格';injectIcons();}
-  });
+  // Auto-save on settings input change (settings page)
+  document.getElementById('view-settings')?.addEventListener('change',()=>{void saveSettings();});
+  document.getElementById('view-settings')?.addEventListener('input',(e)=>{if(e.target.matches('input[type=password],input[type=text],input[type=number]')){clearTimeout(S._settingsSaveTimer);S._settingsSaveTimer=setTimeout(()=>void saveSettings(),800);}});
   // Fetch models button
   document.getElementById('fetch-models-btn')?.addEventListener('click',async()=>{
     const apiKey=[...document.querySelectorAll('#api-keys-list input[name="apiKey"]')].map(e=>e.value.trim()).filter(Boolean)[0]||'';
@@ -2084,8 +1657,8 @@ function bind(){
   el.dataOpenMain?.addEventListener('click',async()=>{try{const r=await window.antbot.openDataDir();toast(`已打开: ${r.path}`,'info')}catch(e){toast(e.message,'error')}});
   el.dataMigrate?.addEventListener('click',()=>void migrate());el.dataClose?.addEventListener('click',()=>closeDlg(el.dataDlg));
   document.getElementById('migrate-old-btn')?.addEventListener('click',()=>void migrate());
-  bindPublishPage();
-  bindDownloadPage();
+  publishPage.bind();
+  downloadPage.bind();
   // Task input
   el.input?.addEventListener('input',()=>{autoInput();queuePreview();renderBtns();toggleSendBtn()});
   el.input?.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){e.preventDefault();void startTasks()}});
@@ -2132,7 +1705,11 @@ function bind(){
       const tid=republishBtn.dataset.republish;
       republishBtn.disabled=true;republishBtn.textContent='发布中...';
       window.antbot.republishTask(tid).then(r=>{
-        if(r?.ok)toast('已重新发布','success');
+        if(r?.ok){
+          toast('已重新发布','success');
+          S.persistedTasks=(S.persistedTasks||[]).filter(t=>t.taskId!==tid&&t.id!==tid);
+          renderChat();
+        }
         else if(r?.error==='FILE_DELETED'){
           const rawLine=r.rawLine||'';
           if(window.confirm(`视频文件已被删除：\n${r.outputPath||''}\n\n是否需要重新执行这个任务（下载→剪辑→发布）？`)){
@@ -2208,14 +1785,41 @@ function bind(){
     const dlBtn = e.target.closest('[data-model-download]');
     if (dlBtn) {
       const key = dlBtn.dataset.modelDownload;
-      dlBtn.disabled = true;
-      dlBtn.innerHTML = '<span class="icon" data-icon="loader"></span>下载中...';
+      // Replace download button with cancel button
+      const td = dlBtn.closest('td');
+      dlBtn.outerHTML = `<button class="btn btn-xs btn-error" data-model-cancel="${esc(key)}" type="button">取消</button>`;
+      // Hide other action buttons in same cell
+      td?.querySelectorAll('[data-model-browser],[data-model-import],[data-model-mirror]')?.forEach(el => el.style.display = 'none');
+      td?.querySelector('label')?.querySelector('input[data-model-mirror]')?.closest('label')?.style.setProperty('display', 'none');
       try {
         const r = await window.antbot.modelsDownload(key);
-        if (r.ok) { toast('下载完成', 'success'); await loadModels(); }
-        else toast(r.message || '下载失败', 'error');
+        if (r.ok) { toast('下载完成', 'success'); }
+        else if (r.message !== '已取消') toast(r.message || '下载失败', 'error');
       } catch (err) { toast(err.message, 'error'); }
       await loadModels();
+      return;
+    }
+    const browserBtn = e.target.closest('[data-model-browser]');
+    if (browserBtn) {
+      const key = browserBtn.dataset.modelBrowser;
+      try {
+        const r = await window.antbot.modelsGetUrl(key);
+        if (r.ok) { await window.antbot.openExternal(r.url); toast('已在浏览器中打开下载页面', 'info'); }
+        else toast(r.message, 'error');
+      } catch (err) { toast(err.message, 'error'); }
+      return;
+    }
+    const importBtn = e.target.closest('[data-model-import]');
+    if (importBtn) {
+      const key = importBtn.dataset.modelImport;
+      try {
+        const filePath = await window.antbot.pickFile('选择模型文件', [{ name: 'Model', extensions: ['pt', 'bin', 'safetensors', 'gguf', 'onnx'] }]);
+        if (!filePath) return;
+        toast('正在导入...', 'info');
+        const r = await window.antbot.modelsImport({ modelKey: key, sourcePath: filePath });
+        if (r.ok) { toast('导入成功', 'success'); await loadModels(); }
+        else toast(r.error || r.message || '导入失败', 'error');
+      } catch (err) { toast(err.message, 'error'); }
       return;
     }
     const delBtn = e.target.closest('[data-model-delete]');
@@ -2226,6 +1830,27 @@ function bind(){
         if (r.ok) { toast('已删除', 'info'); await loadModels(); }
         else toast(r.message || '删除失败', 'error');
       } catch (err) { toast(err.message, 'error'); }
+      return;
+    }
+    const cancelBtn = e.target.closest('[data-model-cancel]');
+    if (cancelBtn) {
+      const key = cancelBtn.dataset.modelCancel;
+      try {
+        const r = await window.antbot.modelsCancel(key);
+        if (r.ok) toast('已取消', 'info');
+        else toast(r.message || '取消失败', 'error');
+      } catch (err) { toast(err.message, 'error'); }
+    }
+  });
+  // Mirror toggle
+  document.getElementById('models-list')?.addEventListener('change', async (e) => {
+    if (e.target.matches('[data-model-mirror]')) {
+      const useMirror = e.target.checked;
+      S.settings = S.settings || {};
+      S.settings.models = S.settings.models || {};
+      S.settings.models.useHfMirror = useMirror;
+      try { await window.antbot.updateSettings({ models: { useHfMirror: useMirror } }); } catch {}
+      toast(useMirror ? '已启用国内镜像 (hf-mirror.com)' : '已关闭国内镜像', 'info');
     }
   });
   // Listen for download progress
@@ -2235,11 +1860,15 @@ function bind(){
     if (p.status === 'downloading') {
       el.innerHTML = `<div class="prog-track"><div class="prog-bar" style="width:${p.percent||0}%"></div></div><div class="prog-info"><span>${p.message||''}</span><span>${p.percent||0}%</span></div>`;
     } else if (p.status === 'completed') {
-      el.innerHTML = '<div class="prog-info"><span style="color:var(--green)">✓ 下载完成</span></div>';
-      setTimeout(() => loadModels(), 1000);
+      el.innerHTML = '';
+      setTimeout(() => loadModels(), 500);
+    } else if (p.status === 'cancelled') {
+      el.innerHTML = '';
+      loadModels();
     } else if (p.status === 'failed') {
-      el.innerHTML = `<div class="prog-info"><span style="color:var(--red)">✗ ${esc(p.message||'失败')}</span></div>`;
+      el.innerHTML = `<div class="prog-info"><span class="icon" data-icon="alertCircle" style="color:var(--destructive)"></span> ${esc(p.message||'失败')}</div>`;
     }
+    injectIcons();
   });
 
   // ── Per-dependency progress tracking ──
@@ -2254,7 +1883,7 @@ function bind(){
       if (!pkg) return '';
       const s = pkg.status || 'queued';
       const pct = Math.max(0, Math.min(100, pkg.percent || 0));
-      const st = s === 'done' ? '✓' : s === 'error' ? '失败' : s === 'cancelled' ? '已取消' : s === 'downloading' ? `${pct}%` : '等待';
+      const st = s === 'done' ? '完成' : s === 'error' ? '失败' : s === 'cancelled' ? '已取消' : s === 'downloading' ? `${pct}%` : '等待';
       const canCancel = s === 'downloading' || s === 'queued';
       return `<div class="dep-item dep-${esc(s)}">
         <div class="dep-item-head"><span class="dep-item-name">${esc(pkg.name)}</span><span class="dep-item-status">${esc(st)}</span>
@@ -2357,7 +1986,7 @@ function bind(){
       checkVoicebox();
     } else if (p.status === 'failed') {
       btn.disabled = false;
-      btn.innerHTML = `<span class="icon" data-icon="refreshCw"></span>重试安装`;
+      btn.innerHTML = `<span class="icon" data-icon="refresh"></span>重试安装`;
       injectIcons();
       toast(p.message || '安装失败', 'error');
     }
@@ -2384,766 +2013,6 @@ function bind(){
   // Subtitle & Voice events
   bindSubtitleVoiceEvents();
 }
-
-/* ── Download page ── */
-S.downloadTasks = [];
-
-async function initDownloadPage() {
-  const setup = document.getElementById('dl-setup');
-  const ytLogin = document.getElementById('dl-yt-login');
-  const list = document.getElementById('dl-list');
-  if (!setup || !list) return;
-  try {
-    const [ytdlp, ffmpeg] = await Promise.all([
-      window.antbot.downloadCheckYtdlp(),
-      window.antbot.downloadCheckFfmpeg()
-    ]);
-    if (!ytdlp.available) {
-      setup.classList.remove('hidden');
-      list.style.display = 'none';
-      if (ytLogin) ytLogin.classList.add('hidden');
-    } else {
-      setup.classList.add('hidden');
-      list.style.display = '';
-      if (!ffmpeg.available) {
-        toast('未检测到 ffmpeg，请在设置页面安装依赖', 'warning');
-      }
-      // 检查 YouTube cookies，没有才显示登录提示
-      try {
-        const hasYtCookies = await window.antbot.downloadCheckYoutubeCookies();
-        if (ytLogin && !hasYtCookies) ytLogin.classList.remove('hidden');
-      } catch {}
-      await loadDownloadTasks();
-    }
-  } catch {}
-}
-
-async function loadDownloadTasks() {
-  try {
-    S.downloadTasks = await window.antbot.downloadList() || [];
-    renderDownloadCards();
-  } catch {}
-}
-
-function handleDownloadTaskUpdate(task) {
-  const idx = S.downloadTasks.findIndex(t => t.id === task.id);
-  if (idx >= 0) S.downloadTasks[idx] = task;
-  else S.downloadTasks.push(task);
-  renderDownloadCards();
-}
-
-// 多选状态
-S.selectedDlTasks = new Set();
-
-function renderDownloadCards() {
-  const cards = document.getElementById('dl-cards');
-  const empty = document.getElementById('dl-empty');
-  if (!cards) return;
-  if (!S.downloadTasks.length) {
-    cards.innerHTML = '';
-    if (empty) empty.style.display = '';
-    return;
-  }
-  if (empty) empty.style.display = 'none';
-
-  // 按创建时间排序，最旧在上，最新在下
-  const sorted = [...S.downloadTasks].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-  const platformClass = { YouTube: 'yt', '抖音': 'dy', TikTok: 'tk', 'B站': 'b' };
-  const hasSelected = S.selectedDlTasks.size > 0;
-
-  cards.innerHTML = sorted.map(t => {
-    const selected = S.selectedDlTasks.has(t.id) ? ' selected' : '';
-    const time = t.createdAt ? new Date(t.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
-
-    let statusHtml = '';
-    if (t.status === 'pending') {
-      statusHtml = '<span class="dl-status dl-status-pending"><span class="dl-dots">准备</span></span>';
-    } else if (t.status === 'downloading' || t.status === 'merging') {
-      statusHtml = `<span class="dl-status dl-status-active">${Math.round(t.progress || 0)}% ${t.speed ? esc(t.speed) : ''}</span>`;
-    } else if (t.status === 'completed') {
-      statusHtml = '<span class="dl-status dl-status-done">完成</span>';
-    } else if (t.status === 'failed') {
-      statusHtml = '<span class="dl-status dl-status-fail">下载失败</span>';
-    } else if (t.status === 'cancelled') {
-      statusHtml = '<span class="dl-status">已取消</span>';
-    }
-
-    const displayName = t.filename || t.url;
-    const showOpen = t.status === 'completed' && t.outputPath;
-    const showClean = t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled';
-
-    return `<div class="dl-card${selected}" data-dl-id="${esc(t.id)}">
-      <div class="dl-card-head">
-        <span class="dl-card-platform">${esc(t.platform)}</span>
-        <span class="dl-card-name">${esc(displayName)}</span>
-        ${statusHtml}
-        <span class="dl-card-actions">
-          ${showOpen ? `<button class="dl-icon-btn" data-dl-open="${esc(t.id)}" title="打开文件"><span class="icon" data-icon="folderOpen"></span></button>` : ''}
-          ${showClean ? `<button class="dl-icon-btn" data-dl-clean="${esc(t.id)}" title="清理记录"><span class="icon" data-icon="trash"></span></button>` : ''}
-        </span>
-      </div>
-      <div class="dl-card-url">${esc(t.url)}</div>
-      <div class="dl-card-time">${time}</div>
-    </div>`;
-  }).join('');
-
-  injectIcons();
-
-  // 按钮事件
-  cards.querySelectorAll('[data-dl-open]').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const task = S.downloadTasks.find(t => t.id === btn.dataset.dlOpen);
-      if (task?.outputPath) window.antbot.revealInFolder(task.outputPath).catch(() => {});
-    });
-  });
-  cards.querySelectorAll('[data-dl-clean]').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const id = btn.dataset.dlClean;
-      await window.antbot.downloadCleanTask(id);
-      S.downloadTasks = S.downloadTasks.filter(t => t.id !== id);
-      S.selectedDlTasks.delete(id);
-      renderDownloadCards();
-    });
-  });
-
-  // 启动等待动画
-  startDlDotsAnimation();
-
-  // 点击选中（Shift 多选）
-  cards.querySelectorAll('.dl-card').forEach(card => {
-    card.addEventListener('click', (e) => {
-      const id = card.dataset.dlId;
-      if (e.shiftKey) {
-        if (S.selectedDlTasks.has(id)) S.selectedDlTasks.delete(id);
-        else S.selectedDlTasks.add(id);
-      } else {
-        S.selectedDlTasks.clear();
-        S.selectedDlTasks.add(id);
-      }
-      renderDownloadCards();
-    });
-    card.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      // 右键自动选中
-      if (!S.selectedDlTasks.has(card.dataset.dlId)) {
-        S.selectedDlTasks.clear();
-        S.selectedDlTasks.add(card.dataset.dlId);
-        renderDownloadCards();
-      }
-      showDownloadContextMenu(e);
-    });
-  });
-
-  // 批量清理按钮
-  const batchBtn = document.getElementById('dl-batch-clean');
-  if (batchBtn) batchBtn.style.display = hasSelected ? '' : 'none';
-}
-
-// 等待动画：准备. 准备.. 准备...
-let _dlDotsTimer = null;
-function startDlDotsAnimation() {
-  if (_dlDotsTimer) return;
-  let dots = 0;
-  _dlDotsTimer = setInterval(() => {
-    dots = (dots + 1) % 4;
-    document.querySelectorAll('.dl-dots').forEach(el => {
-      el.textContent = '准备' + '.'.repeat(dots || 1);
-    });
-  }, 400);
-}
-
-function showDownloadContextMenu(e) {
-  document.querySelectorAll('.dl-ctx-menu').forEach(m => m.remove());
-  const selectedIds = [...S.selectedDlTasks];
-  if (!selectedIds.length) return;
-
-  const menu = document.createElement('div');
-  menu.className = 'dl-ctx-menu';
-  menu.style.left = e.clientX + 'px';
-  menu.style.top = e.clientY + 'px';
-
-  const items = [];
-  if (selectedIds.length === 1) {
-    const task = S.downloadTasks.find(t => t.id === selectedIds[0]);
-    if (task?.status === 'failed' || task?.status === 'cancelled') {
-      items.push({ label: '重试下载', action: () => window.antbot.downloadRetry(selectedIds[0]) });
-    }
-    if (task?.status === 'downloading' || task?.status === 'merging') {
-      items.push({ label: '取消下载', action: () => window.antbot.downloadCancel(selectedIds[0]) });
-    }
-    if (task?.outputPath) {
-      items.push({ label: '打开文件', action: () => window.antbot.revealInFolder(task.outputPath).catch(() => {}) });
-      items.push({ label: '删除文件', action: async () => {
-        if (!window.confirm(`确认删除文件？`)) return;
-        await window.antbot.downloadDeleteFile(selectedIds[0]);
-        S.downloadTasks = S.downloadTasks.filter(t => t.id !== selectedIds[0]);
-        S.selectedDlTasks.clear();
-        renderDownloadCards();
-      }});
-    }
-  }
-  items.push({ label: `清理${selectedIds.length > 1 ? selectedIds.length + '条' : ''}记录`, action: async () => {
-    for (const id of selectedIds) {
-      await window.antbot.downloadCleanTask(id);
-    }
-    S.downloadTasks = S.downloadTasks.filter(t => !selectedIds.includes(t.id));
-    S.selectedDlTasks.clear();
-    renderDownloadCards();
-  }});
-
-  menu.innerHTML = items.map(i => `<button class="dl-ctx-item">${i.label}</button>`).join('');
-  document.body.appendChild(menu);
-
-  const btns = menu.querySelectorAll('.dl-ctx-item');
-  items.forEach((item, idx) => {
-    btns[idx]?.addEventListener('click', () => { item.action(); menu.remove(); });
-  });
-  const close = (ev) => { if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('click', close); } };
-  setTimeout(() => document.addEventListener('click', close), 0);
-}
-
-function bindDownloadPage() {
-  document.getElementById('dl-install-btn')?.addEventListener('click', async () => {
-    const btn = document.getElementById('dl-install-btn');
-    const hint = document.getElementById('dl-setup-hint');
-    if (btn) { btn.disabled = true; btn.textContent = '安装中...'; }
-    if (hint) hint.textContent = '';
-    try {
-      const r = await window.antbot.downloadInstallYtdlp();
-      if (r.ok) {
-        toast('yt-dlp 安装成功', 'success');
-        document.getElementById('dl-setup')?.classList.add('hidden');
-        document.getElementById('dl-list').style.display = '';
-        await loadDownloadTasks();
-      } else {
-        if (hint) hint.textContent = '安装失败: ' + r.error;
-      }
-    } catch (e) {
-      if (hint) hint.textContent = '安装失败: ' + e.message;
-    }
-    if (btn) { btn.disabled = false; btn.textContent = '一键安装'; }
-  });
-
-  // YouTube login
-  document.getElementById('dl-yt-login-btn')?.addEventListener('click', async () => {
-    const btn = document.getElementById('dl-yt-login-btn');
-    if (btn) { btn.disabled = true; btn.textContent = '请在弹出窗口中登录...'; }
-    try {
-      const r = await window.antbot.downloadLoginYoutube();
-      if (r.ok) {
-        toast(`YouTube 登录成功，已保存 cookies`, 'success');
-        document.getElementById('dl-yt-login')?.classList.add('hidden');
-      } else {
-        toast(r.error || '登录失败', 'error');
-      }
-    } catch (e) { toast('登录失败: ' + e.message, 'error'); }
-    if (btn) { btn.disabled = false; btn.textContent = '登录 YouTube'; }
-  });
-  document.getElementById('dl-yt-skip-btn')?.addEventListener('click', () => {
-    document.getElementById('dl-yt-login')?.classList.add('hidden');
-  });
-
-  // 全选 / 批量清理
-  document.getElementById('dl-select-all')?.addEventListener('click', () => {
-    if (S.selectedDlTasks.size === S.downloadTasks.length) {
-      S.selectedDlTasks.clear();
-    } else {
-      S.downloadTasks.forEach(t => S.selectedDlTasks.add(t.id));
-    }
-    renderDownloadCards();
-  });
-  document.getElementById('dl-batch-clean')?.addEventListener('click', async () => {
-    const ids = [...S.selectedDlTasks];
-    if (!ids.length) return;
-    if (!window.confirm(`确认清理 ${ids.length} 条记录？`)) return;
-    for (const id of ids) {
-      await window.antbot.downloadCleanTask(id);
-    }
-    S.downloadTasks = S.downloadTasks.filter(t => !ids.includes(t.id));
-    S.selectedDlTasks.clear();
-    renderDownloadCards();
-  });
-
-  const input = document.getElementById('dl-input');
-  if (input) {
-    // Auto-resize
-    input.addEventListener('input', () => {
-      input.style.height = 'auto';
-      input.style.height = Math.min(input.scrollHeight, 120) + 'px';
-    });
-    input.addEventListener('keydown', async (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        const text = input.value.trim();
-        if (!text) return;
-        input.disabled = true;
-        try {
-          const r = await window.antbot.downloadAdd(text);
-          if (r.ok) {
-            const count = r.tasks?.length || 0;
-            toast(`已添加 ${count} 个下载任务`, 'success');
-            input.value = '';
-            input.style.height = 'auto';
-          } else {
-            toast(r.error || '添加失败', 'error');
-          }
-        } catch (err) { toast(err.message, 'error'); }
-        input.disabled = false;
-        input.focus();
-      }
-    });
-  }
-}
-
-/* ── Remote Control page ── */
-async function initRemotePage() {
-  const statusText = document.getElementById('remote-status-text');
-  const urlEl = document.getElementById('remote-url');
-  const toggle = document.getElementById('remote-toggle');
-  const toggleText = document.getElementById('remote-toggle-text');
-  const passwordEl = document.getElementById('remote-password');
-  const deviceNameEl = document.getElementById('remote-device-name');
-  const copyBtn = document.getElementById('remote-copy-btn');
-  const saveBtn = document.getElementById('remote-save-btn');
-  const qrRow = document.getElementById('remote-qr-row');
-  const qrCode = document.getElementById('remote-qr-code');
-  const passToggle = document.getElementById('remote-pass-toggle');
-  const autoToggle = document.getElementById('remote-auto-toggle');
-
-  let currentUrl = '';
-
-  // 加载当前设置
-  try {
-    const creds = await window.antbot.remoteGetCredentials();
-    if (passwordEl) passwordEl.value = creds.password || '';
-    if (deviceNameEl) deviceNameEl.value = creds.deviceName || '';
-    if (autoToggle && creds.autoStart) autoToggle.classList.add('on');
-  } catch {}
-
-  // 检查当前状态
-  try {
-    const status = await window.antbot.remoteStatus();
-    if (status.serverRunning) {
-      toggle?.classList.add('on');
-      toggleText.textContent = '已启用';
-      statusText.textContent = status.tunnel?.running ? '已连接' : '服务已启动';
-      if (status.tunnel?.url) {
-        currentUrl = 'https://hub.onebugmanai.online';
-        urlEl.textContent = currentUrl;
-        copyBtn.style.display = '';
-        showQrCode(currentUrl);
-      }
-    }
-  } catch {}
-
-  // 密码显示/隐藏
-  passToggle?.addEventListener('click', () => {
-    const isPassword = passwordEl.type === 'password';
-    passwordEl.type = isPassword ? 'text' : 'password';
-    passToggle.querySelector('.icon').dataset.icon = isPassword ? 'eyeOff' : 'eye';
-    injectIcons();
-  });
-
-  // 自动启动开关
-  autoToggle?.addEventListener('click', async () => {
-    const isOn = autoToggle.classList.toggle('on');
-    await window.antbot.remoteUpdateCredentials({ autoStart: isOn });
-    toast(isOn ? '已开启自动启动' : '已关闭自动启动', 'info');
-  });
-
-  // 保存并启用按钮
-  saveBtn?.addEventListener('click', async () => {
-    const password = passwordEl?.value?.trim();
-    const deviceName = deviceNameEl?.value?.trim() || '';
-    if (!password) { toast('请设置密码', 'error'); return; }
-
-    saveBtn.disabled = true;
-    saveBtn.textContent = '启动中...';
-    toggleText.textContent = '启动中...';
-
-    try {
-      const r = await window.antbot.remoteStart({ password, deviceName });
-      if (!r.ok) { toast(r.error, 'error'); toggleText.textContent = '关闭'; saveBtn.disabled = false; saveBtn.textContent = '保存并启用'; return; }
-
-      // 启动 tunnel
-      statusText.textContent = '正在连接 Cloudflare...';
-      const t = await window.antbot.remoteStartTunnel();
-      if (t.ok) {
-        toggle.classList.add('on');
-        toggleText.textContent = '已启用';
-        statusText.textContent = '已连接';
-        currentUrl = 'https://hub.onebugmanai.online';
-        urlEl.textContent = currentUrl;
-        copyBtn.style.display = '';
-        showQrCode(currentUrl);
-        toast('远程访问已启动', 'success');
-      } else {
-        statusText.textContent = '服务已启动（隧道连接失败）';
-        toast('Tunnel 启动失败: ' + t.error, 'error');
-      }
-    } catch (e) {
-      toggleText.textContent = '关闭';
-      toast('启动失败: ' + e.message, 'error');
-    }
-    saveBtn.disabled = false;
-    saveBtn.textContent = '保存并启用';
-  });
-
-  // 复制链接
-  copyBtn?.addEventListener('click', () => {
-    if (currentUrl) {
-      navigator.clipboard.writeText(currentUrl).then(() => {
-        copyBtn.textContent = '已复制';
-        setTimeout(() => { copyBtn.textContent = '复制'; }, 1500);
-      }).catch(() => toast('复制失败', 'error'));
-    }
-  });
-
-  // 开关切换（仅关闭）
-  toggle?.addEventListener('click', async () => {
-    if (!toggle.classList.contains('on')) return; // 开启通过保存按钮
-    await window.antbot.remoteStop();
-    toggle.classList.remove('on');
-    toggleText.textContent = '关闭';
-    statusText.textContent = '未启动';
-    urlEl.textContent = '-';
-    currentUrl = '';
-    copyBtn.style.display = 'none';
-    qrRow.style.display = 'none';
-    toast('远程访问已关闭', 'info');
-  });
-
-  // 生成二维码
-  function showQrCode(url) {
-    if (!qrCode || !qrRow) return;
-    window.antbot.remoteGenerateQr(url).then(result => {
-      if (result.ok && result.dataUrl) {
-        qrCode.innerHTML = `<img src="${result.dataUrl}" style="width:140px;height:140px;border-radius:var(--radius)" alt="扫码访问" />`;
-        qrRow.style.display = '';
-      }
-    }).catch(() => {});
-  }
-
-  // 监听 tunnel URL 更新
-  window.antbot.onRemoteTunnelUrl?.((url) => {
-    if (url) {
-      currentUrl = 'https://hub.onebugmanai.online';
-      urlEl.textContent = currentUrl;
-      copyBtn.style.display = '';
-      showQrCode(currentUrl);
-    }
-  });
-  window.antbot.onRemoteTunnelStatus?.((s) => {
-    if (statusText) statusText.textContent = s.status === 'running' ? '已连接' : s.status === 'starting' ? '连接中...' : '未连接';
-  });
-}
-
-
-/* ── Update Page ── */
-async function initUpdatePage() {
-  // 加载各组件当前版本
-  const [appV, pluginV, remoteV] = await Promise.all([
-    window.antbot.getAppVersion?.().catch(()=>null),
-    window.antbot.getPluginVersion?.().catch(()=>null),
-    window.antbot.remoteGetLocalVersion?.().catch(()=>null),
-  ]);
-  const $t = (id) => document.getElementById(id);
-  if($t('upd-app-current')) $t('upd-app-current').textContent = appV?.version || '-';
-  if($t('upd-plugin-current')) $t('upd-plugin-current').textContent = pluginV?.version || '-';
-  if($t('upd-remote-current')) $t('upd-remote-current').textContent = remoteV?.version || '-';
-
-  setupUpdater('plugin', {
-    checkFn: async () => {
-      const r = await window.antbot.checkAllUpdates();
-      return r?.plugin || {hasUpdate: false};
-    },
-    downloadFn: async (url) => window.antbot.downloadPluginUpdate(url),
-    installFn: async (zip, result) => window.antbot.installPluginUpdate(zip, result?.latestVersion),
-    noRestart: true,
-  });
-  setupUpdater('remote', {
-    checkFn: async () => {
-      const r = await window.antbot.remoteCheckUpdate?.();
-      return r || {hasUpdate: false};
-    },
-    downloadFn: async () => window.antbot.remoteDoUpdate?.(),
-    installFn: null,
-    noRestart: true,
-  });
-  setupUpdater('app', {
-    checkFn: async () => {
-      const r = await window.antbot.checkAllUpdates();
-      return r?.app || {hasUpdate: false};
-    },
-    downloadFn: async (url) => window.antbot.downloadAppUpdate(url),
-    installFn: async (zip, result) => window.antbot.installAppUpdate(zip, result?.latestVersion),
-    noRestart: false,
-  });
-
-  // 浏览器插件位置按钮
-  const pluginDirBtn = document.getElementById('upd-plugin-dir-btn');
-  if (pluginDirBtn && !pluginDirBtn._bound) {
-    pluginDirBtn._bound = true;
-    pluginDirBtn.addEventListener('click', async () => {
-      try { await window.antbot.openPluginDir(); }
-      catch (e) { toast('打开失败: ' + e.message, 'error'); }
-    });
-  }
-
-  // 打开下载目录按钮
-  const appDirBtn = document.getElementById('upd-app-dir-btn');
-  if (appDirBtn && !appDirBtn._bound) {
-    appDirBtn._bound = true;
-    appDirBtn.addEventListener('click', async () => {
-      try { await window.antbot.openDir(require('path').join(require('os').homedir(), 'Downloads')); }
-      catch (e) { toast('打开失败: ' + e.message, 'error'); }
-    });
-  }
-}
-
-function setupUpdater(key, { checkFn, downloadFn, installFn, noRestart }) {
-  const $t = (id) => document.getElementById(id);
-  const checkBtn = $t(`upd-${key}-check-btn`);
-  if (!checkBtn || checkBtn._bound) return;
-  checkBtn._bound = true;
-
-  function log(msg, type='') {
-    const el = $t(`upd-${key}-log`);
-    if (!el) return;
-    const line = document.createElement('div');
-    if (type) line.className = `log-${type}`;
-    line.textContent = msg;
-    el.appendChild(line);
-    el.scrollTop = el.scrollHeight;
-  }
-
-  function setProgress(pct, text) {
-    const bar = $t(`upd-${key}-bar`);
-    const txt = $t(`upd-${key}-progress-text`);
-    const wrap = $t(`upd-${key}-progress`);
-    if (wrap) wrap.classList.remove('hidden');
-    if (bar) { bar.style.width = pct + '%'; bar.style.background = ''; }
-    if (txt) txt.textContent = text || pct + '%';
-  }
-
-  function hideProgress() {
-    $t(`upd-${key}-progress`)?.classList.add('hidden');
-    const bar = $t(`upd-${key}-bar`);
-    if (bar) { bar.style.width = '0%'; bar.style.background = ''; }
-  }
-
-  function resetUI(newVersion) {
-    hideProgress();
-    $t(`upd-${key}-actions`)?.classList.add('hidden');
-    $t(`upd-${key}-changelog`)?.classList.add('hidden');
-    $t(`upd-${key}-latest-label`)?.style.setProperty('display','none');
-    $t(`upd-${key}-latest`)?.style.setProperty('display','none');
-    if (newVersion) { const curEl = $t(`upd-${key}-current`); if (curEl) curEl.textContent = newVersion; }
-    const dlBtn = $t(`upd-${key}-download-btn`);
-    if (dlBtn) { dlBtn.disabled = false; dlBtn.textContent = '下载并安装'; dlBtn._bound = false; }
-    checkBtn.disabled = false;
-    checkBtn.textContent = '检查更新';
-  }
-
-  checkBtn.addEventListener('click', async () => {
-    checkBtn.disabled = true;
-    checkBtn.textContent = '检查中...';
-    $t(`upd-${key}-log`).innerHTML = '';
-    $t(`upd-${key}-changelog`)?.classList.add('hidden');
-    $t(`upd-${key}-actions`)?.classList.add('hidden');
-    $t(`upd-${key}-latest-label`)?.style.setProperty('display','none');
-    $t(`upd-${key}-latest`)?.style.setProperty('display','none');
-    hideProgress();
-
-    try {
-      const result = await checkFn();
-      if (result.hasUpdate) {
-        const latestEl = $t(`upd-${key}-latest`);
-        const latestLbl = $t(`upd-${key}-latest-label`);
-        if (latestEl) { latestEl.textContent = result.latestVersion || result.remoteVersion || ''; latestEl.style.display = ''; }
-        if (latestLbl) latestLbl.style.display = '';
-        if (result.changelog) {
-          const cl = $t(`upd-${key}-changelog`);
-          if (cl) { cl.textContent = result.changelog.replace(/\\n/g, '\n'); cl.classList.remove('hidden'); }
-        }
-        const sizeEl = $t(`upd-${key}-size`);
-        if (sizeEl && result.fileSize) sizeEl.textContent = (result.fileSize/1024/1024).toFixed(1) + ' MB';
-        $t(`upd-${key}-actions`)?.classList.remove('hidden');
-        log(`发现新版本 ${result.latestVersion || result.remoteVersion}`, 'success');
-        checkBtn.disabled = false;
-        checkBtn.textContent = '重新检查';
-
-        // 绑定下载按钮（每次检查更新重新绑定）
-        const dlBtn = $t(`upd-${key}-download-btn`);
-        if (dlBtn) {
-          dlBtn.disabled = false;
-          const newBtn = dlBtn.cloneNode(true);
-          dlBtn.parentNode.replaceChild(newBtn, dlBtn);
-
-          // Windows: 跳转浏览器下载
-          if (result.openBrowser && result.releaseUrl) {
-            newBtn.textContent = '前往下载';
-            newBtn.addEventListener('click', async () => {
-              try {
-                await window.antbot.openExternal(result.releaseUrl);
-                log('已打开下载页面，请下载后手动安装', 'info');
-                toast('已打开浏览器，请下载新版本后手动安装', 'info');
-              } catch (e) { toast('打开浏览器失败: ' + e.message, 'error'); }
-            });
-          } else {
-          newBtn.textContent = '下载并安装';
-          newBtn.addEventListener('click', async () => {
-            newBtn.disabled = true;
-            newBtn.textContent = '下载中...';
-            setProgress(0, '准备下载...');
-            log('开始下载...');
-
-            // 添加取消按钮
-            const cancelBtn = document.createElement('button');
-            cancelBtn.className = 'btn btn-ghost btn-sm';
-            cancelBtn.textContent = '取消';
-            cancelBtn.style.cssText = 'margin-left:8px';
-            newBtn.parentNode.appendChild(cancelBtn);
-
-            let cancelled = false;
-            cancelBtn.addEventListener('click', async () => {
-              cancelled = true;
-              await window.antbot.cancelDownload?.();
-              cancelBtn.remove();
-              hideProgress();
-              newBtn.disabled = false;
-              newBtn.textContent = '下载并安装';
-              log('已取消下载');
-              toast('已取消更新', 'info');
-            });
-
-            try {
-              const removeListener = window.antbot.onUpdateProgress?.((p) => {
-                if (p.key === key && typeof p.percent === 'number') {
-                  let label = p.percent.toFixed(1) + '%';
-                  if (p.speedText) label = p.speedText + ' · ' + (p.downloadedText || '');
-                  if (p.totalText) label += ' / ' + p.totalText;
-                  setProgress(Math.min(99, p.percent), label);
-                }
-              });
-
-              let zipPath = null;
-              const newVer = result.latestVersion || result.remoteVersion || '';
-
-              if (key === 'remote') {
-                const r = await downloadFn(result.downloadUrl || newVer);
-                if (removeListener) removeListener();
-                cancelBtn?.remove();
-                if (r?.ok) {
-                  log('远程页面已更新', 'success');
-                  resetUI(r.version || newVer);
-                  toast('远程页面已更新', 'success');
-                } else {
-                  throw new Error(r?.error || '更新失败');
-                }
-              } else {
-                const dlResult = await downloadFn(result.downloadUrl);
-                if (removeListener) removeListener();
-                cancelBtn?.remove();
-                if (!dlResult?.ok && !dlResult?.zipPath) throw new Error(dlResult?.error || '下载失败');
-                zipPath = dlResult?.zipPath || dlResult;
-                setProgress(95, '安装中...');
-                log('下载完成，正在安装...');
-
-                if (installFn) {
-                  const installResult = await installFn(zipPath, result);
-                  if (!installResult?.ok) throw new Error(installResult?.error || '安装失败');
-                  log('已解压到下载目录', 'success');
-
-                  if (!noRestart && installResult.appPath) {
-                    resetUI(newVer);
-                    showDownloadCompleteDialog(installResult.appPath, installResult.appDir);
-                  } else {
-                    resetUI(newVer);
-                    toast('更新成功', 'success');
-                  }
-                }
-              }
-            } catch (e) {
-              cancelBtn?.remove();
-              if (cancelled) return;
-              const bar = $t(`upd-${key}-bar`);
-              if (bar) bar.style.background = 'var(--destructive)';
-              setProgress(0, '失败');
-              log('失败: ' + e.message, 'error');
-              newBtn.disabled = false;
-              newBtn.textContent = '重试';
-            }
-          });
-          } // end else (not openBrowser)
-        }
-      } else {
-        log('已是最新版本', 'success');
-        checkBtn.disabled = false;
-        checkBtn.textContent = '检查更新';
-      }
-    } catch (e) {
-      log('检查失败: ' + e.message, 'error');
-      checkBtn.disabled = false;
-      checkBtn.textContent = '检查更新';
-    }
-  });
-}
-
-function showDownloadCompleteDialog(appPath, appDir) {
-  const old = document.getElementById('app-restart-overlay');
-  if (old) old.remove();
-  const appName = appPath.split('/').pop() || '搬运蚁.app';
-  const overlay = document.createElement('div');
-  overlay.id = 'app-restart-overlay';
-  overlay.className = 'update-restart-overlay';
-  overlay.innerHTML = `<div class="update-restart-box">
-    <h3>更新已下载</h3>
-    <p>新版本已解压到下载目录。<br><br><strong>操作步骤：</strong><br>1. 关闭当前 App<br>2. 打开下载目录，将 <strong>${appName}</strong> 拖到原 App 位置替换<br>3. 重新打开 App</p>
-    <div class="update-restart-actions">
-      <button id="restart-later-btn" class="btn btn-ghost">稍后</button>
-      <button id="restart-open-btn" class="btn btn-primary">打开下载目录</button>
-    </div>
-  </div>`;
-  document.body.appendChild(overlay);
-  document.getElementById('restart-later-btn').addEventListener('click', () => overlay.remove());
-  document.getElementById('restart-open-btn').addEventListener('click', async () => {
-    try { await window.antbot.openDir(appDir || appPath.substring(0, appPath.lastIndexOf('/'))); } catch {}
-    overlay.remove();
-  });
-}
-
-
-/* ── Batch Clone Voices ── */
-window.batchCloneVoices = async function() {
-  const dir = '/Users/chenxincheng/导出目录/音色';
-  const refText = '生活总在催促我们奔赴前路，我们步履匆匆，追赶时间、奔赴目标，常常在喧嚣里弄丢了平和的自己。其实，人生最珍贵的美好，从不在疾驰的前路，而在细碎温柔的日常里。晨起推开窗，清风裹挟着草木的清香扑面而来，枝头鸟鸣清脆，晨光温柔洒落，驱散一夜的疲惫。午后静坐窗边，泡一杯温热的茶，翻几页闲书，任由时光缓缓流淌。没有琐事的叨扰，没有浮躁的焦虑，这一刻的松弛，便是生活最好的馈赠。';
-  const files = ['TVB女生（内置）.mp3','乌萨奇（内置）.mp3','奶龙（内置）.mp3','小姐姐（内置）.mp3','懒羊羊（内置）.mp3','曼波（内置）.mp3','熊二（内置）.mp3','猪妞（内置）.mp3','蜡笔小新（内置）.mp3','解说小帅（内置）.mp3'];
-  const voices = files.map(f => ({ name: f.replace('.mp3','').replace('（内置）',''), path: dir + '/' + f }));
-
-  const stopListener = window.antbot.onVoiceBatchProgress((p) => {
-    if (p.status === 'done') {
-      console.log('========== 批量克隆完成 ==========');
-      (p.results||[]).forEach(r => console.log(r.ok ? `✅ ${r.name}` : `❌ ${r.name}: ${r.error}`));
-      toast('批量克隆完成', 'success');
-    } else {
-      console.log(`[${p.done+1}/${p.total}] ${p.name} - ${p.step || '处理中'}...`);
-    }
-  });
-
-  toast('开始批量克隆 10 个音色...', 'info');
-  try {
-    const results = await window.antbot.batchCloneVoices({ voices, refText });
-    return results;
-  } catch(e) {
-    toast('批量克隆失败: ' + e.message, 'error');
-  } finally {
-    stopListener?.();
-  }
-};
-console.log('💡 输入 batchCloneVoices() 开始批量克隆 10 个音色');
 
 /* ── Init ── */
 async function init(){

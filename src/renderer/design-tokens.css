@@ -1,7 +1,6 @@
 /**
- * AntBot Design Token System
- * Based on shadcn/ui design principles
- * Theme: Teal (#0D9488)
+ * AntBot Design Token System — Teal accent
+ * Auto light/dark based on system preference
  */
 
 :root {
@@ -95,27 +94,27 @@
   --titlebar-h:            52px;
 }
 
-/* ── 暗色模式 (class-based) ── */
+/* ── 暗色模式 ── */
 .dark {
   color-scheme: dark;
 
-  --background:            #09090B;
+  --background:            #111113;
   --foreground:            #FAFAFA;
 
-  --card:                  #111113;
+  --card:                  #1A1A1E;
   --card-foreground:       #FAFAFA;
 
-  --popover:               #111113;
+  --popover:               #1A1A1E;
   --popover-foreground:    #FAFAFA;
 
   --primary:               #5EEAD4;
   --primary-hover:         #99F6E4;
   --primary-foreground:    #042F2E;
 
-  --secondary:             #1C1C1F;
+  --secondary:             #27272A;
   --secondary-foreground:  #FAFAFA;
 
-  --muted:                 #1C1C1F;
+  --muted:                 #27272A;
   --muted-foreground:      #A1A1AA;
 
   --accent:                #134E4A;
@@ -126,7 +125,7 @@
   --success:               #22C55E;
   --success-foreground:    #FFFFFF;
   --warning:               #F59E0B;
-  --warning-foreground:    #FFFFFF;
+  --warning-foreground:    #0A0A0A;
   --info:                  #3B82F6;
   --info-foreground:       #FFFFFF;
 
@@ -135,8 +134,8 @@
   --warning-bg:            #451A03;
   --info-bg:               #172554;
 
-  --border:                #27272A;
-  --input:                 #27272A;
+  --border:                #2E2E32;
+  --input:                 #2E2E32;
   --ring:                  #5EEAD4;
 
   --shadow-xs:             0 1px 2px rgba(0,0,0,0.2);
@@ -144,28 +143,4 @@
   --shadow:                0 4px 6px -1px rgba(0,0,0,0.35), 0 2px 4px -2px rgba(0,0,0,0.25);
   --shadow-md:             0 10px 15px -3px rgba(0,0,0,0.4), 0 4px 6px -4px rgba(0,0,0,0.3);
   --shadow-lg:             0 20px 25px -5px rgba(0,0,0,0.5), 0 8px 10px -6px rgba(0,0,0,0.35);
-}
-
-/* ── 向后兼容别名 (迁移期间) ── */
-:root {
-  --brand:                 var(--primary);
-  --brand-hover:           var(--primary-hover);
-  --brand-bg:              var(--accent);
-  --bg:                    var(--background);
-  --surface:               var(--card);
-  --s-soft:                var(--secondary);
-  --s-muted:               var(--muted);
-  --text:                  var(--foreground);
-  --t2:                    var(--muted-foreground);
-  --t3:                    color-mix(in srgb, var(--muted-foreground) 60%, transparent);
-  --green:                 var(--success);
-  --green-bg:              var(--success-bg);
-  --red:                   var(--destructive);
-  --red-bg:                var(--destructive-bg);
-  --amber:                 var(--warning);
-  --amber-bg:              var(--warning-bg);
-  --border-s:              color-mix(in srgb, var(--border) 70%, var(--foreground));
-  --r-sm:                  var(--radius-sm);
-  --r-md:                  var(--radius-lg);
-  --r-lg:                  var(--radius-xl);
 }

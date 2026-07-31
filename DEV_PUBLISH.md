@@ -79,11 +79,6 @@ Chrome 插件 content scripts (douyin.js / weixin.js)
 - `local-server/bridgeQueue.js` — 新增桥接队列模块
 - `local-server/tests/bridgeQueue.test.js` — 队列测试
 
-### Windows 打包同步
-- `win_app/assets/` 下所有 chrome-extension 和 local-server 文件已同步
-- `win_app/pubspec.yaml` 新增 `bridgeQueue.js`
-- `win_app/lib/main.dart` 资源列表新增 `bridgeQueue.js`
-
 ## 支持的桥接命令
 
 | 命令 | 说明 |

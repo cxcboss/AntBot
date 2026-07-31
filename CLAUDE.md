@@ -20,11 +20,15 @@ The `postinstall` hook runs `playwright install chromium`. The build script runs
 ## Architecture
 
 **Electron two-process model:**
-- **Main process** (`src/main/`) — all business logic, IPC handlers, service modules
+- **Main process** (`src/main/`) — business logic, IPC handlers, service modules
+  - `ipc.js` — IPC 注册中心，委托给 `ipc/*.js` 子模块
+  - `ipc/` — 按功能域拆分的 IPC handler 模块（voicebox, download, edit, publish, remote, updates, models, library）
 - **Renderer** (`src/renderer/`) — UI only, communicates via `window.antbot` bridge
+  - `app.js` — 核心状态、主控页面、事件绑定，委托给 `app/*.js` 子模块
+  - `app/` — 按页面拆分的 ES 模块（download-page, publish-page, remote-page, update-page）
 - **Preload** (`src/main/preload.js`) — `contextBridge.exposeInMainWorld('antbot', {...})` maps IPC channels
 
-**IPC pattern:** Renderer calls `window.antbot.methodName()` → `ipcRenderer.invoke(channel)` → `ipcMain.handle(channel)` in `ipc.js`. Push events: `webContents.send(channel)` → `ipcRenderer.on(channel)` via preload `on()` helper.
+**IPC pattern:** Renderer calls `window.antbot.methodName()` → `ipcRenderer.invoke(channel)` → `ipcMain.handle(channel)` in `ipc.js` or `ipc/*.js` sub-modules. Push events: `webContents.send(channel)` → `ipcRenderer.on(channel)` via preload `on()` helper.
 
 **Smart edit pipeline (two-phase):**
 ```

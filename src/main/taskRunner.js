@@ -3,7 +3,7 @@ const path = require('node:path');
 const os = require('node:os');
 const { app } = require('electron');
 const { STEP_NAMES } = require('./services/config');
-const { ensureDir, getDaySequence, buildTaskBaseName, buildOutputPath, buildPreciseTimestamp } = require('./services/fileUtil');
+const { ensureDir, getDaySequence, buildTaskBaseName } = require('./services/fileUtil');
 const { downloadVideo } = require('./services/downloader');
 const { prepareEditVideo, composeEditVideo } = require('./services/smartEditor');
 const { publishVideo } = require('./services/publisher');
@@ -848,17 +848,64 @@ class TaskRunner {
           return { status: 'failed', retryable: true };
         }
 
-        // 检查下载结果
+        // 检查下载结果（重试时如果之前下载成功则跳过）
         const dlResult = downloadResults.get(task.id);
-        if (!dlResult || dlResult.error) {
-          const errMsg = dlResult?.error?.message || '视频下载失败';
-          this.setTaskState(task.id, { status: 'failed', step: '失败', message: errMsg, attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit });
-          runRecord.items.push(this.buildRunItem(job, task, row, 'failed', { message: errMsg, finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, retryable: false }));
-          return { status: 'failed', retryable: false };
+        const hasExistingOutput = dlResult?.outputPath && !dlResult?.error;
+        if (!hasExistingOutput && (!dlResult || dlResult.error)) {
+          // 重试时重新下载
+          if (attemptIndex > 0 && (!dlResult || dlResult.error)) {
+            try {
+              this.setTaskState(task.id, { status: 'running', progress: 10, step: '重新下载', message: `重试: 重新下载...` });
+              const baseName = task._baseName || buildTaskBaseName(task, 0, new Date());
+              const redlResult = await downloadVideo({ task, settings, baseName, tempDir: mainControlCacheDir, log: (msg) => this.log(task.id, msg) });
+              downloadResults.set(task.id, redlResult);
+            } catch (redlErr) {
+              downloadResults.set(task.id, { error: redlErr });
+              const errMsg = redlErr.message || '视频下载失败';
+              this.setTaskState(task.id, { status: 'failed', step: '失败', message: errMsg, attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit });
+              runRecord.items.push(this.buildRunItem(job, task, row, 'failed', { message: errMsg, finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, retryable: !task.__stopped }));
+              return { status: 'failed', retryable: !task.__stopped };
+            }
+          } else {
+            const errMsg = dlResult?.error?.message || '视频下载失败';
+            this.setTaskState(task.id, { status: 'failed', step: '失败', message: errMsg, attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit });
+            runRecord.items.push(this.buildRunItem(job, task, row, 'failed', { message: errMsg, finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, retryable: !task.__stopped }));
+            return { status: 'failed', retryable: !task.__stopped };
+          }
         }
 
         this.currentTaskId = task.id;
-        this.setTaskState(task.id, { status: 'running', progress: 30, step: '字幕生成', message: attemptIndex > 0 ? `重试中（第${attemptIndex}次）` : '正在生成字幕...', attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit });
+        const publishOnlyRetry = attemptIndex > 0 && task._outPath && await this.fileExists(task._outPath);
+        if (publishOnlyRetry) {
+          this.log(task.id, '视频已生成，跳过下载和编辑，直接重试发布');
+        }
+        this.setTaskState(task.id, { status: 'running', progress: publishOnlyRetry ? 80 : 30, step: publishOnlyRetry ? '重新发布' : '字幕生成', message: attemptIndex > 0 ? `重试中（第${attemptIndex}次）` : '正在生成字幕...', attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit });
+
+        if (publishOnlyRetry) {
+          // 发布重试：直接跳到发布步骤
+          const outPath = task._outPath;
+          const publishEnabled = settings?.publish?.enabled !== false;
+          try {
+            let publishResult = null;
+            if (publishEnabled) {
+              publishResult = await publishVideo({ task, settings, outputPath: outPath, log: (msg) => this.log(task.id, msg) });
+            }
+            const publishedPlatforms = publishResult?.platforms || [];
+            const platformNames = publishedPlatforms.map(p => p === 'videoChannel' ? '视频号' : '抖音').join('、');
+            const completionMsg = platformNames ? `已发布到 ${platformNames}` : '任务完成';
+            this.setTaskState(task.id, { status: 'completed', progress: 100, step: '完成', message: completionMsg, attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit, outputPath: outPath });
+            this.savePersistedTask(this.progressRows.find(r => r.id === task.id));
+            runRecord.items.push(this.buildRunItem(job, task, row, 'completed', { outputPath: outPath, publishedPlatforms, publishMode: publishResult?.mode || '', finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex }));
+            if (publishEnabled && publishedPlatforms.length) {
+              publishedRecords.push({ userId: job.userId, userName: job.userName, taskName: row.taskName, outputPath: outPath, publishAt: nowIso(), publishedPlatforms, publishMode: publishResult?.mode || '', completedAt: nowIso(), runId: this.runId });
+            }
+            return { status: 'completed', retryable: false };
+          } catch (pubErr) {
+            this.setTaskState(task.id, { status: 'failed', step: '发布失败', message: pubErr.message, attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit, outputPath: outPath });
+            runRecord.items.push(this.buildRunItem(job, task, row, 'failed', { message: pubErr.message, finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, retryable: true }));
+            return { status: 'failed', retryable: true };
+          }
+        }
 
         const baseName = task._baseName;
         let outDir = '';
@@ -948,6 +995,7 @@ class TaskRunner {
             })
           }), 75);
           editCompleted = true;
+          task._outPath = outPath; // 保存路径供发布重试使用
 
           let publishResult = null;
           if (publishEnabled) {
@@ -1039,8 +1087,8 @@ class TaskRunner {
             this.log(task.id, `发布失败但视频已生成: ${error.message}`, 'warn');
             this.setTaskState(task.id, { status: 'warning', progress: 100, step: '部分完成', message: publishEnabled ? `发布失败: ${error.message}` : '成品视频已输出', attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit, outputPath: outPath });
             this.savePersistedTask(this.progressRows.find(r => r.id === task.id));
-            runRecord.items.push(this.buildRunItem(job, task, row, 'completed', { outputPath: outPath, publishAt: task.publishAt ? task.publishAt.toISOString() : '', publishedPlatforms: [], publishMode: publishEnabled ? 'failed' : 'disabled', finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, message: publishEnabled ? '发布失败，但视频已生成' : '成品视频已输出' }));
-            return { status: 'completed', retryable: false };
+            runRecord.items.push(this.buildRunItem(job, task, row, 'warning', { outputPath: outPath, publishAt: task.publishAt ? task.publishAt.toISOString() : '', publishedPlatforms: [], publishMode: publishEnabled ? 'failed' : 'disabled', finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, message: publishEnabled ? '发布失败，但视频已生成' : '成品视频已输出', retryable: publishEnabled }));
+            return { status: publishEnabled ? 'failed' : 'completed', retryable: publishEnabled };
           }
 
           const isStopped = task.__stopped || (this.stopRequested && this.currentTaskId === task.id);

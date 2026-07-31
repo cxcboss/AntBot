@@ -4,7 +4,6 @@ const path = require('node:path');
 const os = require('node:os');
 const { spawn } = require('node:child_process');
 const { editVideo } = require('./editor');
-const { shutdownVoicebox } = require('./autoDubClient');
 const { recordUsage } = require('./usageTracker');
 const { createClipArtifactManager } = require('./clipArtifacts');
 const { resolveDependencyPath } = require('./dependencyManager');
@@ -1164,7 +1163,6 @@ async function composeEditVideo({
           gpuMode,
         },
         paths: { editProjectPath: '' },
-        commands: {},
       },
       inputVideoPath: videoPath,
       subtitlePath: srtPath,

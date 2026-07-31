@@ -16,8 +16,10 @@ assets/icon-build\ 2.iconset
 .DS_Store
 *.log
 src/main/**/tmp
+src/renderer/output.css
 vendors/ms-playwright/*
 !vendors/ms-playwright/.gitkeep
+vendors/auto_dub_web/.voicebox-setup-done
 clients/antbot_flutter/build
 clients/antbot_flutter/.dart_tool
 clients/antbot_flutter/macos/Flutter/ephemeral

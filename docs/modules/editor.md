@@ -12,17 +12,16 @@
 参数：`{ task, settings, inputVideoPath, subtitlePath, outputPath, log }`
 
 **流程：**
-1. 如果配置了自定义剪辑命令 → 执行命令
-2. 否则找到 auto_dub_web → 调用 `processWithAutoDub()`
-3. 都没有 → 直接复制视频（占位模式）
+1. 校验视频、字幕和输出路径
+2. 找到 auto_dub_web → 调用 `processWithAutoDub()`
+3. 未找到 auto_dub_web → 直接复制视频（占位模式）
 
 **settings 结构：**
 ```js
 {
   style: { voiceoverEnabled, subtitleEnabled, voiceSpeed, subtitleTextColor, subtitleStrokeColor, subtitlePositionPercent },
   voiceClone: { voiceId, profileName, samplePath, referenceText, language },
-  paths: { editProjectPath },
-  commands: { edit }
+  paths: { editProjectPath }
 }
 ```
 
@@ -30,7 +29,6 @@
 
 - 被 `smartEditor.composeEditVideo()` 调用
 - 调用 `autoDubClient.processWithAutoDub()` 执行实际合成
-- 调用 `commandRunner.runCommand()` 执行自定义命令
 
 ## 注意事项
 

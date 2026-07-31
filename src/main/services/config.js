@@ -94,9 +94,7 @@ const BASE_DEFAULT_SETTINGS = {
       timeoutMs: 30 * 60 * 1000
     }
   },
-  subtitle: {
-    geminiUrl: ''
-  },
+  subtitle: {},
   retry: {
     failedTaskRetries: 0
   },
@@ -120,13 +118,6 @@ const BASE_DEFAULT_SETTINGS = {
     subtitleEnabled: true,
     voiceoverEnabled: true
   },
-  commands: {
-    download: '',
-    gemini: '',
-    edit: '',
-    publish: '',
-    voiceClone: ''
-  },
   voiceClone: {
     voiceId: '',
     modelPath: '',
@@ -144,6 +135,9 @@ const BASE_DEFAULT_SETTINGS = {
     modelId: '',
     availableModels: []
   },
+  models: {
+    useHfMirror: false
+  },
   loginHints: {
     videoChannel: {
       url: 'https://channels.weixin.qq.com',
@@ -152,11 +146,6 @@ const BASE_DEFAULT_SETTINGS = {
     douyin: {
       url: 'https://creator.douyin.com',
       loginKeywords: ['登录', '抖音号登录', '扫码']
-    },
-    gemini: {
-      url: 'https://gemini.google.com',
-      loginKeywords: ['Sign in', '登录', 'Google'],
-      skipStartupCheck: true
     }
   }
 };
@@ -229,13 +218,6 @@ function getSettingsOverridesFromEnv() {
   if (failedTaskRetriesRaw) {
     overrides.retry = {
       failedTaskRetries: parseNumberEnv(failedTaskRetriesRaw, 0, 0, 20)
-    };
-  }
-
-  const geminiUrl = String(process.env.ANTBOT_GEMINI_URL || '').trim();
-  if (geminiUrl) {
-    overrides.subtitle = {
-      geminiUrl
     };
   }
 

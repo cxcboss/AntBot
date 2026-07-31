@@ -56,10 +56,6 @@ async function runVoiceClone(payload, settings, log = () => {}) {
     progress
   });
 
-  if (settings.commands.voiceClone) {
-    logger('已配置“语音克隆命令”，当前优先使用内置 Voicebox 克隆流程。');
-  }
-
   progress({
     status: 'running',
     step: '保存结果',

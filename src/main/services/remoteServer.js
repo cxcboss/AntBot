@@ -69,7 +69,7 @@ async function getStatus() {
     taskCount: tasks.length,
     tasks: tasks.map(t => ({
       id: t.id,
-      name: t.taskName || t.isOriginal ? '原创' : '任务',
+      name: t.taskName || (t.isOriginal ? '原创' : '任务'),
       status: t.status,
       progress: t.progress,
       step: t.step,

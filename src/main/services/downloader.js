@@ -1,7 +1,7 @@
 const path = require('node:path');
 const fs = require('node:fs/promises');
 const os = require('node:os');
-const { runCommand, runCommandArgs } = require('./commandRunner');
+const { runCommandArgs } = require('./commandRunner');
 const { ensureWindowsDependency, getManagedBinDir } = require('./dependencyManager');
 
 const DOWNLOAD_TIMEOUT_MS = 30 * 60 * 1000;
@@ -21,11 +21,6 @@ function uniq(items) {
     result.push(value);
   }
   return result;
-}
-
-function isMissingCommandError(error) {
-  const message = String(error?.message || error || '');
-  return /ENOENT|command not found|not found|No such file or directory/i.test(message);
 }
 
 function isYtDlpSslError(error) {
@@ -501,53 +496,6 @@ async function downloadVideo(taskContext) {
   const outputPath = path.join(tempDir, `${baseName}.mp4`);
   const cwd = settings.paths.youtubeProjectPath || undefined;
 
-  if (settings.commands.download) {
-    let result;
-    try {
-      result = await runCommand(settings.commands.download, {
-        cwd,
-        log,
-        timeoutMs: DOWNLOAD_TIMEOUT_MS,
-        variables: {
-          url: task.videoUrl,
-          output: outputPath,
-          timeRange: task.timeRange,
-          taskName: task.taskName,
-          original: task.isOriginal ? '1' : '0'
-        }
-      });
-    } catch (error) {
-      if (isMissingCommandError(error)) {
-        throw new Error(
-          `${String(error?.message || error)}\n` +
-          '下载命令中的可执行文件不存在。可清空“下载命令”使用内置下载器，或安装对应命令后重试。'
-        );
-      }
-      throw error;
-    }
-
-    const commandOutput = `${result?.stdout || ''}\n${result?.stderr || ''}`;
-    const resolvedPath = await resolveDownloadedOutputPath(tempDir, baseName, outputPath, {
-      commandOutput,
-      searchDirs: [cwd]
-    });
-    if (!resolvedPath) {
-      const outputTail = compactTail(commandOutput);
-      throw new Error(
-        `下载命令执行完成，但未找到视频输出文件：${outputPath}` +
-        (outputTail ? `\n下载日志：\n${outputTail}` : '')
-      );
-    }
-    if (resolvedPath !== outputPath) {
-      log(`下载输出文件路径与预期不一致，已自动使用：${resolvedPath}`);
-    }
-
-    return {
-      outputPath: resolvedPath,
-      mode: 'custom-command'
-    };
-  }
-
   const launcher = await resolveYtDlpLauncher({ settings, log });
   const normalizedUrl = normalizeVideoUrl(task.videoUrl);
 
@@ -621,7 +569,7 @@ async function downloadVideo(taskContext) {
     const outputTail = compactTail(commandOutput);
     throw new Error(
       `视频下载完成，但未找到输出文件。期望路径：${outputPath}\n` +
-      '请确认链接可下载，或在设置中填写自定义“下载命令”。' +
+      '请确认链接可下载，并检查下载目录权限与 yt-dlp 输出。' +
       (outputTail ? `\n下载日志：\n${outputTail}` : '')
     );
   }
