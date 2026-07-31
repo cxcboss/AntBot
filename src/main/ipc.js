@@ -57,24 +57,7 @@ const { runStartupChecks, getProfileDir, getProfileScopeKey } = require('./servi
 const { runVoiceClone } = require('./services/voiceClone');
 const { getDependencyState, repairMissingDependencies } = require('./services/dependencyManager');
 const { installDependencies } = require('./services/dependencyInstaller');
-const { launchPersistentChromiumContext } = require('./services/playwrightUtil');
 const { getAppInfo } = require('./services/appInfo');
-
-async function openPlaywrightLoginContext(serviceKey, serviceConfig, userId) {
-  const profileDir = getProfileDir(serviceKey, userId);
-  const context = await launchPersistentChromiumContext(profileDir, {
-    headless: false,
-    args: ['--disable-blink-features=AutomationControlled']
-  }, () => {});
-  try {
-    const page = context.pages()[0] || await context.newPage();
-    await page.goto(serviceConfig.url, { waitUntil: 'domcontentloaded', timeout: 60000 });
-  } catch (error) {
-    await context.close().catch(() => {});
-    throw error;
-  }
-  return context;
-}
 
 function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl = null }) {
   _storeRef = store;
@@ -84,7 +67,6 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
   const { setLogger: setBridgeLogger } = require('./services/bridgeServiceManager');
   setBridgeLogger(appLog);
 
-  const authContexts = new Map();
 
   const sendWindowState = async (options = {}) => {
     const win = mainWindowRef();
@@ -159,34 +141,7 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
     return result;
   });
 
-  ipcMain.handle('startup:open-login-window', async (_event, serviceKey) => {
-    const settings = await store.getSettings();
-    const scopeId = settings.__userId || 'user-1';
-    const serviceConfig = settings.loginHints?.[serviceKey];
-    if (!serviceConfig) throw new Error(`未知服务：${serviceKey}`);
-    const contextKey = getProfileScopeKey(serviceKey, scopeId);
-    const existing = authContexts.get(contextKey);
-    if (existing) {
-      const pages = existing.pages();
-      if (pages.length) await pages[0].bringToFront().catch(() => {});
-      return { opened: true, reused: true, profileDir: getProfileDir(serviceKey, scopeId) };
-    }
-    const context = await openPlaywrightLoginContext(serviceKey, serviceConfig, scopeId);
-    authContexts.set(contextKey, context);
-    context.on('close', () => authContexts.delete(contextKey));
-    return { opened: true, reused: false, profileDir: getProfileDir(serviceKey, scopeId) };
-  });
 
-  ipcMain.handle('startup:mark-login-done', async (_event, serviceKey) => {
-    const settings = await store.getSettings();
-    const scopeId = settings.__userId || 'user-1';
-    const contextKey = getProfileScopeKey(serviceKey, scopeId);
-    const context = authContexts.get(contextKey);
-    if (context) { await context.close().catch(() => {}); authContexts.delete(contextKey); }
-    const state = await store.setLoginState(serviceKey, true);
-    await sendWindowState();
-    return state;
-  });
 
   ipcMain.handle('voice:clone', async (_event, payload) => {
     const settings = await store.getSettings();
@@ -2173,8 +2128,6 @@ except Exception as e:
 
   return {
     cleanup: async () => {
-      for (const [, context] of authContexts) { try { await context.close(); } catch {} }
-      authContexts.clear();
       // 杀掉所有 spawned 子进程
       try {
         const { getManagedChildren } = require('./services/autoDubClient');

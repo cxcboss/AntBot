@@ -10,8 +10,7 @@ contextBridge.exposeInMainWorld('antbot', {
   getPathForFile: (file) => webUtils.getPathForFile(file),
   getInitialState: () => ipcRenderer.invoke('app:get-initial-state'),
   checkStartup: () => ipcRenderer.invoke('startup:check'),
-  markLoginDone: (serviceKey) => ipcRenderer.invoke('startup:mark-login-done', serviceKey),
-  openLoginWindow: (serviceKey) => ipcRenderer.invoke('startup:open-login-window', serviceKey),
+  // 登录检测和登录窗口已废弃，登录在用户浏览器中进行
   updateSettings: (settings) => ipcRenderer.invoke('settings:update', settings),
   listGeminiProfiles: () => ipcRenderer.invoke('gemini-profiles:list'),
   createGeminiProfile: (name) => ipcRenderer.invoke('gemini-profiles:create', name),
