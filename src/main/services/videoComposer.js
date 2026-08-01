@@ -1271,34 +1271,44 @@ async function composeVideoWithDub({
     // 2. Get video duration/dimensions
     progressFn({ percent: 10, step: 'probing', message: '读取视频信息...' });
     const duration = await getDuration(inputVideoPath);
-    logFn(`[compose] video duration: ${duration.toFixed(2)}s`);
+    logFn(`[compose] 视频时长: ${duration.toFixed(2)}s`);
 
     // 3. Generate TTS
     let dubSource = 'none';
     if (!voiceoverEnabled) {
       progressFn({ percent: 20, step: 'silent', message: '生成静音轨道...' });
+      logFn('[compose] 配音关闭，生成静音轨道');
       await generateSilentTrack(duration, voiceTrackPath);
     } else if (ttsMode === 'voice_clone' && cloneProfileId) {
       progressFn({ percent: 20, step: 'tts-clone', message: '语音克隆合成中...' });
+      logFn(`[compose] 语音克隆模式，profileId=${cloneProfileId}，${sentenceEntries.length} 句`);
+      // 检查 Voicebox 是否可用
+      try {
+        await fetchVoicebox('/health', { timeoutMs: 5000 });
+        logFn('[compose] Voicebox 已就绪');
+      } catch (e) {
+        throw new Error(`Voicebox 未运行或不可达（${VOICEBOX_BASE_URL}）：${e.message}。请先在设置中安装语音克隆环境。`);
+      }
       const cloneOutputs = await synthesizeSpeechWithVoiceClone(
         sentenceEntries,
         cloneProfileId,
         cloneLanguage || 'zh',
         ttsDir,
       );
-      logFn(`[compose] generated ${cloneOutputs.length} voice clone clips`);
+      logFn(`[compose] 生成 ${cloneOutputs.length} 个语音片段`);
       progressFn({ percent: 60, step: 'mixing', message: '混合配音轨道...' });
       await buildVoiceoverTrack(cloneOutputs, duration, voiceTrackPath, 20, dubSpeedNumber);
       dubSource = 'voice_clone';
     } else {
       progressFn({ percent: 20, step: 'tts-system', message: '系统语音合成中...' });
+      logFn(`[compose] 系统语音模式，${sentenceEntries.length} 句`);
       // Use first available system voice
       const voices = await getSayVoices();
       const voice = Object.prototype.hasOwnProperty.call(voices, 'Tingting')
         ? 'Tingting'
         : Object.keys(voices)[0];
       const ttsOutputs = await synthesizeSpeech(sentenceEntries, voice, 220, ttsDir);
-      logFn(`[compose] generated ${ttsOutputs.length} system TTS clips`);
+      logFn(`[compose] 生成 ${ttsOutputs.length} 个系统语音片段`);
       progressFn({ percent: 60, step: 'mixing', message: '混合配音轨道...' });
       await buildVoiceoverTrack(ttsOutputs, duration, voiceTrackPath, 18, dubSpeedNumber);
       dubSource = 'tts';
