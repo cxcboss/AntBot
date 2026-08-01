@@ -39,8 +39,10 @@ async function editVideo(taskContext) {
 
   // 如果需要配音克隆，确保 Voicebox 后端运行
   if (voiceoverEnabled && useVoiceClone) {
-    const { ensureVoiceCloneBackend } = require('./autoDubClient');
-    await ensureVoiceCloneBackend('', log, progress || (() => {}), {
+    const { ensureVoiceCloneBackend, resolveAutoDubProjectPath } = require('./autoDubClient');
+    const projectPath = await resolveAutoDubProjectPath('');
+    if (!projectPath) throw new Error('未找到语音克隆后端（auto_dub_web），请检查 vendors/auto_dub_web 目录');
+    await ensureVoiceCloneBackend(projectPath, log, progress || (() => {}), {
       gpuMode: settings.voiceClone.gpuMode || 'auto'
     });
   }
