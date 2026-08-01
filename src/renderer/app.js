@@ -1231,8 +1231,8 @@ function renderModels() {
         ${m.downloaded
           ? `<button class="btn btn-xs btn-ghost" data-model-delete="${esc(key)}" type="button">删除</button>`
           : `<button class="btn btn-xs btn-primary" data-model-download="${esc(key)}" type="button">下载</button>
-             ${!isHf ? `<button class="btn btn-xs btn-ghost" data-model-browser="${esc(key)}" type="button">浏览器</button>
-             <button class="btn btn-xs btn-ghost" data-model-import="${esc(key)}" type="button">导入</button>` : ''}
+             <button class="btn btn-xs btn-ghost" data-model-browser="${esc(key)}" type="button">浏览器</button>
+             <button class="btn btn-xs btn-ghost" data-model-import="${esc(key)}" data-hf="${isHf ? '1' : ''}" type="button">导入</button>
              ${isHf ? `<label class="flex items-center gap-1 text-xs cursor-pointer"><input type="checkbox" class="checkbox checkbox-xs" data-model-mirror ${useMirror ? 'checked' : ''} /> 国内镜像</label>` : ''}
              `
         }
@@ -1812,11 +1812,17 @@ function bind(){
     const importBtn = e.target.closest('[data-model-import]');
     if (importBtn) {
       const key = importBtn.dataset.modelImport;
+      const isHf = importBtn.dataset.hf === '1';
       try {
-        const filePath = await window.antbot.pickFile('选择模型文件', [{ name: 'Model', extensions: ['pt', 'bin', 'safetensors', 'gguf', 'onnx'] }]);
-        if (!filePath) return;
+        let sourcePath;
+        if (isHf) {
+          sourcePath = await window.antbot.pickDirectory('选择下载后的模型文件夹');
+        } else {
+          sourcePath = await window.antbot.pickFile('选择模型文件', [{ name: 'Model', extensions: ['pt', 'bin', 'safetensors', 'gguf', 'onnx'] }]);
+        }
+        if (!sourcePath) return;
         toast('正在导入...', 'info');
-        const r = await window.antbot.modelsImport({ modelKey: key, sourcePath: filePath });
+        const r = await window.antbot.modelsImport({ modelKey: key, sourcePath });
         if (r.ok) { toast('导入成功', 'success'); await loadModels(); }
         else toast(r.error || r.message || '导入失败', 'error');
       } catch (err) { toast(err.message, 'error'); }
