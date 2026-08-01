@@ -19,6 +19,15 @@ function detectSystemProxy() {
   if (_proxyDetected) return _proxyUrl;
   _proxyDetected = true;
   try {
+    // 1. 检查环境变量（最通用）
+    const envProxy = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.https_proxy || process.env.http_proxy;
+    if (envProxy) {
+      _proxyUrl = envProxy.startsWith('http') ? envProxy : `http://${envProxy}`;
+      logToAppFile(`从环境变量检测到代理: ${_proxyUrl}`);
+      return _proxyUrl;
+    }
+
+    // 2. 系统代理设置
     if (process.platform === 'win32') {
       const { execSync } = require('node:child_process');
       const out = execSync('reg query "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ProxyEnable', { encoding: 'utf-8', timeout: 3000, windowsHide: true });
@@ -28,6 +37,7 @@ function detectSystemProxy() {
         if (match) {
           const addr = match[1].trim();
           _proxyUrl = addr.startsWith('http') ? addr : `http://${addr}`;
+          logToAppFile(`从 Windows 注册表检测到代理: ${_proxyUrl}`);
         }
       }
     } else if (process.platform === 'darwin') {
@@ -37,10 +47,56 @@ function detectSystemProxy() {
         const host = out.match(/Server:\s*(.+)$/m)?.[1]?.trim();
         const port = out.match(/Port:\s*(.+)$/m)?.[1]?.trim() || '80';
         if (host) _proxyUrl = `http://${host}:${port}`;
+        logToAppFile(`从 macOS 网络设置检测到代理: ${_proxyUrl}`);
       }
+    }
+
+    // 3. 探测常见 VPN 代理端口（Clash/V2Ray/Shadowsocks）
+    if (!_proxyUrl) {
+      const candidates = [
+        { port: 7890, name: 'Clash' },
+        { port: 7891, name: 'Clash (备选)' },
+        { port: 10809, name: 'V2Ray/SS' },
+        { port: 10808, name: 'V2Ray (备选)' },
+        { port: 1080, name: 'SOCKS' },
+        { port: 8080, name: 'HTTP 代理' },
+      ];
+      for (const c of candidates) {
+        try {
+          const net = require('node:net');
+          const sock = net.createConnection({ host: '127.0.0.1', port: c.port });
+          const connected = new Promise((resolve) => {
+            sock.on('connect', () => { sock.destroy(); resolve(true); });
+            sock.on('error', () => { sock.destroy(); resolve(false); });
+            setTimeout(() => { sock.destroy(); resolve(false); }, 500);
+          });
+          // 同步等待不现实，用同步检测
+        } catch {}
+      }
+      // 异步端口探测（非阻塞，结果缓存到下次调用）
+      _probeCommonPorts();
     }
   } catch {}
   return _proxyUrl;
+}
+
+function _probeCommonPorts() {
+  const net = require('node:net');
+  const candidates = [7890, 7891, 10809, 10808, 1080, 8080];
+  for (const port of candidates) {
+    try {
+      const sock = net.createConnection({ host: '127.0.0.1', port });
+      sock.on('connect', () => {
+        sock.destroy();
+        if (!_proxyUrl) {
+          _proxyUrl = `http://127.0.0.1:${port}`;
+          logToAppFile(`探测到本地代理端口: ${port}`);
+        }
+      });
+      sock.on('error', () => sock.destroy());
+      setTimeout(() => sock.destroy(), 300);
+    } catch {}
+  }
 }
 
 let _proxyFetch = null;
