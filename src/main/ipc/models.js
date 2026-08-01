@@ -58,22 +58,24 @@ function register({ ipcMain, store, mainWindowRef }) {
         const { spawn } = require('node:child_process');
         // Write a temp script to avoid escaping issues
         const scriptPath = path.join(dir, `_download_${modelKey}.py`);
-        await fs.writeFile(scriptPath, `
-  import sys, os
-  os.environ['HF_HUB_DISABLE_TELEMETRY'] = '1'
-  ${useMirror ? "os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'" : ''}
-  try:
-    from huggingface_hub import snapshot_download
-    p = snapshot_download(
-        repo_id=${JSON.stringify(meta.repoId)},
-        local_dir=${JSON.stringify(destDir)},
-        resume_download=True
-    )
-    print("OK:" + p)
-  except Exception as e:
-    print("ERR:" + str(e), file=sys.stderr)
-    sys.exit(1)
-  `, 'utf-8');
+        const mirrorLine = useMirror ? "os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'" : '';
+        const script = [
+          'import sys, os',
+          "os.environ['HF_HUB_DISABLE_TELEMETRY'] = '1'",
+          mirrorLine,
+          'try:',
+          '    from huggingface_hub import snapshot_download',
+          '    p = snapshot_download(',
+          `        repo_id=${JSON.stringify(meta.repoId)},`,
+          `        local_dir=${JSON.stringify(destDir)},`,
+          '        resume_download=True',
+          '    )',
+          '    print("OK:" + p)',
+          'except Exception as e:',
+          '    print("ERR:" + str(e), file=sys.stderr)',
+          '    sys.exit(1)',
+        ].filter(Boolean).join('\n');
+        await fs.writeFile(scriptPath, script, 'utf-8');
 
         const _pythonBin = await resolveDependencyPath('python') || 'python3';
         await new Promise((resolve, reject) => {
@@ -216,33 +218,54 @@ function register({ ipcMain, store, mainWindowRef }) {
     return { ok: true, url: meta.url, type: 'direct' };
   });
 
-  // 导入已下载的模型文件
+  // 导入已下载的模型（支持单文件和目录）
   ipcMain.handle('models:import', async (_event, { modelKey, sourcePath }) => {
     const meta = MODEL_REGISTRY[modelKey];
     if (!meta) return { ok: false, message: '未知模型' };
-    if (meta.hfDownload) return { ok: false, message: 'HuggingFace 模型不支持文件导入，请使用内置下载' };
+
+    const dir = await getModelsDir();
 
     try {
       const stat = await fs.stat(sourcePath);
-      if (stat.size < 1024 * 1024) return { ok: false, error: '文件太小，可能不是模型文件' };
-    } catch { return { ok: false, error: '无法读取源文件' }; }
 
-    const dir = await getModelsDir();
-    const destPath = path.join(dir, meta.filename);
-
-    try {
-      // 同分区 rename，跨分区 copy+delete
-      try {
-        await fs.rename(sourcePath, destPath);
-      } catch (renameErr) {
-        if (renameErr.code === 'EXDEV') {
-          await fs.copyFile(sourcePath, destPath);
-          await fs.unlink(sourcePath);
-        } else {
-          throw renameErr;
+      if (meta.hfDownload) {
+        // HF 模型：导入整个目录
+        if (!stat.isDirectory()) return { ok: false, error: 'HuggingFace 模型请选择下载后的文件夹' };
+        // 验证目录内有 model.safetensors 或 config.json
+        const files = await fs.readdir(sourcePath);
+        const hasModel = files.some(f => f.endsWith('.safetensors') || f === 'config.json');
+        if (!hasModel) return { ok: false, error: '目录内未找到模型文件（.safetensors 或 config.json）' };
+        const destDir = path.join(dir, modelKey);
+        await fs.mkdir(destDir, { recursive: true });
+        // 复制所有文件
+        for (const file of files) {
+          const src = path.join(sourcePath, file);
+          const dst = path.join(destDir, file);
+          const fileStat = await fs.stat(src);
+          if (fileStat.isDirectory()) {
+            await fs.cp(src, dst, { recursive: true });
+          } else {
+            await fs.copyFile(src, dst);
+          }
         }
+        return { ok: true, path: destDir };
+      } else {
+        // 单文件模型：导入文件
+        if (!stat.isFile()) return { ok: false, error: '请选择模型文件' };
+        if (stat.size < 1024 * 1024) return { ok: false, error: '文件太小，可能不是模型文件' };
+        const destPath = path.join(dir, meta.filename);
+        try {
+          await fs.rename(sourcePath, destPath);
+        } catch (renameErr) {
+          if (renameErr.code === 'EXDEV') {
+            await fs.copyFile(sourcePath, destPath);
+            await fs.unlink(sourcePath);
+          } else {
+            throw renameErr;
+          }
+        }
+        return { ok: true, path: destPath };
       }
-      return { ok: true, path: destPath };
     } catch (error) {
       return { ok: false, error: error.message };
     }
