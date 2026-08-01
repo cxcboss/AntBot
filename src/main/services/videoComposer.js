@@ -474,22 +474,33 @@ async function getFfmpegFilterSupport() {
 
   const filtersProbe = await runCommandCapture(ffmpegBin, ['-filters']);
   if (!filtersProbe.ok) {
-    ffmpegFilterSupport = {
-      ffmpegBin,
-      ffprobeBin,
-      subtitles: false,
-      drawtext: false,
-      overlay: false,
-    };
+    ffmpegFilterSupport = { ffmpegBin, ffprobeBin, subtitles: false, drawtext: false, overlay: false };
     return ffmpegFilterSupport;
   }
 
   const combined = `${filtersProbe.stdout}\n${filtersProbe.stderr}`;
+  const subtitles = /\bsubtitles\b/.test(combined);
+  const drawtext = /\bdrawtext\b/.test(combined);
+
+  // macOS: 如果缺少字幕滤镜，尝试安装 ffmpeg-full
+  if (!subtitles && !drawtext && process.platform === 'darwin') {
+    console.log('[ffmpeg] 缺少 subtitles/drawtext 滤镜，尝试 brew install ffmpeg-full ...');
+    try {
+      const brewBin = (await runCommandCapture('brew', ['--prefix'])).stdout.trim() + '/bin/brew';
+      const repair = await runCommandCapture(brewBin, ['install', 'ffmpeg-full'], { cwd: '/' });
+      if (repair.ok) {
+        // 重置缓存，重新检测
+        ffmpegFilterSupport = null;
+        return getFfmpegFilterSupport();
+      }
+    } catch {}
+  }
+
   ffmpegFilterSupport = {
     ffmpegBin,
     ffprobeBin,
-    subtitles: /\bsubtitles\b/.test(combined),
-    drawtext: /\bdrawtext\b/.test(combined),
+    subtitles,
+    drawtext,
     overlay: /\boverlay\b/.test(combined),
   };
   return ffmpegFilterSupport;
