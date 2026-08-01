@@ -157,7 +157,8 @@ async function callApi(baseUrl, apiKey, modelId, messages, maxTokens = 4000, abo
       throw new Error(`${reason} (${status})，${bodySizeKB}KB：${errText.slice(0, 200)}`);
     }
     const data = await response.json();
-    return data.choices?.[0]?.message?.content || '';
+    const msg = data.choices?.[0]?.message;
+    return msg?.content || msg?.reasoning_content || '';
   } catch (err) {
     if (err.name === 'AbortError') throw new Error('已取消');
     if (err.message.includes('HTTP 错误') || err.message.includes('请求格式') || err.message.includes('API Key')) throw err;
