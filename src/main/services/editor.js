@@ -1,7 +1,7 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { ensureDir } = require('./fileUtil');
-const { resolveAutoDubProjectPath, processWithAutoDub } = require('./autoDubClient');
+const { composeVideoWithDub } = require('./videoComposer');
 
 async function ensureReadableFile(filePath, label) {
   try {
@@ -21,7 +21,8 @@ async function editVideo(taskContext) {
     inputVideoPath,
     subtitlePath,
     outputPath,
-    log
+    log,
+    progress
   } = taskContext;
 
   const voiceoverEnabled = settings?.style?.voiceoverEnabled !== false;
@@ -34,37 +35,43 @@ async function editVideo(taskContext) {
   }
   await ensureDir(path.dirname(outputPath));
 
-  const autoDubProjectPath = await resolveAutoDubProjectPath(settings.paths.editProjectPath);
-  if (autoDubProjectPath) {
-    log(`使用 auto_dub_web 处理视频：${autoDubProjectPath}`);
-    return processWithAutoDub({
-      projectPath: autoDubProjectPath,
-      inputVideoPath,
-      subtitlePath: needsSubtitleFile ? subtitlePath : '',
-      outputPath,
-      subtitleEnabled,
-      voiceoverEnabled,
-      voiceCloneId: settings.voiceClone.voiceId || '',
-      voiceCloneProfileName: settings.voiceClone.profileName || '',
-      voiceCloneSamplePath: settings.voiceClone.samplePath || '',
-      voiceCloneReferenceText: settings.voiceClone.referenceText || '',
-      voiceCloneLanguage: settings.voiceClone.language || 'zh',
-      voiceCloneGpuMode: settings.voiceClone.gpuMode || 'auto',
-      voiceSpeed: settings.style.voiceSpeed,
-      subtitleTextColor: settings.style.subtitleTextColor,
-      subtitleStrokeColor: settings.style.subtitleStrokeColor,
-      subtitlePositionPercent: settings.style.subtitlePositionPercent,
-      subtitleFontSize: settings.style.subtitleFontSize || 0,
-      log
+  const useVoiceClone = !!(settings.voiceClone?.voiceId);
+
+  // 如果需要配音克隆，确保 Voicebox 后端运行
+  if (voiceoverEnabled && useVoiceClone) {
+    const { ensureVoiceCloneBackend } = require('./autoDubClient');
+    await ensureVoiceCloneBackend('', log, progress || (() => {}), {
+      gpuMode: settings.voiceClone.gpuMode || 'auto'
     });
   }
 
-  await fs.copyFile(inputVideoPath, outputPath);
-  log('未配置剪辑命令，且未找到 auto_dub_web，已直接复制原视频到输出目录（占位模式）。');
+  log(`开始视频合成：${path.basename(inputVideoPath)}`);
+
+  const result = await composeVideoWithDub({
+    inputVideoPath,
+    subtitlePath: needsSubtitleFile ? subtitlePath : '',
+    outputPath,
+    voiceoverEnabled,
+    subtitleEnabled,
+    ttsMode: useVoiceClone ? 'voice_clone' : 'system',
+    cloneProfileId: settings.voiceClone?.voiceId || '',
+    cloneLanguage: settings.voiceClone?.language || 'zh',
+    dubSpeed: settings.style?.voiceSpeed || 1.0,
+    subtitleStyle: {
+      textColor: settings.style?.subtitleTextColor,
+      strokeColor: settings.style?.subtitleStrokeColor,
+      positionPercent: settings.style?.subtitlePositionPercent,
+      fontSize: settings.style?.subtitleFontSize || 0,
+    },
+    log,
+    progress,
+  });
 
   return {
-    outputPath,
-    mode: 'passthrough'
+    outputPath: result.outputPath || outputPath,
+    mode: result.dubSource || 'composed',
+    subtitleMode: result.subtitleMode,
+    dubSource: result.dubSource,
   };
 }
 

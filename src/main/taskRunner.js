@@ -1161,10 +1161,9 @@ class TaskRunner {
       });
       this.log('', error.message, 'error');
     } finally {
-      // 整批任务结束，关闭 voicebox 和 auto_dub_web 释放内存
+      // 整批任务结束，关闭 voicebox 释放内存
       try {
-        const { shutdownVoicebox, shutdownAutoDub } = require('./services/autoDubClient');
-        await shutdownAutoDub(this.log).catch(() => {});
+        const { shutdownVoicebox } = require('./services/autoDubClient');
         await shutdownVoicebox(this.log).catch(() => {});
       } catch {}
 

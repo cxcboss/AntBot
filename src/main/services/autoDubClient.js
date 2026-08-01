@@ -6,104 +6,13 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { constants: fsConstants } = require('node:fs');
 const { buildRuntimePath, withRuntimeEnv } = require('./runtimeEnv');
-const { ensureWindowsDependency, getManagedBinDir } = require('./dependencyManager');
 
-const AUTO_DUB_PORT = 5001;
-const AUTO_DUB_BASE_URL = `http://127.0.0.1:${AUTO_DUB_PORT}`;
-const AUTO_DUB_HEALTHCHECK_URL = `${AUTO_DUB_BASE_URL}/api/health`;
 const VOICEBOX_PORT = 17493;
 const VOICEBOX_BASE_URL = `http://127.0.0.1:${VOICEBOX_PORT}`;
-const startedServers = new Map();
 const startedVoiceboxBackends = new Map();
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function stringifyErrorWithCause(error) {
-  const message = error instanceof Error ? error.message : String(error);
-  const causeMessage = error?.cause?.message ? String(error.cause.message) : '';
-  if (causeMessage && !message.includes(causeMessage)) {
-    return `${message}（cause: ${causeMessage}）`;
-  }
-  return message;
-}
-
-function escapeMultipartHeaderValue(value) {
-  return String(value || '')
-    .replace(/[\r\n]+/g, ' ')
-    .replace(/"/g, '%22');
-}
-
-function createMultipartBoundary() {
-  return `----AntBotBoundary${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`;
-}
-
-async function postAutoDubProcessRequest({ fields, files }) {
-  const boundary = createMultipartBoundary();
-  const targetUrl = new URL(`${AUTO_DUB_BASE_URL}/api/process`);
-
-  return new Promise((resolve, reject) => {
-    const request = http.request({
-      protocol: targetUrl.protocol,
-      hostname: targetUrl.hostname,
-      port: targetUrl.port,
-      path: `${targetUrl.pathname}${targetUrl.search}`,
-      method: 'POST',
-      headers: {
-        'Content-Type': `multipart/form-data; boundary=${boundary}`
-      }
-    }, (response) => {
-      const chunks = [];
-      response.on('data', (chunk) => {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-      });
-      response.on('error', reject);
-      response.on('end', () => {
-        resolve({
-          statusCode: response.statusCode || 0,
-          headers: response.headers,
-          bodyText: Buffer.concat(chunks).toString('utf8')
-        });
-      });
-    });
-
-    request.setTimeout(0);
-    request.on('socket', (socket) => {
-      socket.setTimeout(0);
-      socket.setKeepAlive(true, 1000);
-    });
-    request.on('error', reject);
-
-    const writeField = (name, value) => {
-      request.write(`--${boundary}\r\n`);
-      request.write(`Content-Disposition: form-data; name="${escapeMultipartHeaderValue(name)}"\r\n\r\n`);
-      request.write(String(value ?? ''));
-      request.write('\r\n');
-    };
-
-    const writeFile = ({ fieldName, fileName, contentType, buffer }) => {
-      request.write(`--${boundary}\r\n`);
-      request.write(
-        `Content-Disposition: form-data; name="${escapeMultipartHeaderValue(fieldName)}"; filename="${escapeMultipartHeaderValue(fileName)}"\r\n`
-      );
-      request.write(`Content-Type: ${contentType || 'application/octet-stream'}\r\n\r\n`);
-      request.write(buffer);
-      request.write('\r\n');
-    };
-
-    try {
-      for (const [name, value] of Object.entries(fields || {})) {
-        writeField(name, value);
-      }
-      for (const file of files || []) {
-        writeFile(file);
-      }
-      request.end(`--${boundary}--\r\n`);
-    } catch (error) {
-      request.destroy(error);
-    }
-  });
 }
 
 async function exists(targetPath) {
@@ -135,18 +44,6 @@ async function resolveVoiceboxVenvPython(venvDir) {
   return candidates[0];
 }
 
-async function canWritePath(targetPath) {
-  if (!targetPath) {
-    return false;
-  }
-  try {
-    await fs.access(targetPath, fsConstants.W_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 async function canExecute(filePath) {
   if (!filePath) {
     return false;
@@ -157,60 +54,6 @@ async function canExecute(filePath) {
   } catch {
     return false;
   }
-}
-
-async function resolveNodeBinary() {
-  const candidates = [];
-  const pushCandidate = (value) => {
-    const trimmed = String(value || '').trim();
-    if (trimmed) {
-      candidates.push(trimmed);
-    }
-  };
-
-  pushCandidate(process.env.ANTBOT_NODE_BIN);
-  if (process.platform === 'win32') {
-    pushCandidate(path.join(getManagedBinDir(), 'node-runtime', 'node.exe'));
-    pushCandidate(path.join(getManagedBinDir(), 'node.exe'));
-    pushCandidate(path.resolve(process.resourcesPath || '', 'bin', 'node.exe'));
-  }
-
-  const pathEntries = String(buildRuntimePath(process.env.PATH || ''))
-    .split(path.delimiter)
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-  for (const entry of pathEntries) {
-    pushCandidate(path.join(entry, 'node'));
-    if (process.platform === 'win32') {
-      pushCandidate(path.join(entry, 'node.exe'));
-    }
-  }
-
-  pushCandidate('/opt/homebrew/bin/node');
-  pushCandidate('/usr/local/bin/node');
-  pushCandidate('/usr/bin/node');
-  pushCandidate(path.resolve(process.resourcesPath || '', 'bin', 'node'));
-
-  const seen = new Set();
-  for (const candidate of candidates) {
-    if (seen.has(candidate)) {
-      continue;
-    }
-    seen.add(candidate);
-    if (await canExecute(candidate)) {
-      return candidate;
-    }
-  }
-
-  if (process.platform === 'win32') {
-    try {
-      return await ensureWindowsDependency('node');
-    } catch {
-      return '';
-    }
-  }
-
-  return '';
 }
 
 async function resolveBashBinary() {
@@ -406,20 +249,11 @@ function getRuntimeRoot() {
     : path.resolve(process.cwd(), '.antbot-runtime');
 }
 
-async function getServiceLogFilePath(projectPath, serviceName) {
+async function getVoiceboxLogFilePath(projectPath) {
   const safeProjectName = path.basename(projectPath || 'service').replace(/[^a-zA-Z0-9._-]/g, '_') || 'service';
-  const safeServiceName = String(serviceName || 'service').replace(/[^a-zA-Z0-9._-]/g, '_') || 'service';
   const logDir = path.join(getRuntimeRoot(), 'logs');
   await fs.mkdir(logDir, { recursive: true });
-  return path.join(logDir, `${safeProjectName}.${safeServiceName}.log`);
-}
-
-async function getAutoDubLogFilePath(projectPath) {
-  return getServiceLogFilePath(projectPath, 'auto_dub_web');
-}
-
-async function getVoiceboxLogFilePath(projectPath) {
-  return getServiceLogFilePath(projectPath, 'voicebox');
+  return path.join(logDir, `${safeProjectName}.voicebox.log`);
 }
 
 async function readRecentLogTail(logFilePath, maxLines = 10, maxBytes = 12288) {
@@ -899,10 +733,6 @@ async function killVoiceboxByPort(logger = () => {}) {
   await killListeningProcessByPort(VOICEBOX_PORT, logger, 'voicebox');
 }
 
-async function killAutoDubByPort(logger = () => {}) {
-  await killListeningProcessByPort(AUTO_DUB_PORT, logger, 'auto_dub_web');
-}
-
 function buildVoiceboxPythonPath(projectPath) {
   const entries = [
     path.join(projectPath, 'vendor', 'voicebox'),
@@ -919,15 +749,16 @@ async function detectAutoDubProject(projectPath) {
     return false;
   }
 
-  const serverFile = path.join(projectPath, 'server.mjs');
-  const publicFile = path.join(projectPath, 'public', 'app.js');
+  // 检测 Voicebox 后端是否可用（scripts + vendor/voicebox）
+  const startScript = path.join(projectPath, 'scripts', 'start_voicebox_backend.sh');
+  const voiceboxBackend = path.join(projectPath, 'vendor', 'voicebox', 'backend');
 
-  const [hasServer, hasPublic] = await Promise.all([
-    exists(serverFile),
-    exists(publicFile)
+  const [hasScript, hasBackend] = await Promise.all([
+    exists(startScript),
+    exists(voiceboxBackend)
   ]);
 
-  return hasServer && hasPublic;
+  return hasScript && hasBackend;
 }
 
 function getElectronApp() {
@@ -939,283 +770,23 @@ function getElectronApp() {
   }
 }
 
-function isManagedRuntimeAutoDubPath(targetPath) {
-  const app = getElectronApp();
-  if (!app || !targetPath) {
-    return false;
-  }
-  const managedPath = path.resolve(app.getPath('userData'), 'engines', 'auto_dub_web');
-  return path.resolve(targetPath) === managedPath;
-}
-
-function shouldCopyAutoDubEntry(sourceRoot, currentPath) {
-  const relative = path.relative(sourceRoot, currentPath);
-  if (!relative || relative === '.') {
-    return true;
-  }
-  const normalized = relative.split(path.sep).join('/');
-  if (normalized === 'data' || normalized.startsWith('data/')) {
-    return normalized === 'data/models' || normalized.startsWith('data/models/');
-  }
-  const blockedPrefixes = [
-    'outputs',
-    'workspace',
-    '.venv-voicebox'
-  ];
-  return !blockedPrefixes.some((prefix) => normalized === prefix || normalized.startsWith(`${prefix}/`));
-}
-
-async function syncAutoDubSourceToTarget(sourcePath, targetPath) {
-  if (!sourcePath || !targetPath) {
-    return;
-  }
-  if (path.resolve(sourcePath) === path.resolve(targetPath)) {
-    return;
-  }
-  await fs.cp(sourcePath, targetPath, {
-    recursive: true,
-    force: true,
-    filter: (src) => shouldCopyAutoDubEntry(sourcePath, src)
-  });
-}
-
-async function ensureWritableBundledAutoDub(bundledPath) {
-  const app = getElectronApp();
-  const runtimeRoot = app
-    ? path.join(app.getPath('userData'), 'engines')
-    : path.resolve(process.cwd(), '.antbot-runtime', 'engines');
-
-  const runtimePath = path.join(runtimeRoot, 'auto_dub_web');
-  await fs.mkdir(runtimeRoot, { recursive: true });
-
-  if (await detectAutoDubProject(runtimePath)) {
-    await syncAutoDubSourceToTarget(bundledPath, runtimePath);
-    return runtimePath;
-  }
-
-  await syncAutoDubSourceToTarget(bundledPath, runtimePath);
-
-  return runtimePath;
-}
-
-async function isAutoDubProjectWritable(projectPath) {
-  if (!projectPath) {
-    return false;
-  }
-  const projectWritable = await canWritePath(projectPath);
-  if (!projectWritable) {
-    return false;
-  }
-  const dataDir = path.join(projectPath, 'data');
-  try {
-    await fs.mkdir(dataDir, { recursive: true });
-  } catch {
-    return false;
-  }
-  return canWritePath(dataDir);
-}
-
 async function resolveAutoDubProjectPath(explicitPath) {
   const localVendorPath = path.resolve(process.cwd(), 'vendors', 'auto_dub_web');
   const resourcesCandidate = path.resolve(process.resourcesPath || '', 'vendors', 'auto_dub_web');
 
   if (explicitPath && await detectAutoDubProject(explicitPath)) {
-    if (!await isAutoDubProjectWritable(explicitPath)) {
-      return ensureWritableBundledAutoDub(explicitPath);
-    }
-    if (isManagedRuntimeAutoDubPath(explicitPath)) {
-      if (await detectAutoDubProject(localVendorPath)) {
-        await syncAutoDubSourceToTarget(localVendorPath, explicitPath);
-      } else if (await detectAutoDubProject(resourcesCandidate)) {
-        await syncAutoDubSourceToTarget(resourcesCandidate, explicitPath);
-      }
-    }
     return explicitPath;
   }
 
   if (await detectAutoDubProject(localVendorPath)) {
-    if (!await isAutoDubProjectWritable(localVendorPath)) {
-      return ensureWritableBundledAutoDub(localVendorPath);
-    }
     return localVendorPath;
   }
 
   if (await detectAutoDubProject(resourcesCandidate)) {
-    return ensureWritableBundledAutoDub(resourcesCandidate);
+    return resourcesCandidate;
   }
 
   return '';
-}
-
-async function waitForAutoDubReady(timeoutMs = 25000) {
-  const startedAt = Date.now();
-  let lastError = '';
-  let lastStatus = 0;
-
-  while (Date.now() - startedAt < timeoutMs) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 3500);
-    try {
-      const response = await fetch(AUTO_DUB_HEALTHCHECK_URL, {
-        method: 'GET',
-        signal: controller.signal
-      });
-      lastStatus = response.status;
-      if (response.ok) {
-        return {
-          ready: true,
-          status: response.status,
-          lastError: ''
-        };
-      }
-      lastError = `健康检查返回 HTTP ${response.status}`;
-    } catch (error) {
-      lastError = String(error?.message || error || '健康检查失败');
-    } finally {
-      clearTimeout(timer);
-    }
-
-    await sleep(700);
-  }
-
-  return {
-    ready: false,
-    status: lastStatus,
-    lastError
-  };
-}
-
-async function ensureAutoDubServer(projectPath, logger = () => {}) {
-  if (process.platform === 'win32') {
-    try {
-      await ensureWindowsDependency('ffmpeg', logger);
-    } catch (error) {
-      logger(`自动准备 FFmpeg 失败：${String(error?.message || error)}`);
-    }
-  }
-
-  const tracked = startedServers.get(projectPath);
-  const trackedChild = getStartedChild(tracked);
-  const trackedAlive = isStartedChildAlive(tracked);
-  const logFilePath = tracked?.logFilePath || await getAutoDubLogFilePath(projectPath);
-
-  const alreadyReady = await waitForAutoDubReady(1800);
-  if (alreadyReady.ready && trackedAlive) {
-    return {
-      baseUrl: AUTO_DUB_BASE_URL,
-      started: false
-    };
-  }
-
-  if (alreadyReady.ready && !trackedAlive) {
-    logger('检测到历史 auto_dub_web 进程，正在重启以应用当前环境...');
-    await killAutoDubByPort(logger);
-    await sleep(700);
-  }
-
-  if (!alreadyReady.ready && trackedAlive) {
-    logger('已记录的 auto_dub_web 进程未通过健康检查，正在重启...');
-    try {
-      trackedChild?.kill('SIGTERM');
-    } catch {
-      // noop
-    }
-    startedServers.delete(projectPath);
-    await killAutoDubByPort(logger);
-    await sleep(900);
-  }
-
-  const readyAfterCleanup = await waitForAutoDubReady(1800);
-  if (readyAfterCleanup.ready) {
-    return {
-      baseUrl: AUTO_DUB_BASE_URL,
-      started: false
-    };
-  }
-
-  const nodeBinary = await resolveNodeBinary();
-  if (!nodeBinary) {
-    throw new Error('未找到 Node.js 运行时。请先安装 Node.js，或在环境变量 ANTBOT_NODE_BIN 中指定 node 路径。');
-  }
-
-  const startAttempt = async (attempt) => {
-    const nodeDir = path.dirname(nodeBinary);
-    const env = withRuntimeEnv({
-      PATH: buildRuntimePath(nodeDir, process.env.PATH)
-    });
-
-    let child;
-    try {
-      child = await spawnLoggedDetachedProcess(nodeBinary, ['server.mjs'], {
-        cwd: projectPath,
-        env,
-        logFilePath,
-        label: 'auto_dub_web'
-      });
-    } catch (error) {
-      throw new Error(`启动 auto_dub_web 失败：${String(error?.message || error)}`);
-    }
-
-    child.unref();
-    startedServers.set(projectPath, {
-      child,
-      logFilePath,
-      nodeBinary,
-      startedAt: new Date().toISOString()
-    });
-    logger(`已启动 auto_dub_web 服务（node: ${nodeBinary}，PID: ${child.pid}）。`);
-
-    const ready = await waitForAutoDubReady(50000);
-    if (ready.ready) {
-      return {
-        baseUrl: AUTO_DUB_BASE_URL,
-        started: true
-      };
-    }
-
-    const childAlive = isStartedChildAlive({ child });
-    const tail = await readRecentLogTail(logFilePath, 12);
-
-    if (attempt === 1) {
-      logger(`auto_dub_web 首次启动未就绪（${ready.lastError || '无详细错误'}），正在自动重试一次...`);
-      if (childAlive) {
-        try {
-          child.kill('SIGTERM');
-        } catch {
-          // noop
-        }
-      }
-      startedServers.delete(projectPath);
-      await killAutoDubByPort(logger);
-      await sleep(1000);
-      return null;
-    }
-
-    const details = [];
-    if (ready.lastError) {
-      details.push(`健康检查：${ready.lastError}`);
-    }
-    details.push(`日志：${logFilePath}`);
-    if (tail) {
-      details.push(`最近日志：\n${tail}`);
-    }
-
-    throw new Error(
-      `auto_dub_web 服务启动超时。可在目录手动执行：${nodeBinary} server.mjs\n${details.join('\n')}`
-    );
-  };
-
-  const first = await startAttempt(1);
-  if (first) {
-    return first;
-  }
-
-  const second = await startAttempt(2);
-  if (!second) {
-    throw new Error(`auto_dub_web 服务启动失败：${logFilePath}`);
-  }
-
-  return second;
 }
 
 async function fetchVoiceCloneStatus(timeoutMs = 6000) {
@@ -1578,13 +1149,6 @@ async function ensureVoiceCloneBackend(projectPath, logger = () => {}, progress 
   logger('合成步骤2a完成: prewarm done');
 }
 
-function toFileNameFromOutputUrl(outputUrl) {
-  if (!outputUrl || !outputUrl.startsWith('/outputs/')) {
-    return '';
-  }
-  return decodeURIComponent(outputUrl.slice('/outputs/'.length));
-}
-
 function getAudioMimeType(filePath) {
   const ext = path.extname(filePath).toLowerCase();
   if (ext === '.wav') return 'audio/wav';
@@ -1638,11 +1202,10 @@ async function createVoiceCloneProfileWithAutoDub({
 
   progress({
     status: 'running',
-    step: '启动服务',
+    step: '检查后端',
     percent: 18,
-    message: '正在启动 auto_dub_web 服务...'
+    message: '正在检查语音克隆后端...'
   });
-  await ensureAutoDubServer(projectPath, logger);
   await ensureVoiceCloneBackend(projectPath, logger, progress);
 
   progress({
@@ -1899,208 +1462,8 @@ async function resolveVoiceCloneProfile({
   );
 }
 
-async function processWithAutoDub({
-  projectPath,
-  inputVideoPath,
-  subtitlePath,
-  outputPath,
-  subtitleEnabled = true,
-  voiceoverEnabled = true,
-  voiceCloneId,
-  voiceCloneProfileName,
-  voiceCloneSamplePath,
-  voiceCloneReferenceText,
-  voiceCloneLanguage,
-  voiceSpeed,
-  subtitleTextColor,
-  subtitleStrokeColor,
-  subtitlePositionPercent,
-  subtitleFontSize = 0,
-  voiceCloneGpuMode,
-  log = () => {}
-}) {
-  log('合成步骤1: ensureAutoDubServer...');
-  await ensureAutoDubServer(projectPath, log);
-  log('合成步骤1完成: auto_dub_web 就绪');
-  const voiceoverOn = voiceoverEnabled !== false;
-  const subtitleOn = voiceoverOn && subtitleEnabled !== false;
-  const needsSubtitleFile = voiceoverOn || subtitleOn;
-
-  log('合成步骤2: resolveVoiceCloneProfile...');
-  const voiceClone = voiceoverOn
-    ? await resolveVoiceCloneProfile({
-      projectPath,
-      voiceCloneId,
-      voiceCloneProfileName,
-      voiceCloneSamplePath,
-      voiceCloneReferenceText,
-      language: voiceCloneLanguage || 'zh',
-      gpuMode: voiceCloneGpuMode || 'auto',
-      log
-    })
-    : {
-      useVoiceClone: false,
-      profileId: '',
-      language: voiceCloneLanguage || 'zh'
-    };
-  log(`合成步骤2完成: useVoiceClone=${voiceClone.useVoiceClone}, profileId=${voiceClone.profileId}`);
-
-  if (needsSubtitleFile && !subtitlePath) {
-    throw new Error('缺少字幕文件，无法进行配音或字幕处理。');
-  }
-
-  const [videoBuffer, subtitleBuffer] = await Promise.all([
-    fs.readFile(inputVideoPath),
-    needsSubtitleFile ? fs.readFile(subtitlePath) : null
-  ]);
-
-  const useVoiceClone = Boolean(voiceoverOn && voiceClone.useVoiceClone && voiceClone.profileId);
-  const autoDubLogFilePath = await getAutoDubLogFilePath(projectPath);
-  const requestFields = {
-    tts_mode: useVoiceClone ? 'voice_clone' : 'system',
-    voice: 'Tingting',
-    rate: '220',
-    clone_profile_id: useVoiceClone ? voiceClone.profileId : '',
-    clone_language: voiceClone.language || 'zh',
-    dub_speed: String(voiceSpeed || 1.1),
-    subtitle_position: 'bottom',
-    subtitle_margin: '120',
-    subtitle_text_color: String(subtitleTextColor || '#FFA100'),
-    subtitle_stroke_color: String(subtitleStrokeColor || '#000000'),
-    subtitle_y_percent: String(
-      Math.max(0, Math.min(100, Number.isFinite(Number(subtitlePositionPercent)) ? Number(subtitlePositionPercent) : 12))
-    ),
-    subtitle_font_size: subtitleFontSize > 0 ? String(subtitleFontSize) : '',
-    subtitle_enabled: subtitleOn ? 'on' : 'off',
-    voiceover_enabled: voiceoverOn ? 'on' : 'off',
-    keep_original_audio: 'on',
-    original_audio_level: '45',
-    dub_audio_level: '180'
-  };
-  const buildAutoDubFailureDetails = async () => {
-    const details = [];
-    const health = await waitForAutoDubReady(4000);
-    details.push(`健康检查：${health.ready ? '服务可达' : (health.lastError || `HTTP ${health.status || 0}`)}`);
-    details.push(`日志：${autoDubLogFilePath}`);
-    const tail = await readRecentLogTail(autoDubLogFilePath, 20, 16384);
-    if (tail) {
-      details.push(`最近日志：\n${tail}`);
-    }
-    return details;
-  };
-
-  log(`已向 auto_dub_web 提交处理请求（配音模式：${voiceoverOn ? (useVoiceClone ? 'voice_clone' : 'system') : 'off'}）。`);
-
-  const postArgs = {
-    fields: requestFields,
-    files: [
-      {
-        fieldName: 'video_file',
-        fileName: path.basename(inputVideoPath),
-        contentType: 'video/mp4',
-        buffer: videoBuffer
-      },
-      ...(needsSubtitleFile
-        ? [{
-          fieldName: 'srt_file',
-          fileName: path.basename(subtitlePath),
-          contentType: 'application/x-subrip',
-            buffer: subtitleBuffer
-          }]
-          : [])
-      ]
-    };
-
-  log(`合成步骤3: postAutoDubProcessRequest (video=${videoBuffer.length} bytes)...`);
-
-  // 带重试的请求（处理并发任务时 auto_dub_web 忙的情况）
-  let response;
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      response = await postAutoDubProcessRequest(postArgs);
-      log(`合成步骤3完成: HTTP ${response.statusCode}`);
-      break;
-    } catch (error) {
-      log(`合成步骤3失败（第 ${attempt} 次）: ${error.message}`);
-      if (attempt < 3) {
-        // 500/后端不可用 → voicebox 可能崩溃，重启并等待完全就绪
-        if (error.message.includes('500') || error.message.includes('不可用') || error.message.includes('后端')) {
-          log('voicebox 可能崩溃，正在重启...');
-          try { await shutdownVoicebox(() => {}); } catch {}
-          await sleep(3000);
-          // 等待 voicebox 完全就绪（含模型加载）
-          for (let w = 0; w < 30; w++) {
-            try {
-              const profiles = await getVoiceCloneProfiles(5000);
-              if (Array.isArray(profiles)) { log(`voicebox 已恢复（${profiles.length} 个音色）`); break; }
-            } catch {}
-            await sleep(2000);
-          }
-        }
-        log(`auto_dub_web 请求失败（第 ${attempt} 次），${attempt * 5} 秒后重试...`);
-        await sleep(attempt * 5000);
-        await ensureAutoDubServer(projectPath, log);
-      } else {
-        const details = await buildAutoDubFailureDetails();
-        throw new Error(`auto_dub_web 请求失败（重试 ${attempt} 次）：${stringifyErrorWithCause(error)}\n${details.join('\n')}`);
-      }
-    }
-  }
-
-  log(`auto_dub_web 已返回响应（HTTP ${response.statusCode}）。`);
-
-  let payload;
-  try {
-    payload = response.bodyText ? JSON.parse(response.bodyText) : null;
-  } catch {
-    payload = null;
-  }
-
-  if (response.statusCode < 200 || response.statusCode >= 300 || !payload?.ok) {
-    const message = payload?.error || `auto_dub_web 处理失败（HTTP ${response.statusCode}）`;
-    log(`错误: ${message}`);
-    log(`响应体: ${(response.bodyText || '').slice(0, 500)}`);
-    const details = await buildAutoDubFailureDetails();
-    for (const d of details) log(d);
-    throw new Error(`${message}\n${details.join('\n')}`);
-  }
-
-  const expectedSubtitleMode = subtitleOn ? 'burned' : 'none';
-  if (payload.subtitleMode !== expectedSubtitleMode) {
-    throw new Error(`字幕模式异常（subtitleMode=${payload.subtitleMode || 'unknown'}），已停止输出。`);
-  }
-
-  const outputName = toFileNameFromOutputUrl(payload.outputUrl);
-  if (!outputName) {
-    throw new Error('auto_dub_web 未返回输出文件路径。');
-  }
-
-  const sourceOutputPath = path.join(projectPath, 'outputs', outputName);
-  await fs.copyFile(sourceOutputPath, outputPath);
-  await fs.rm(sourceOutputPath, { force: true }).catch(() => {});
-
-  return {
-    mode: 'auto_dub_web',
-    outputPath,
-    subtitleMode: payload.subtitleMode,
-    dubSource: payload.dubSource,
-    voiceClone: useVoiceClone
-      ? {
-        voiceId: voiceClone.profileId,
-        profileName: voiceClone.profileName || voiceCloneProfileName || '',
-        language: voiceClone.language || voiceCloneLanguage || 'zh',
-        recovered: Boolean(voiceClone.recovered)
-      }
-      : null
-  };
-}
-
 function getManagedChildren() {
   const children = [];
-  for (const [, rec] of startedServers) {
-    const c = getStartedChild(rec);
-    if (c && c.exitCode === null) children.push(c);
-  }
   for (const [, rec] of startedVoiceboxBackends) {
     const c = getStartedChild(rec);
     if (c && c.exitCode === null) children.push(c);
@@ -2127,26 +1490,13 @@ async function shutdownVoicebox(logger = () => {}) {
   logger('voicebox 后端已关闭');
 }
 
-async function shutdownAutoDub(logger = () => {}) {
-  for (const [key, rec] of startedServers) {
-    const child = getStartedChild(rec);
-    if (child && child.exitCode === null) {
-      try { child.kill('SIGTERM'); } catch {}
-      await new Promise(r => setTimeout(r, 2000));
-      try { if (child.exitCode === null) child.kill('SIGKILL'); } catch {}
-    }
-    startedServers.delete(key);
-  }
-  await killAutoDubByPort(logger);
-  logger('auto_dub_web 已关闭');
-}
-
 module.exports = {
   detectAutoDubProject,
   resolveAutoDubProjectPath,
   createVoiceCloneProfileWithAutoDub,
-  processWithAutoDub,
-  getManagedChildren,
+  resolveVoiceCloneProfile,
+  ensureVoiceCloneBackend,
   shutdownVoicebox,
-  shutdownAutoDub
+  getManagedChildren,
+  prewarmVoiceCloneModel
 };
