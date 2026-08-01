@@ -342,10 +342,9 @@ app.on('before-quit', async () => {
     const tunnelManager = require('./services/tunnelManager');
     tunnelManager.stopTunnel();
   } catch {}
-  // 关闭 voicebox 和 auto_dub_web 释放内存
+  // 关闭 voicebox 释放内存
   try {
-    const { shutdownVoicebox, shutdownAutoDub } = require('./services/autoDubClient');
-    await shutdownAutoDub(() => {}).catch(() => {});
+    const { shutdownVoicebox } = require('./services/autoDubClient');
     await shutdownVoicebox(() => {}).catch(() => {});
   } catch {}
 });
