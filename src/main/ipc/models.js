@@ -48,72 +48,88 @@ function register({ ipcMain, store, mainWindowRef }) {
     const win = mainWindowRef();
     const sendProgress = (p) => { if (win && !win.isDestroyed()) win.webContents.send('models:progress', p); };
 
-    // HuggingFace model download via Python huggingface_hub
+    // HuggingFace model download via Node.js fetch (no Python dependency)
     if (meta.hfDownload) {
       const destDir = path.join(dir, modelKey);
       const settings = await store.getSettings();
       const useMirror = settings.models?.useHfMirror;
+      const baseUrl = useMirror ? 'https://hf-mirror.com' : 'https://huggingface.co';
+      const controller = new AbortController();
+      activeDownloads.set(modelKey, controller);
       try {
-        sendProgress({ model: modelKey, status: 'downloading', percent: 5, message: useMirror ? '通过国内镜像下载...' : '正在通过 HuggingFace 下载...' });
-        const { spawn } = require('node:child_process');
-        // Write a temp script to avoid escaping issues
-        const scriptPath = path.join(dir, `_download_${modelKey}.py`);
-        const mirrorLine = useMirror ? "os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'" : '';
-        const script = [
-          'import sys, os',
-          "os.environ['HF_HUB_DISABLE_TELEMETRY'] = '1'",
-          mirrorLine,
-          'try:',
-          '    from huggingface_hub import snapshot_download',
-          '    p = snapshot_download(',
-          `        repo_id=${JSON.stringify(meta.repoId)},`,
-          `        local_dir=${JSON.stringify(destDir)},`,
-          '        resume_download=True',
-          '    )',
-          '    print("OK:" + p)',
-          'except Exception as e:',
-          '    print("ERR:" + str(e), file=sys.stderr)',
-          '    sys.exit(1)',
-        ].filter(Boolean).join('\n');
-        await fs.writeFile(scriptPath, script, 'utf-8');
+        sendProgress({ model: modelKey, status: 'downloading', percent: 0, message: useMirror ? '通过国内镜像获取文件列表...' : '获取文件列表...' });
 
-        const _pythonBin = await resolveDependencyPath('python') || 'python3';
-        await new Promise((resolve, reject) => {
-          const child = spawn(_pythonBin, [scriptPath], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
-          activeDownloads.set(modelKey, child); // store child process for cancellation
-          let stderr = '';
-          let lastProgress = Date.now();
-          child.stderr.on('data', d => { stderr += d.toString(); });
-          child.stdout.on('data', d => {
-            const msg = d.toString().trim();
-            if (msg.startsWith('OK:')) return;
-            lastProgress = Date.now();
-            sendProgress({ model: modelKey, status: 'downloading', percent: 50, message: '正在下载模型文件...' });
-          });
-          const timeout = setTimeout(() => {
-            child.kill();
-            reject(new Error('下载超时（30分钟），请检查网络连接'));
-          }, 30 * 60 * 1000);
-          child.on('close', code => {
-            clearTimeout(timeout);
-            activeDownloads.delete(modelKey);
-            fs.unlink(scriptPath).catch(() => {});
-            if (code === 0) resolve();
-            else if (code === null) reject(new Error('已取消'));
-            else reject(new Error(stderr.trim() || '下载失败'));
-          });
-          child.on('error', (e) => {
-            clearTimeout(timeout);
-            activeDownloads.delete(modelKey);
-            fs.unlink(scriptPath).catch(() => {});
-            reject(e);
-          });
-        });
+        // 1. 获取仓库文件列表
+        const treeUrl = `${baseUrl}/api/models/${meta.repoId}/tree/main`;
+        const treeResp = await fetch(treeUrl, { signal: controller.signal });
+        if (!treeResp.ok) throw new Error(`获取文件列表失败: HTTP ${treeResp.status}`);
+        const treeData = await treeResp.json();
+
+        // 展开子目录（获取 speech_tokenizer 等子目录的文件）
+        const files = [];
+        for (const item of treeData) {
+          if (item.type === 'tree') {
+            const subUrl = `${baseUrl}/api/models/${meta.repoId}/tree/main/${item.path}`;
+            const subResp = await fetch(subUrl, { signal: controller.signal });
+            if (subResp.ok) {
+              const subData = await subResp.json();
+              for (const f of subData) {
+                if (f.type !== 'tree' && f.lfs) {
+                  files.push({ path: `${item.path}/${f.path}`, size: f.size || 0 });
+                }
+              }
+            }
+          } else if (item.lfs) {
+            files.push({ path: item.path, size: item.size || 0 });
+          }
+        }
+
+        // 也下载小文件（config.json 等）
+        for (const item of treeData) {
+          if (item.type !== 'tree' && !item.lfs && !files.some(f => f.path === item.path)) {
+            files.push({ path: item.path, size: item.size || 0 });
+          }
+        }
+
+        const totalBytes = files.reduce((s, f) => s + (f.size || 0), 0);
+        let downloadedBytes = 0;
+
+        sendProgress({ model: modelKey, status: 'downloading', percent: 2, message: `${files.length} 个文件，共 ${(totalBytes / 1024 / 1024).toFixed(0)}MB` });
+
+        // 2. 逐个下载文件
+        for (const file of files) {
+          if (controller.signal.aborted) throw new Error('已取消');
+
+          const fileUrl = `${baseUrl}/${meta.repoId}/resolve/main/${file.path}`;
+          const destPath = path.join(destDir, file.path);
+          await fs.mkdir(path.dirname(destPath), { recursive: true });
+
+          const resp = await fetch(fileUrl, { signal: controller.signal, redirect: 'follow' });
+          if (!resp.ok) throw new Error(`下载 ${file.path} 失败: HTTP ${resp.status}`);
+
+          const fileBytes = [];
+          const reader = resp.body.getReader();
+          let fileDownloaded = 0;
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            fileBytes.push(value);
+            fileDownloaded += value.length;
+            downloadedBytes += value.length;
+            if (totalBytes > 0) {
+              const percent = Math.round((downloadedBytes / totalBytes) * 100);
+              sendProgress({ model: modelKey, status: 'downloading', percent, message: `${file.path} (${(downloadedBytes / 1024 / 1024).toFixed(0)}MB / ${(totalBytes / 1024 / 1024).toFixed(0)}MB)` });
+            }
+          }
+          await fs.writeFile(destPath, Buffer.concat(fileBytes));
+        }
+
+        activeDownloads.delete(modelKey);
         sendProgress({ model: modelKey, status: 'completed', percent: 100, message: '下载完成' });
         return { ok: true, path: destDir };
       } catch (error) {
         activeDownloads.delete(modelKey);
-        if (error.message === '已取消') {
+        if (error.name === 'AbortError' || error.message === '已取消') {
           sendProgress({ model: modelKey, status: 'cancelled', message: '已取消' });
           return { ok: false, message: '已取消' };
         }
