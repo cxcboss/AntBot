@@ -45,10 +45,33 @@ let cachedSubtitleFont = null;
 // ─── ffmpeg/ffprobe path resolution (via dependencyManager) ───────────────────
 
 async function getFfmpegBin() {
+  // 优先使用 ffmpeg-full（Homebrew 完整版，带 subtitles/drawtext 滤镜）
+  if (process.platform === 'darwin') {
+    try {
+      const { execFileSync } = require('node:child_process');
+      const prefix = execFileSync('brew', ['--prefix', 'ffmpeg-full'], { encoding: 'utf-8', timeout: 5000, windowsHide: true }).trim();
+      if (prefix) {
+        const bin = path.join(prefix, 'bin', 'ffmpeg');
+        await fs.access(bin);
+        return bin;
+      }
+    } catch {}
+  }
   return await resolveDependencyPath('ffmpeg') || 'ffmpeg';
 }
 
 async function getFfprobeBin() {
+  if (process.platform === 'darwin') {
+    try {
+      const { execFileSync } = require('node:child_process');
+      const prefix = execFileSync('brew', ['--prefix', 'ffmpeg-full'], { encoding: 'utf-8', timeout: 5000, windowsHide: true }).trim();
+      if (prefix) {
+        const bin = path.join(prefix, 'bin', 'ffprobe');
+        await fs.access(bin);
+        return bin;
+      }
+    } catch {}
+  }
   return await resolveDependencyPath('ffprobe') || 'ffprobe';
 }
 
