@@ -3,6 +3,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { shell } = require('electron');
 const { resolveDependencyPath } = require('../services/dependencyManager');
+const { proxyFetch } = require('../services/proxyFetch');
 
 // ── Model management ──
 const MODEL_REGISTRY = {
@@ -61,7 +62,7 @@ function register({ ipcMain, store, mainWindowRef }) {
 
         // 1. 获取仓库文件列表
         const treeUrl = `${baseUrl}/api/models/${meta.repoId}/tree/main`;
-        const treeResp = await fetch(treeUrl, { signal: controller.signal });
+        const treeResp = await proxyFetch(treeUrl, { signal: controller.signal });
         if (!treeResp.ok) throw new Error(`获取文件列表失败: HTTP ${treeResp.status}`);
         const treeData = await treeResp.json();
 
@@ -70,7 +71,7 @@ function register({ ipcMain, store, mainWindowRef }) {
         for (const item of treeData) {
           if (item.type === 'tree') {
             const subUrl = `${baseUrl}/api/models/${meta.repoId}/tree/main/${item.path}`;
-            const subResp = await fetch(subUrl, { signal: controller.signal });
+            const subResp = await proxyFetch(subUrl, { signal: controller.signal });
             if (subResp.ok) {
               const subData = await subResp.json();
               for (const f of subData) {
@@ -104,7 +105,7 @@ function register({ ipcMain, store, mainWindowRef }) {
           const destPath = path.join(destDir, file.path);
           await fs.mkdir(path.dirname(destPath), { recursive: true });
 
-          const resp = await fetch(fileUrl, { signal: controller.signal, redirect: 'follow' });
+          const resp = await proxyFetch(fileUrl, { signal: controller.signal, redirect: 'follow' });
           if (!resp.ok) throw new Error(`下载 ${file.path} 失败: HTTP ${resp.status}`);
 
           const fileBytes = [];
@@ -145,7 +146,7 @@ function register({ ipcMain, store, mainWindowRef }) {
     activeDownloads.set(modelKey, controller);
     try {
       sendProgress({ model: modelKey, status: 'downloading', percent: 0, message: '开始下载...' });
-      const response = await fetch(meta.url, { signal: controller.signal });
+      const response = await proxyFetch(meta.url, { signal: controller.signal });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const total = parseInt(response.headers.get('content-length') || '0', 10);
       const reader = response.body.getReader();

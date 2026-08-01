@@ -3,6 +3,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { app, dialog } = require('electron');
 const { resolveDependencyPath } = require('../services/dependencyManager');
+const { proxyFetch } = require('../services/proxyFetch');
 
 function register({ ipcMain, store, mainWindowRef, appLog }) {
   // ── Style learning: video → audio → speech-to-text ──
@@ -137,7 +138,7 @@ function register({ ipcMain, store, mainWindowRef, appLog }) {
   ipcMain.handle('api:fetch-models', async (_event, { baseUrl, apiKey }) => {
     try {
       const url = `${String(baseUrl || '').replace(/\/+$/, '')}/models`;
-      const response = await fetch(url, {
+      const response = await proxyFetch(url, {
         headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
       });
       if (!response.ok) {
