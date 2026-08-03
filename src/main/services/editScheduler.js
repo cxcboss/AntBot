@@ -244,12 +244,14 @@ class EditScheduler {
       if (this._voiceboxShutdownTimer) {
         clearTimeout(this._voiceboxShutdownTimer);
         this._voiceboxShutdownTimer = null;
+        this.log('[调度] 有活跃任务，取消 voicebox 关闭定时器');
       }
       return;
     }
 
     // 无活跃任务，延迟60秒关闭（预热）
     if (this._voiceboxShutdownTimer) return;
+    this.log('[调度] 无活跃任务，60 秒后关闭 voicebox 后端');
     this._voiceboxShutdownTimer = setTimeout(async () => {
       this._voiceboxShutdownTimer = null;
       if (this._hasActiveTasks()) return;

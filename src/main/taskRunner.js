@@ -7,6 +7,7 @@ const { ensureDir, getDaySequence, buildTaskBaseName } = require('./services/fil
 const { downloadVideo } = require('./services/downloader');
 const { prepareEditVideo, composeEditVideo } = require('./services/smartEditor');
 const { publishVideo } = require('./services/publisher');
+const { resolveAutoDubProjectPath, ensureVoiceCloneBackend, prewarmVoiceCloneModel } = require('./services/autoDubClient');
 
 function nowIso() {
   return new Date().toISOString();
@@ -37,6 +38,27 @@ class TaskRunner {
     this.jobSequence = 0;
     this.currentJob = null;
     this.persistedTasksFile = path.join(os.homedir(), 'AntBot', 'main-control-tasks.json');
+  }
+
+  // 下载视频期间后台预热语音模型：下载（分钟级）与模型加载（分钟级）重叠，
+  // 后续剪辑合成直接使用已加载模型，不再等待。
+  prewarmVoiceModel() {
+    if (this._prewarmPromise) return;
+    this._prewarmPromise = (async () => {
+      try {
+        const settings = await this.store.getSettings();
+        const voice = settings?.voiceClone || {};
+        const voiceoverEnabled = settings?.style?.voiceoverEnabled !== false;
+        if (!voiceoverEnabled || !(voice.voiceId || voice.profileName)) return;
+        const projectPath = await resolveAutoDubProjectPath('');
+        if (!projectPath) return;
+        await ensureVoiceCloneBackend(projectPath, (m) => this.log('', `[预热] ${m}`), () => {}, { gpuMode: voice.gpuMode || 'auto' });
+        await prewarmVoiceCloneModel('qwen-tts-1.7B', (m) => this.log('', `[预热] ${m}`));
+        this.log('', '[预热] 语音模型已在后台加载，合成时直接使用');
+      } catch (err) {
+        this.log('', `[预热] 跳过：${err.message}`);
+      }
+    })().finally(() => { this._prewarmPromise = null; });
   }
 
   buildRunId() {
@@ -776,6 +798,8 @@ class TaskRunner {
 
       // ── Phase 1: 并行下载所有视频 ──
       this.log('', `开始并行下载 ${tasks.length} 个视频...`);
+      // 下载期间后台预热语音模型（若任务需要音色配音）
+      this.prewarmVoiceModel();
       const activeTasks = tasks.filter(t => !t.__stopped);
       const downloadResults = new Map();
 

@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 回答风格（永久规则）
+
+回答必须简洁、突出重点：不要贴代码（除非用户要求）、不要重复用户已知道的信息、不要客套话；方案用短清单，改动直接说结论。
+
 ## Project
 
 AntBot（搬运蚁）is an Electron desktop app for video automation: download → subtitle generation → editing/dubbing → publishing.

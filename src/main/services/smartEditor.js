@@ -3,12 +3,14 @@ const fsSync = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { spawn } = require('node:child_process');
+const crypto = require('node:crypto');
 const { editVideo } = require('./editor');
 const { recordUsage } = require('./usageTracker');
 const { createClipArtifactManager } = require('./clipArtifacts');
 const { resolveDependencyPath } = require('./dependencyManager');
 
 const { proxyFetch } = require('./proxyFetch');
+const { parseSrt, fmtMs, entriesToSrt } = require('./subtitleParser');
 
 /* ── Subtitle text cleanup (professional subtitle standards) ── */
 
@@ -158,7 +160,10 @@ async function callApi(baseUrl, apiKey, modelId, messages, maxTokens = 4000, abo
     }
     const data = await response.json();
     const msg = data.choices?.[0]?.message;
-    return msg?.content || msg?.reasoning_content || '';
+    // 只取正式回答 content：reasoning 模型思考占满 maxTokens 时 content 为空，
+    // 若 fallback 到 reasoning_content 会把思考过程（"用户要求我根据提..."）当结果，
+    // 命名/字幕/识别全部被污染。content 为空时返回空串，由各调用方自行处理。
+    return msg?.content || '';
   } catch (err) {
     if (err.name === 'AbortError') throw new Error('已取消');
     if (err.message.includes('HTTP 错误') || err.message.includes('请求格式') || err.message.includes('API Key')) throw err;
@@ -214,7 +219,7 @@ async function extractFrames(videoPath, outputDir, progress, abortSignal, frameR
 
 /* ── AI video recognition ── */
 
-const MAX_VISION_IMAGES_PER_REQUEST = 6; // 从4增加到6，减少API调用次数
+const MAX_VISION_IMAGES_PER_REQUEST = 4; // 上游接口上限，超过返回 400（"Image count N exceeds limit 4"）
 const MAX_CONCURRENT_BATCHES = 3; // 并发批次数
 
 function createVisionFrameBatches(framePaths) {
@@ -472,83 +477,31 @@ ${String(rawSrt || '').slice(0, 8000)}
 
 /* ── AI video naming ── */
 
+// 校验 AI 命名输出：必须是纯中英文/数字，且不是复述指令的废话（思考或对齐语）
+function sanitizeVideoName(raw) {
+  const cleaned = String(raw || '').replace(/[\s\n"'"《》【】(),，。！？!?：:；;、\-—·]/g, '');
+  if (!/^[0-9a-zA-Z\u4e00-\u9fa5]+$/.test(cleaned)) return '';
+  // 废话开头特征："用户要求我根据...""请根据...""让我来...""以下是我的建议"
+  if (/^(用户|请|根据|按照|我来|让我|我需要|帮我|以下|这是|可以|我建议|建议)/.test(cleaned)) return '';
+  return cleaned.slice(0, 8);
+}
+
 async function generateVideoName(recognizedContent, apiConfig, abortSignal) {
-  try {
-    const r = await callApiWithKeyRotation(apiConfig.baseUrl, apiConfig.apiKeys || [apiConfig.apiKey], apiConfig.modelId, [{ role: 'user', content: `根据以下内容起一个简短中文名（不超过8字，无标点）：\n${recognizedContent.slice(0, 500)}` }], 200, abortSignal);
-    return r.replace(/[\s\n"'"《》【】]/g, '').slice(0, 8) || '视频';
-  } catch { return '视频'; }
-}
-
-/* ── SRT parsing & validation ── */
-
-const SRT_TIMELINE_RE = /^(\d{1,2}):([0-5]\d):([0-5]\d)[,.](\d{1,3})\s*(?:-->|->|→)\s*(\d{1,2}):([0-5]\d):([0-5]\d)[,.](\d{1,3})$/;
-const SRT_TIMESTAMP_FRAGMENT_RE = /\d{1,2}:[0-5]\d:[0-5]\d[,.]\d{1,3}/;
-
-function parseSrt(srtText) {
-  const lines = String(srtText || '').replace(/\r/g, '').split('\n');
-  const entries = [];
-  let i = 0;
-
-  while (i < lines.length) {
-    const line = lines[i].trim();
-    let index = entries.length + 1;
-    let timelineMatch = null;
-
-    if (/^\d+$/.test(line) && i + 1 < lines.length) {
-      const nextLine = lines[i + 1].trim();
-      timelineMatch = nextLine.match(SRT_TIMELINE_RE);
-      if (timelineMatch) {
-        index = Number(line);
-        i += 2;
-      } else if (SRT_TIMESTAMP_FRAGMENT_RE.test(nextLine)) {
-        throw new Error(`AI 返回的字幕时间线格式异常：${nextLine}`);
-      }
-    }
-
-    if (!timelineMatch) {
-      timelineMatch = line.match(SRT_TIMELINE_RE);
-      if (timelineMatch) i += 1;
-    }
-
-    if (!timelineMatch) {
-      if (SRT_TIMESTAMP_FRAGMENT_RE.test(line)) {
-        throw new Error(`AI 返回的字幕时间线格式异常：${line}`);
-      }
-      i += 1;
-      continue;
-    }
-
-    const textLines = [];
-    while (i < lines.length) {
-      const textLine = lines[i].trim();
-      if (!textLine) {
-        i += 1;
-        if (textLines.length) break;
-        continue;
-      }
-      if (textLine.match(SRT_TIMELINE_RE)) break;
-      if (/^\d+$/.test(textLine) && i + 1 < lines.length) {
-        const nextLine = lines[i + 1].trim();
-        if (nextLine.match(SRT_TIMELINE_RE)) break;
-        if (SRT_TIMESTAMP_FRAGMENT_RE.test(nextLine)) {
-          throw new Error(`AI 返回的字幕时间线格式异常：${nextLine}`);
-        }
-      }
-      if (SRT_TIMESTAMP_FRAGMENT_RE.test(textLine)) {
-        throw new Error(`AI 返回的字幕时间线格式异常：${textLine}`);
-      }
-      textLines.push(textLine);
-      i += 1;
-    }
-
-    const text = textLines.join('\n').trim();
-    if (!text) continue;
-    const startMs = +timelineMatch[1] * 3600000 + +timelineMatch[2] * 60000 + +timelineMatch[3] * 1000 + Number(timelineMatch[4].padStart(3, '0'));
-    const endMs = +timelineMatch[5] * 3600000 + +timelineMatch[6] * 60000 + +timelineMatch[7] * 1000 + Number(timelineMatch[8].padStart(3, '0'));
-    entries.push({ index, startMs, endMs, text });
+  // maxTokens 500：留足思考空间，避免 reasoning 模型把 200 token 全用在思考上
+  // 导致 content 为空 → 空串 fallback
+  const prompt = `根据以下内容起一个简短中文名（不超过8字，无标点）。直接输出名字本身，不要解释，不要复述指令，不要任何多余文字：\n${recognizedContent.slice(0, 500)}`;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const r = await callApiWithKeyRotation(apiConfig.baseUrl, apiConfig.apiKeys || [apiConfig.apiKey], apiConfig.modelId, [{ role: 'user', content: prompt }], 500, abortSignal);
+      const name = sanitizeVideoName(r);
+      if (name) return name;
+    } catch { /* 重试一次 */ }
   }
-  return entries;
+  return '视频';
 }
+
+/* ── SRT parsing & validation ──
+ * parseSrt / fmtMs / entriesToSrt 由 ./subtitleParser 提供（同时供合成阶段复用）*/
 
 async function parseSrtWithRepair(rawSrt, repair) {
   try {
@@ -565,14 +518,6 @@ async function parseSrtWithRepair(rawSrt, repair) {
   }
   if (!entries.length) throw new Error('AI 多次未生成有效字幕');
   return { entries, srtText: repairedSrt, repaired: true };
-}
-
-function fmtMs(ms) {
-  const h = Math.floor(ms / 3600000);
-  const m = Math.floor((ms % 3600000) / 60000);
-  const s = Math.floor((ms % 60000) / 1000);
-  const l = Math.floor(ms % 1000);
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},${String(l).padStart(3, '0')}`;
 }
 
 /* ── Dynamic subtitle font size calculation ── */
@@ -644,8 +589,6 @@ function validateAndFixSrt(entries, videoDurationMs) {
 
   return fixed;
 }
-
-function entriesToSrt(entries) { return entries.map(e => `${e.index}\n${fmtMs(e.startMs)} --> ${fmtMs(e.endMs)}\n${e.text}`).join('\n\n') + '\n'; }
 
 /* ── Dynamic gap timing helpers ── */
 
@@ -977,6 +920,50 @@ function splitLongSubtitles(entries) {
 
 /* ── Phase 1: Prepare (frames + AI recognition + SRT + naming) ── */
 
+const PREPARE_CACHE_MAX_AGE_MS = 7 * 24 * 3600 * 1000;
+
+// 同一个源视频（内容未变）+ 相同风格/语言/帧率，多次任务复用上次准备结果，
+// 避免重复抽帧 / 重复调 Vision / 重复生成字幕。
+async function getPrepareCacheKey(videoPath, stylePrompt, language, frameRate) {
+  try {
+    const stat = await fs.stat(videoPath);
+    const raw = `${videoPath}|${stat.mtimeMs}|${stat.size}|${stylePrompt || ''}|${language}|${String(frameRate)}`;
+    return crypto.createHash('sha1').update(raw).digest('hex');
+  } catch {
+    return null;
+  }
+}
+
+async function readPrepareCache(dataDir, key) {
+  if (!key) return null;
+  try {
+    const cached = JSON.parse(await fs.readFile(path.join(dataDir, 'prepare-cache', `${key}.json`), 'utf-8'));
+    if (cached && typeof cached.srtContent === 'string' && cached.srtContent) return cached;
+  } catch {}
+  return null;
+}
+
+async function writePrepareCache(dataDir, key, payload) {
+  if (!key || !payload?.srtContent) return;
+  try {
+    const dir = path.join(dataDir, 'prepare-cache');
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, `${key}.json`), JSON.stringify(payload, null, 2), 'utf-8');
+  } catch {}
+}
+
+async function cleanupStalePrepareCache(dataDir, maxAgeMs = PREPARE_CACHE_MAX_AGE_MS) {
+  const dir = path.join(dataDir, 'prepare-cache');
+  const now = Date.now();
+  for (const entry of await fs.readdir(dir, { withFileTypes: true }).catch(() => [])) {
+    if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
+    try {
+      const stat = await fs.stat(path.join(dir, entry.name));
+      if (now - stat.mtimeMs > maxAgeMs) await fs.rm(path.join(dir, entry.name), { force: true });
+    } catch {}
+  }
+}
+
 async function prepareEditVideo({
   taskId, videoPath, stylePrompt, apiConfig, language = 'zh', frameRate = 1,
   dataDir,
@@ -1006,6 +993,30 @@ async function prepareEditVideo({
   });
   const framesDir = path.join(tmpDir, 'frames');
   const srtPath = path.join(tmpDir, 'subtitle.srt');
+
+  // 同源视频 + 相同风格/语言/帧率的任务直接复用上次准备结果
+  const prepareKey = await getPrepareCacheKey(videoPath, stylePrompt, language, frameRate);
+  const preparedCache = await readPrepareCache(dataDir, prepareKey);
+  if (preparedCache) {
+    log('命中准备缓存：复用已生成的字幕（跳过抽帧/识别/字幕生成）');
+    await fs.writeFile(srtPath, preparedCache.srtContent, 'utf-8');
+    await artifactManager.writeTaskManifest(cacheTaskId, {
+      status: 'ready',
+      videoPath,
+      srtPath,
+      videoDuration: preparedCache.videoDuration || 0,
+    });
+    progress({ step: '字幕完成', percent: 50 });
+    return {
+      srtContent: preparedCache.srtContent,
+      srtPath,
+      videoName: preparedCache.videoName || '',
+      tmpDir,
+      videoDuration: preparedCache.videoDuration || 0,
+      videoWidth: preparedCache.videoWidth || 0,
+      videoHeight: preparedCache.videoHeight || 0,
+    };
+  }
 
   try {
     checkAbort();
@@ -1053,6 +1064,14 @@ async function prepareEditVideo({
     progress({ step: '字幕完成', percent: 50 });
 
     checkAbort();
+
+    await writePrepareCache(dataDir, prepareKey, {
+      srtContent,
+      videoName,
+      videoDuration,
+      videoWidth: videoInfo.width,
+      videoHeight: videoInfo.height,
+    });
 
     await fs.rm(framesDir, { recursive: true, force: true }).catch(() => {});
     return { srtContent, srtPath, videoName, tmpDir, videoDuration, videoWidth: videoInfo.width, videoHeight: videoInfo.height };
@@ -1122,6 +1141,7 @@ async function composeEditVideo({
 async function cleanupStaleCache(maxAgeMs = 3600000) {
   const artifactManager = createClipArtifactManager();
   await artifactManager.cleanupLegacySmartEditCaches(maxAgeMs);
+  await cleanupStalePrepareCache(path.join(os.homedir(), 'AntBot'));
 }
 
 module.exports = {

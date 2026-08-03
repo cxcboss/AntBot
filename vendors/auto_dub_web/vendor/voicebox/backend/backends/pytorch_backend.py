@@ -5,6 +5,7 @@ PyTorch backend implementation for TTS and STT.
 from typing import Optional, List, Tuple
 import os
 import asyncio
+import threading
 import torch
 import numpy as np
 from pathlib import Path
@@ -25,6 +26,12 @@ class PyTorchTTSBackend:
         self.model_size = model_size
         self.device = self._get_device()
         self._current_model_size = None
+        # 串行化模型加载/卸载：并发请求同时懒加载会导致加载竞态
+        # （一个线程迁移到 MPS 时另一个线程 unload → self.model 变 None → AttributeError）
+        self._load_lock = threading.Lock()
+        # 串行化推理：MPS 上并发推理（2 个线程同时执行 relu_mps）
+        # 会损坏 MetalShaderLibrary 内部 hash table → SIGSEGV 崩溃
+        self._infer_lock = threading.Lock()
 
     def _get_device(self) -> str:
         """Get the best available device."""
@@ -54,9 +61,10 @@ class PyTorchTTSBackend:
                 return torch_directml.device(0)
         except ImportError:
             pass
-        # MPS (Apple Silicon) — kept for completeness but MLX backend is preferred
+        # MPS (Apple Silicon) — 实测可用：qwen-tts 1.7B float32 在 MPS 上正常推理。
+        # Windows/无 MPS 环境自动回退 CPU，不受影响。
         if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-            return "cpu"  # MPS disabled for stability; MLX backend handles Apple Silicon
+            return "mps"
         return "cpu"
     
     def is_loaded(self) -> bool:
@@ -133,17 +141,32 @@ class PyTorchTTSBackend:
         if model_size is None:
             model_size = self.model_size
             
-        # If already loaded with correct size, return
-        if self.model is not None and self._current_model_size == model_size:
-            return
-        
-        # Unload existing model if different size requested
-        if self.model is not None and self._current_model_size != model_size:
-            self.unload_model()
-        
-        # Run blocking load in thread pool
-        await asyncio.to_thread(self._load_model_sync, model_size)
-    
+        # Run blocking load in thread pool (serialized via lock)
+        await asyncio.to_thread(self._load_model_sync_guarded, model_size)
+
+    def _load_model_sync_guarded(self, model_size: str):
+        """Serialized model load/unload to avoid concurrent-loading races."""
+        with self._load_lock:
+            # Already loaded with correct size: no-op
+            if self.model is not None and self._current_model_size == model_size:
+                return
+            # Unload existing model if different size requested
+            if self.model is not None:
+                self._unload_model_locked()
+            self._load_model_sync(model_size)
+
+    def _unload_model_locked(self):
+        """Unload model, must be called while holding _load_lock."""
+        if self.model is not None:
+            del self.model
+            self.model = None
+            self._current_model_size = None
+            
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
+            print("TTS model unloaded")
+
     # Alias for compatibility
     load_model = load_model_async
     
@@ -194,12 +217,18 @@ class PyTorchTTSBackend:
                 # Don't pass device_map on CPU: accelerate's meta-tensor mechanism
                 # causes "Cannot copy out of meta tensor" when moving to CPU.
                 # Instead load directly then call .to(device) if needed.
-                if self.device == "cpu":
+                if self.device in ("cpu", "mps"):
+                    # CPU 与 MPS 都直接加载（float32），避免 accelerate device_map 的
+                    # meta-tensor 机制（"Cannot copy out of meta tensor"）；MPS 加载后
+                    # 整体迁移到 MPS 并同步包装类的 device 快照（qwen_tts 推理用该快照）。
                     self.model = Qwen3TTSModel.from_pretrained(
                         model_path,
                         torch_dtype=torch.float32,
                         low_cpu_mem_usage=False,
                     )
+                    if self.device == "mps" and self.model is not None:
+                        self.model.model.to("mps")
+                        self.model.device = torch.device("mps")
                 else:
                     self.model = Qwen3TTSModel.from_pretrained(
                         model_path,
@@ -240,15 +269,8 @@ class PyTorchTTSBackend:
     
     def unload_model(self):
         """Unload the model to free memory."""
-        if self.model is not None:
-            del self.model
-            self.model = None
-            self._current_model_size = None
-            
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            
-            print("TTS model unloaded")
+        with self._load_lock:
+            self._unload_model_locked()
     
     async def create_voice_prompt(
         self,
@@ -373,11 +395,12 @@ class PyTorchTTSBackend:
                     torch.cuda.manual_seed(seed)
 
             # Generate audio - this is the blocking operation
-            wavs, sample_rate = self.model.generate_voice_clone(
-                text=text,
-                voice_clone_prompt=voice_prompt,
-                instruct=instruct,
-            )
+            with self._infer_lock:
+                wavs, sample_rate = self.model.generate_voice_clone(
+                    text=text,
+                    voice_clone_prompt=voice_prompt,
+                    instruct=instruct,
+                )
             return wavs[0], sample_rate
 
         # Run blocking inference in thread pool to avoid blocking event loop
@@ -414,7 +437,7 @@ class PyTorchSTTBackend:
         except ImportError:
             pass
         if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-            return "cpu"  # MPS disabled for stability
+            return "mps"
         return "cpu"
     
     def is_loaded(self) -> bool:

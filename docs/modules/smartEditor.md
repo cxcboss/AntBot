@@ -19,14 +19,25 @@
 - `frameRate` — 抽帧频率（默认 1，即 1秒/帧）
 - `abortSignal` — 取消信号
 
-**返回：** `{ srtContent, srtPath, videoName, tmpDir, videoDuration }`
+**返回：** `{ srtContent, srtPath, videoName, tmpDir, videoDuration, videoWidth, videoHeight }`
 
 **流程：**
-1. `extractFrames()` — ffmpeg 抽帧，按源视频宽度压缩到 320-480px
-2. `recognizeVideoContent()` — 每批最多 4 帧发 Vision API，带微进度
-3. `generateSrt()` — AI 根据识别内容+风格生成 SRT；首次格式无效时自动请求一次严格 SRT 修复
-4. `generateVideoName()` — AI 起 8 字以内中文名
-5. 清理帧文件，返回 SRT
+1. 计算准备缓存 key，命中则直接复用上次字幕（见下方「准备缓存」），跳过 2-5
+2. `extractFrames()` — ffmpeg 抽帧，按源视频宽度压缩到 320-480px
+3. `recognizeVideoContent()` — 每批最多 4 帧发 Vision API，带微进度
+4. `generateSrt()` — AI 根据识别内容+风格生成 SRT；首次格式无效时自动请求一次严格 SRT 修复
+5. `generateVideoName()` — AI 起 8 字以内中文名
+6. 写入 `prepare-cache`、清理帧文件，返回 SRT
+
+## 准备缓存（prepare-cache）
+
+同一源视频 + 相同 风格/语言/帧率 的重复任务直接复用上次结果，跳过抽帧、Vision 调用和字幕生成：
+
+- **key**：sha1( 视频路径 + mtime + size + 风格 prompt + 语言 + 帧率 )，视频内容未变则 key 稳定
+- **存储**：`~/AntBot/prepare-cache/<key>.json`（保存 srtContent、videoName、时长、宽高）
+- **失效**：源视频修改（mtime/size 变化）、风格/语言/帧率变化 → 自动 miss 重新生成
+- **清理**：超过 7 天的缓存由 `cleanupStalePrepareCache()` 删除，随 `cleanupStaleCache()` 启动时调用
+- 缓存读写失败不阻塞任务（静默降级为重新生成）
 
 ### `composeEditVideo(params)`
 合成阶段。**直接调用 `editor.js` 的 `editVideo()`**，走原始 auto_dub_web 流程。
@@ -37,7 +48,7 @@
 - `voiceSpeed, subtitleStyle` — 语速/字幕样式
 
 ### `cleanupStaleCache()`
-清理超过 1 小时的 `antbot-smart-edit-*` 临时目录。
+清理超过 1 小时的 `antbot-smart-edit-*` 临时目录，并顺带清理超过 7 天的 `prepare-cache` 缓存文件。
 
 ## 关键细节
 

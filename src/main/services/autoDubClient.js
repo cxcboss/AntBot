@@ -632,16 +632,20 @@ async function prewarmVoiceCloneModel(modelName, logger = () => {}) {
 
   try {
     const status = await getVoiceCloneModelStatus(normalizedName, 8000);
-    if (status?.loaded || status?.downloaded) {
+    if (status?.loaded) {
       return;
     }
     if (status?.downloading) {
-      logger(`检测到语音模型 ${normalizedName} 正在后台下载。`);
+      logger(`检测到语音模型 ${normalizedName} 正在后台下载/加载。`);
       return;
     }
 
+    // 已下载但未加载（或未下载）都触发后端 download 接口：
+    // 后端 load_model 对已下载模型命中本地缓存直接加载，不会重新下载。
     await triggerVoiceCloneModelDownload(normalizedName, 15000);
-    logger(`已触发语音模型 ${normalizedName} 后台下载。首次生成语音时会自动等待模型准备完成。`);
+    logger(status?.downloaded
+      ? `已触发语音模型 ${normalizedName} 后台加载。`
+      : `已触发语音模型 ${normalizedName} 后台下载。首次生成语音时会自动等待模型准备完成。`);
   } catch (error) {
     logger(`语音模型 ${normalizedName} 预热失败：${String(error?.message || error)}`);
   }
