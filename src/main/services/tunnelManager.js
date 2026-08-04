@@ -1,7 +1,35 @@
-const { spawn } = require('node:child_process');
+const { spawn, execFileSync } = require('node:child_process');
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
+
+// 检测系统代理（cloudflared 需要走代理才能绕过 fake-ip DNS 的 UDP 超时）
+function getSystemProxy() {
+  // 1. 环境变量优先
+  const envProxy = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy;
+  if (envProxy) return envProxy;
+  try {
+    if (process.platform === 'darwin') {
+      // macOS: scutil --proxy
+      const out = execFileSync('scutil', ['--proxy'], { timeout: 3000 }).toString();
+      if (/HTTPEnable\s*:\s*1/.test(out)) {
+        const portMatch = out.match(/HTTPPort\s*:\s*(\d+)/);
+        const hostMatch = out.match(/HTTPProxy\s*:\s*([^\s]+)/);
+        if (portMatch) return `http://${hostMatch ? hostMatch[1] : '127.0.0.1'}:${portMatch[1]}`;
+      }
+    } else if (process.platform === 'win32') {
+      // Windows: 注册表 Internet Settings
+      const key = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings';
+      const enable = execFileSync('reg', ['query', key, '/v', 'ProxyEnable'], { timeout: 3000 }).toString();
+      if (/0x1\s*$/.test(enable.trim())) {
+        const server = execFileSync('reg', ['query', key, '/v', 'ProxyServer'], { timeout: 3000 }).toString();
+        const m = server.match(/ProxyServer\s+REG_SZ\s+([^\s]+)/);
+        if (m) return `http://${m[1]}`;
+      }
+    }
+  } catch {}
+  return null;
+}
 
 let _tunnelProcess = null;
 let _tunnelUrl = null;
@@ -226,9 +254,19 @@ function startTunnel(port, { onUrl, onStatus, log, deviceId, deviceName } = {}) 
       _tunnelUrl = null;
     }
 
+    // 检测系统代理：有代理时强制 http2 协议走代理（QUIC 不支持代理，且 fake-ip DNS 会导致 UDP 查询超时）
+    const proxy = getSystemProxy();
+    if (proxy) {
+      _log('info', `检测到系统代理，隧道将通过代理连接: ${proxy}`);
+      args = [args[0], '--protocol', 'http2', ...args.slice(1)];
+    }
+
     _tunnelProcess = spawn(cloudflared, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env },
+      env: {
+        ...process.env,
+        ...(proxy ? { HTTPS_PROXY: proxy, HTTP_PROXY: proxy } : {})
+      },
       windowsHide: true
     });
 
