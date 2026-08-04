@@ -1,8 +1,10 @@
 const http = require('node:http');
+const https = require('node:https');
 const crypto = require('node:crypto');
 const path = require('node:path');
 const fs = require('node:fs/promises');
 const os = require('node:os');
+const { execFile } = require('node:child_process');
 
 const REMOTE_PORT = 18931;
 const TOKEN_TTL = 24 * 60 * 60 * 1000; // 会话 24 小时过期
@@ -116,8 +118,94 @@ function broadcast(event, data) {
   }
 }
 
+function checkPortOpen(port, host = '127.0.0.1', timeoutMs = 1200) {
+  return new Promise((resolve) => {
+    const net = require('node:net');
+    const sock = new net.Socket();
+    let done = false;
+    const finish = (ok) => { if (!done) { done = true; sock.destroy(); resolve(ok); } };
+    sock.setTimeout(timeoutMs);
+    sock.once('connect', () => finish(true));
+    sock.once('timeout', () => finish(false));
+    sock.once('error', () => finish(false));
+    sock.connect(port, host);
+  });
+}
+
+async function getDiskSpace(targetPath) {
+  try {
+    if (process.platform === 'win32') {
+      const { stdout } = await new Promise((resolve, reject) => {
+        execFile('powershell', ['-NoProfile', '-Command', `Get-PSDrive -Name $((Get-Item '${targetPath.replace(/'/g, "''")}').PSDrive.Name) | Select-Object @{n='Used';e={[math]::Round($_.Used/1GB,1)}},@{n='Free';e={[math]::Round($_.Free/1GB,1)}} | ConvertTo-Json`], { timeout: 5000, windowsHide: true }, (e, so) => e ? reject(e) : resolve({ stdout: so }));
+      });
+      const m = stdout.match(/\{\s*"Used"\s*:\s*([\d.]+)[\s\S]*?"Free"\s*:\s*([\d.]+)/);
+      if (m) {
+        const used = parseFloat(m[1]), free = parseFloat(m[2]);
+        return { totalGB: used + free, usedGB: used, freeGB: free };
+      }
+    } else {
+      const { stdout } = await new Promise((resolve, reject) => {
+        execFile('df', ['-k', targetPath], { timeout: 5000 }, (e, so) => e ? reject(e) : resolve({ stdout: so }));
+      });
+      const lines = stdout.trim().split('\n');
+      const line = lines[lines.length - 1];
+      const parts = line.trim().split(/\s+/);
+      if (parts.length >= 4) {
+        const blocks = parseInt(parts[1], 10), used = parseInt(parts[2], 10), avail = parseInt(parts[3], 10);
+        const totalGB = blocks * 512 / 1024 / 1024 / 1024;
+        return { totalGB: +totalGB.toFixed(1), usedGB: +(used * 512 / 1024 / 1024 / 1024).toFixed(1), freeGB: +(avail * 512 / 1024 / 1024 / 1024).toFixed(1) };
+      }
+    }
+  } catch {}
+  return null;
+}
+
+async function getVoiceboxStatus() {
+  const open = await checkPortOpen(17493);
+  if (!open) return { running: false };
+  return new Promise((resolve) => {
+    const req = http.get('http://127.0.0.1:17493/api/health', { timeout: 1500 }, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => {
+        try {
+          const payload = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+          resolve({ running: true, ...(typeof payload === 'object' && payload ? payload : {}) });
+        } catch { resolve({ running: true }); }
+      });
+    });
+    req.on('timeout', () => { req.destroy(); resolve({ running: true }); });
+    req.on('error', () => resolve({ running: true }));
+  });
+}
+
+async function getServicesStatus() {
+  const tunnel = (() => { try { return require('./tunnelManager').getStatus(); } catch { return { running: false }; } })();
+  const [api, bridge, voicebox, remote, tunnelUp] = await Promise.all([
+    checkPortOpen(18930), checkPortOpen(18321), getVoiceboxStatus(), checkPortOpen(18931), Promise.resolve(true),
+  ]);
+  return {
+    api: { name: '本地 API', port: 18930, running: api },
+    bridge: { name: '桥接服务', port: 18321, running: bridge },
+    voicebox: { name: '配音引擎', port: 17493, running: voicebox.running },
+    remote: { name: '远程服务', port: 18931, running: remote },
+    tunnel: { name: '隧道', port: null, running: Boolean(tunnel.running && tunnelUp), url: tunnel.url || null },
+  };
+}
+
+async function getApiUsage() {
+  try {
+    const { getUsageSummary } = require('./usageTracker');
+    const settings = _store ? await _store.getSettings() : null;
+    const keys = settings?.api?.apiKeys || (settings?.api?.apiKey ? [settings.api.apiKey] : []);
+    if (!keys.length) return [];
+    return getUsageSummary(keys);
+  } catch { return []; }
+}
+
 async function getStatus() {
   const tasks = _taskRunner ? _taskRunner.progressRows || [] : [];
+  const [services, disk, usage] = await Promise.all([getServicesStatus(), getDiskSpace(os.homedir()), getApiUsage()]);
   return {
     running: _taskRunner?.running || false,
     taskCount: tasks.length,
@@ -131,6 +219,10 @@ async function getStatus() {
       isOriginal: t.isOriginal,
       rawLine: t.rawLine,
     })),
+    services,
+    disk,
+    usage,
+    system: { platform: process.platform, uptime: Math.floor(process.uptime()), memoryFreeGB: +(os.freemem() / 1024 / 1024 / 1024).toFixed(1) },
   };
 }
 

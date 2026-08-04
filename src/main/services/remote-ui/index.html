@@ -246,6 +246,45 @@ input[type=number]::-webkit-inner-spin-button{opacity:1}
 .slider-h::-webkit-slider-thumb{background:hsl(var(--h,30),100%,50%)!important}
 .slider-s::-webkit-slider-thumb{background:hsl(var(--h,30),var(--s,100)%,50%)!important}
 
+/* ── 字幕调色盘 ── */
+.palette-preview{width:100%;height:32px;border-radius:var(--radius);border:1px solid var(--border);margin-bottom:var(--space-3);box-shadow:var(--shadow-xs);transition:background var(--transition-fast)}
+.palette-swatches{display:grid;grid-template-columns:repeat(8,1fr);gap:var(--space-2);margin-bottom:var(--space-3)}
+.palette-swatches .swatch{width:100%;aspect-ratio:1;border-radius:var(--radius-sm);border:1px solid color-mix(in srgb,var(--border) 60%,transparent);cursor:pointer;padding:0;transition:transform var(--transition-fast),box-shadow var(--transition-fast);outline:none}
+.palette-swatches .swatch:hover{transform:scale(1.1);box-shadow:var(--shadow-sm)}
+.palette-swatches .swatch:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+.palette-swatches .swatch.active{outline:2px solid var(--ring);outline-offset:2px;transform:scale(1.1)}
+.palette-row{display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-2)}
+.palette-row input[type=color]{width:40px;height:28px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--card);cursor:pointer;padding:2px}
+.palette-row input[type=color]::-webkit-color-swatch-wrapper{padding:0}
+.palette-row input[type=color]::-webkit-color-swatch{border:none;border-radius:var(--radius-sm)}
+.palette-hex{font-family:var(--font-mono);font-size:12px;color:var(--muted-foreground)}
+.palette-tip{font-size:11px;color:var(--muted-foreground);margin-left:auto}
+.palette-advanced{margin-bottom:var(--space-3)}
+.palette-advanced summary{font-size:11px;color:var(--muted-foreground);cursor:pointer;margin-bottom:var(--space-2);user-select:none}
+.palette-advanced summary:hover{color:var(--foreground)}
+
+/* ── 状态页 ── */
+.status-toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-3)}
+.status-time{font-size:11px;color:var(--muted-foreground)}
+.status-grid{display:grid;grid-template-columns:1fr;gap:var(--space-2);margin-bottom:var(--space-5)}
+.status-item{display:flex;align-items:center;gap:var(--space-3);background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:var(--space-3) var(--space-4);box-shadow:var(--shadow-xs);min-width:0}
+.status-item-body{flex:1;min-width:0}
+.status-item-name{font-size:13px;font-weight:500}
+.status-item-url{font-size:11px;color:var(--muted-foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.status-dot{width:8px;height:8px;border-radius:var(--radius-full);flex-shrink:0}
+.status-dot.ok{background:var(--success)}
+.status-dot.fail{background:var(--destructive)}
+.status-bar{width:64px;height:6px;border-radius:var(--radius-full);background:var(--muted);overflow:hidden;flex-shrink:0}
+.status-bar-fill{height:100%;border-radius:var(--radius-full);background:var(--success);transition:width var(--transition-normal)}
+.status-bar-fill.over{background:var(--destructive)}
+.status-queue-row{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-3);padding:var(--space-3)}
+.status-queue-item{text-align:center}
+.status-queue-num{font-size:20px;font-weight:700;color:var(--accent-foreground)}
+.status-queue-label{font-size:11px;color:var(--muted-foreground);margin-top:var(--space-1)}
+@media(min-width:768px){
+  .status-grid{grid-template-columns:repeat(2,1fr)}
+}
+
 /* ── 响应式：桌面（≥768px） ── */
 @media(min-width:768px){
   .header{height:var(--header-h);padding:0 var(--space-4)}
@@ -444,8 +483,9 @@ function renderAppShell(){
         <button class="nav-item" data-page="subtitle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>字幕</button>
         <button class="nav-item" data-page="remote"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>远程</button>
         <button class="nav-item" data-page="login"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>平台登录</button>
+        <button class="nav-item" data-page="status"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>状态</button>
       </nav>
-      <div class="sidebar-version" id="sidebar-version">v1.4.0</div>
+      <div class="sidebar-version" id="sidebar-version">v1.5.0</div>
     </aside>
     <div class="content">
       <div class="page active" id="page-main">
@@ -453,16 +493,33 @@ function renderAppShell(){
       </div>
       <div class="page" id="page-subtitle">
         <div class="form-group"><label class="form-label">字幕颜色</label>
-          <div style="width:100%;height:28px;border-radius:var(--radius);border:1px solid var(--border);margin-bottom:var(--space-2)" id="color-preview"></div>
-          <div class="slider-row"><span class="slider-label">色相</span><input type="range" id="color-h" min="0" max="360" value="30" class="slider-h"><span class="slider-val" id="color-h-val">30°</span></div>
-          <div class="slider-row"><span class="slider-label">饱和</span><input type="range" id="color-s" min="0" max="100" value="100" class="slider-s"><span class="slider-val" id="color-s-val">100%</span></div>
-          <div class="slider-row"><span class="slider-label">亮度</span><input type="range" id="color-l" min="0" max="100" value="50" class="slider-l"><span class="slider-val" id="color-l-val">50%</span></div>
+          <div class="palette-preview" id="color-preview" data-for="color"></div>
+          <div class="palette-swatches" id="color-swatches"></div>
+          <div class="palette-row">
+            <input type="color" id="color-native" value="#FFA100"/>
+            <span class="palette-hex" id="color-hex">#FFA100</span>
+            <span class="palette-tip">点击右侧色块可自定义</span>
+          </div>
+          <details class="palette-advanced">
+            <summary>高级：HSL 调节</summary>
+            <div class="slider-row"><span class="slider-label">色相</span><input type="range" id="color-h" min="0" max="360" value="30" class="slider-h"><span class="slider-val" id="color-h-val">30°</span></div>
+            <div class="slider-row"><span class="slider-label">饱和</span><input type="range" id="color-s" min="0" max="100" value="100" class="slider-s"><span class="slider-val" id="color-s-val">100%</span></div>
+            <div class="slider-row"><span class="slider-label">亮度</span><input type="range" id="color-l" min="0" max="100" value="50" class="slider-l"><span class="slider-val" id="color-l-val">50%</span></div>
+          </details>
         </div>
         <div class="form-group"><label class="form-label">描边颜色</label>
-          <div style="width:100%;height:28px;border-radius:var(--radius);border:1px solid var(--border);margin-bottom:var(--space-2)" id="stroke-preview"></div>
-          <div class="slider-row"><span class="slider-label">色相</span><input type="range" id="stroke-h" min="0" max="360" value="0" class="slider-h"><span class="slider-val" id="stroke-h-val">0°</span></div>
-          <div class="slider-row"><span class="slider-label">饱和</span><input type="range" id="stroke-s" min="0" max="100" value="0" class="slider-s"><span class="slider-val" id="stroke-s-val">0%</span></div>
-          <div class="slider-row"><span class="slider-label">亮度</span><input type="range" id="stroke-l" min="0" max="100" value="0" class="slider-l"><span class="slider-val" id="stroke-l-val">0%</span></div>
+          <div class="palette-preview" id="stroke-preview" data-for="stroke"></div>
+          <div class="palette-swatches" id="stroke-swatches"></div>
+          <div class="palette-row">
+            <input type="color" id="stroke-native" value="#000000"/>
+            <span class="palette-hex" id="stroke-hex">#000000</span>
+          </div>
+          <details class="palette-advanced">
+            <summary>高级：HSL 调节</summary>
+            <div class="slider-row"><span class="slider-label">色相</span><input type="range" id="stroke-h" min="0" max="360" value="0" class="slider-h"><span class="slider-val" id="stroke-h-val">0°</span></div>
+            <div class="slider-row"><span class="slider-label">饱和</span><input type="range" id="stroke-s" min="0" max="100" value="0" class="slider-s"><span class="slider-val" id="stroke-s-val">0%</span></div>
+            <div class="slider-row"><span class="slider-label">亮度</span><input type="range" id="stroke-l" min="0" max="100" value="0" class="slider-l"><span class="slider-val" id="stroke-l-val">0%</span></div>
+          </details>
         </div>
         <div class="form-group"><label class="form-label">字幕位置 (0-100)</label><input class="form-input" id="sub-position" type="number" min="0" max="100" value="12"></div>
         <button class="btn btn-primary btn-block" id="sub-save-btn" type="button">保存设置</button>
@@ -485,6 +542,17 @@ function renderAppShell(){
           <div class="platform-qr" id="login-qr-weixin"></div>
         </div>
         <div class="login-tip" id="login-tip" style="display:none">请使用对应平台 APP 扫描二维码登录，登录成功后状态会自动更新</div>
+      </div>
+      <div class="page" id="page-status">
+        <div class="status-toolbar"><span class="status-time" id="status-time"></span><button class="btn btn-sm btn-ghost" id="status-refresh-btn" type="button">刷新</button></div>
+        <div class="section-title">服务状态</div>
+        <div class="status-grid" id="status-services"></div>
+        <div class="section-title">资源</div>
+        <div class="status-grid" id="status-resources"></div>
+        <div class="section-title">任务队列</div>
+        <div class="card status-card" id="status-queue"><div class="dialog-empty">加载中...</div></div>
+        <div class="section-title" id="usage-title" style="display:none">今日 API 用量</div>
+        <div class="status-grid" id="status-usage"></div>
       </div>
     </div>
   </div>
@@ -569,7 +637,7 @@ function switchPage(page){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.getElementById('page-'+page)?.classList.add('active');
   document.querySelectorAll('.nav-item[data-page]').forEach(n=>n.classList.toggle('active',n.dataset.page===page));
-  document.getElementById('header-title').textContent={main:'主控',subtitle:'字幕',remote:'远程',login:'平台登录'}[page]||'主控';
+  document.getElementById('header-title').textContent={main:'主控',subtitle:'字幕',remote:'远程',login:'平台登录',status:'状态'}[page]||'主控';
   // 桌面侧边栏常驻不关闭；手机抽屉切换后关闭
   if(window.innerWidth<768){
     document.getElementById('sidebar')?.classList.remove('open');
@@ -578,6 +646,7 @@ function switchPage(page){
   const ib=document.getElementById('input-bar');if(ib)ib.style.display=page==='main'?'':'none';
   if(page==='subtitle')loadSubtitleSettings();
   if(page==='remote')loadRemoteSettings();
+  if(page==='status')loadSystemStatus();
 }
 
 // ── 对话框（风格/音色/重试） ──
@@ -791,10 +860,78 @@ async function selectWeixinAccount(index){
 
 function hslToHex(h,s,l){s/=100;l/=100;const a=s*Math.min(l,1-l);const f=n=>{const k=(n+h/30)%12;const c=l-a*Math.max(Math.min(k-3,9-k,1),-1);return Math.round(255*c).toString(16).padStart(2,'0')};return '#'+f(0)+f(8)+f(4)}
 function hexToHsl(hex){hex=hex.replace('#','');if(hex.length===3)hex=hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];const r=parseInt(hex.substring(0,2),16)/255,g=parseInt(hex.substring(2,4),16)/255,b=parseInt(hex.substring(4,6),16)/255;const mx=Math.max(r,g,b),mn=Math.min(r,g,b);let h=0,s=0,l=(mx+mn)/2;if(mx!==mn){const d=mx-mn;s=l>.5?d/(2-mx-mn):d/(mx+mn);if(mx===r)h=((g-b)/d+(g<b?6:0))/6;else if(mx===g)h=((b-r)/d+2)/6;else h=((r-g)/d+4)/6}return{h:Math.round(h*360),s:Math.round(s*100),l:Math.round(l*100)}}
-function getColorHex(p){const h=parseInt(document.getElementById(p+'-h')?.value||0),s=parseInt(document.getElementById(p+'-s')?.value||0),l=parseInt(document.getElementById(p+'-l')?.value||50);return hslToHex(h,s,l)}
-function setColorFromHex(p,hex){const c=hexToHsl(hex);['h','s','l'].forEach(t=>{const el=document.getElementById(p+'-'+t);if(el){el.value=c[t];const v=document.getElementById(p+'-'+t+'-val');if(v)v.textContent=c[t]+(t==='h'?'°':'%')}});updatePreview(p)}
+const PALETTE_COLORS=['#FFA100','#FF3B30','#FF9500','#FFCC00','#34C759','#00C7BE','#32ADE6','#007AFF','#5856D6','#AF52DE','#FF2D55','#8E8E93','#3A3A3C','#FFFFFF','#000000'];
+function getColorHex(p){
+  const native=document.getElementById(p+'-native');
+  if(native&&native.value)return native.value;
+  const h=parseInt(document.getElementById(p+'-h')?.value||0),s=parseInt(document.getElementById(p+'-s')?.value||0),l=parseInt(document.getElementById(p+'-l')?.value||50);return hslToHex(h,s,l)
+}
+function setColorFromHex(p,hex){
+  if(!hex)hex='#000000';
+  const native=document.getElementById(p+'-native');if(native)native.value=hex;
+  const hexEl=document.getElementById(p+'-hex');if(hexEl)hexEl.textContent=hex;
+  const c=hexToHsl(hex);['h','s','l'].forEach(t=>{const el=document.getElementById(p+'-'+t);if(el){el.value=c[t];const v=document.getElementById(p+'-'+t+'-val');if(v)v.textContent=c[t]+(t==='h'?'°':'%')}});
+  updatePreview(p);
+  const sw=document.querySelectorAll('#'+p+'-swatches .swatch');
+  sw.forEach(s=>s.classList.toggle('active',(s.dataset.color||'').toLowerCase()===hex.toLowerCase()));
+}
 function updatePreview(p){const hex=getColorHex(p);const el=document.getElementById(p+'-preview');if(el)el.style.background=hex}
-function setupColorPicker(p,def){setColorFromHex(p,def);['h','s','l'].forEach(t=>{const el=document.getElementById(p+'-'+t);if(el)el.addEventListener('input',()=>{const v=document.getElementById(p+'-'+t+'-val');if(v)v.textContent=el.value+(t==='h'?'°':'%');updatePreview(p)})})}
+function setupColorPicker(p,def){
+  setColorFromHex(p,def);
+  const sw=document.getElementById(p+'-swatches');
+  if(sw){
+    sw.innerHTML=PALETTE_COLORS.map(c=>'<button class="swatch" type="button" data-color="'+c+'" style="background:'+c+'" title="'+c+'"></button>').join('');
+    sw.querySelectorAll('.swatch').forEach(b=>{
+      b.addEventListener('click',()=>{setColorFromHex(p,b.dataset.color);showToast(b.dataset.color)});
+    });
+  }
+  const native=document.getElementById(p+'-native');
+  if(native)native.addEventListener('input',()=>{setColorFromHex(p,native.value)});
+  ['h','s','l'].forEach(t=>{const el=document.getElementById(p+'-'+t);if(el)el.addEventListener('input',()=>{
+    const v=document.getElementById(p+'-'+t+'-val');if(v)v.textContent=el.value+(t==='h'?'°':'%');
+    const hex=hslToHex(parseInt(document.getElementById(p+'-h')?.value||0),parseInt(document.getElementById(p+'-s')?.value||0),parseInt(document.getElementById(p+'-l')?.value||50));
+    const native=document.getElementById(p+'-native');if(native)native.value=hex;
+    const hexEl=document.getElementById(p+'-hex');if(hexEl)hexEl.textContent=hex;
+    updatePreview(p);
+    const sw=document.querySelectorAll('#'+p+'-swatches .swatch');
+    sw.forEach(s=>s.classList.toggle('active',(s.dataset.color||'').toLowerCase()===hex.toLowerCase()));
+  })});
+}
+
+async function loadSystemStatus(){
+  const d=await api('GET','/remote/status');if(!d)return;
+  const timeEl=document.getElementById('status-time');if(timeEl)timeEl.textContent='更新于 '+new Date().toLocaleTimeString();
+  const services=document.getElementById('status-services');
+  if(services){
+    const svc=d.services||{};
+    services.innerHTML=Object.values(svc).map(s=>{
+      const st=s.running?'ok':'fail';
+      return '<div class="status-item"><span class="status-dot '+st+'"></span><div class="status-item-body"><div class="status-item-name">'+esc(s.name)+'</div>'+(s.url?'<div class="status-item-url">'+esc(s.url)+'</div>':'')+'</div><span class="badge '+(s.running?'badge-ok':'badge-fail')+'">'+(s.running?'运行中':'已停止')+'</span></div>';
+    }).join('');
+  }
+  const resources=document.getElementById('status-resources');
+  if(resources){
+    const dk=d.disk,mem=d.system?.memoryFreeGB;
+    let html='';
+    if(dk){
+      const pct=dk.totalGB>0?Math.round(dk.usedGB/dk.totalGB*100):0;
+      html+='<div class="status-item"><span class="status-dot '+(pct>90?'fail':'ok')+'"></span><div class="status-item-body"><div class="status-item-name">磁盘空间</div><div class="status-item-url">'+(dk.totalGB-dk.freeGB).toFixed(1)+' / '+dk.totalGB+' GB 已用</div></div><div class="status-bar"><div class="status-bar-fill '+(pct>90?'over':'')+'" style="width:'+pct+'%"></div></div></div>';
+    }
+    if(mem!==undefined)html+='<div class="status-item"><span class="status-dot ok"></span><div class="status-item-body"><div class="status-item-name">空闲内存</div><div class="status-item-url">'+mem+' GB</div></div></div>';
+    resources.innerHTML=html||'<div class="dialog-empty">暂无数据</div>';
+  }
+  const queue=document.getElementById('status-queue');
+  if(queue){
+    const running=d.running,total=d.taskCount||0,active=(d.tasks||[]).filter(t=>t.status==='running'||t.status==='pending'||t.status==='preparing'||t.status==='ready').length;
+    queue.innerHTML='<div class="status-queue-row"><div class="status-queue-item"><div class="status-queue-num">'+total+'</div><div class="status-queue-label">总任务</div></div><div class="status-queue-item"><div class="status-queue-num">'+active+'</div><div class="status-queue-label">进行中</div></div><div class="status-queue-item"><div class="status-queue-num">'+(running?'是':'否')+'</div><div class="status-queue-label">队列运行</div></div></div>';
+  }
+  const usageTitle=document.getElementById('usage-title'),usage=document.getElementById('status-usage');
+  if(usageTitle)usageTitle.style.display=d.usage&&d.usage.length?'':'none';
+  if(usage){
+    usage.innerHTML=(d.usage||[]).map(u=>'<div class="status-item"><span class="status-dot '+(u.remaining>0?'ok':'fail')+'"></span><div class="status-item-body"><div class="status-item-name">'+esc(u.keyMasked)+'</div><div class="status-item-url">已用 '+u.used+' · 失败 '+u.failed+' · 限流 '+u.rateLimited+'</div></div><span class="badge '+(u.remaining>0?'badge-ok':'badge-fail')+'">剩余 '+u.remaining+'</span></div>').join('')||'<div class="dialog-empty">今日暂无使用记录</div>';
+  }
+}
+document.addEventListener('DOMContentLoaded',()=>{document.getElementById('status-refresh-btn')?.addEventListener('click',loadSystemStatus);});
 
 async function loadTasks(){
   const d=await api('GET','/remote/tasks');if(d?.tasks)tasks=d.tasks;
