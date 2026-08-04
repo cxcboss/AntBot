@@ -220,7 +220,7 @@ function exitToHub(){
 async function api(method,path,body){
   const opts={method,headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'}};
   if(body)opts.body=JSON.stringify(body);
-  const res=await fetch(API+'/remote'+path,opts);
+  const res=await fetch(API+path,opts);
   if(res.status===401){logout();return null;}
   return res.json();
 }
@@ -336,7 +336,7 @@ function renderAppShell(){
     <button class="nav-item" data-page="remote"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>远程</button>
     <button class="nav-item" data-page="login"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>平台登录</button>
   </nav>
-  <div class="sidebar-version" id="sidebar-version">v1.3.0</div>
+  <div class="sidebar-version" id="sidebar-version">v1.3.1</div>
 </div>
 <div class="content" id="content">
   <div class="page active" id="page-main">
@@ -434,8 +434,8 @@ function bindEvents(){
   document.getElementById('chat-stream')?.addEventListener('click',e=>{
     const btn=e.target.closest('[data-action]');
     if(!btn)return;
-    if(btn.dataset.action==='stop')api('POST','/tasks/'+btn.dataset.id+'/stop').then(()=>showToast('已停止'));
-    if(btn.dataset.action==='retry')api('POST','/tasks/'+btn.dataset.id+'/retry').then(()=>showToast('已重试'));
+    if(btn.dataset.action==='stop')api('POST','/remote/tasks/'+btn.dataset.id+'/stop').then(()=>showToast('已停止'));
+    if(btn.dataset.action==='retry')api('POST','/remote/tasks/'+btn.dataset.id+'/retry').then(()=>showToast('已重试'));
   });
   document.getElementById('sub-save-btn')?.addEventListener('click',async()=>{
     await api('POST','/remote/settings',{style:{subtitleTextColor:getColorHex('color'),subtitleStrokeColor:getColorHex('stroke'),subtitlePositionPercent:parseInt(document.getElementById('sub-position')?.value)||12}});
@@ -573,7 +573,7 @@ async function checkPlatformLogin(platform){
   statusEl.textContent='检测中...';statusEl.className='login-status checking';
   qrEl.innerHTML='';if(tipEl)tipEl.style.display='none';
   try{
-    const r=await api('POST','/platform-login',{platform});
+    const r=await api('POST','/remote/platform-login',{platform});
     if(!r){statusEl.textContent='请求失败';statusEl.className='login-status fail';return;}
     if(r.loggedIn){
       statusEl.textContent='已登录';statusEl.className='login-status ok';
@@ -612,7 +612,7 @@ async function confirmScan(platform){
   if(statusEl){statusEl.textContent='确认中...';statusEl.className='login-status checking';}
   document.querySelectorAll('.login-check-btn').forEach(b=>{b.disabled=true;b.style.opacity='0.5';b.style.pointerEvents='none';});
   try{
-    const r=await api('POST','/platform-login',{platform});
+    const r=await api('POST','/remote/platform-login',{platform});
     if(!r){if(statusEl){statusEl.textContent='请求失败';statusEl.className='login-status fail';}return;}
     if(r.loggedIn){
       if(statusEl){statusEl.textContent='已登录';statusEl.className='login-status ok';}
@@ -655,7 +655,7 @@ async function selectWeixinAccount(index){
   document.querySelectorAll('.login-check-btn').forEach(b=>{b.disabled=true;b.style.opacity='0.5';b.style.pointerEvents='none';});
   if(statusEl){statusEl.textContent='选择中...';statusEl.className='login-status checking';}
   try{
-    const r=await api('POST','/select-account',{platform:'weixin',accountIndex:index});
+    const r=await api('POST','/remote/select-account',{platform:'weixin',accountIndex:index});
     if(r?.ok===false){showToast(r.error||'选择失败');return;}
     if(r?.loggedIn){
       if(statusEl){statusEl.textContent='已登录';statusEl.className='login-status ok';}
@@ -700,7 +700,7 @@ async function sendTask(){
   const input=document.getElementById('task-input');if(!input)return;
   const text=input.value.trim();if(!text)return;
   input.disabled=true;const btn=document.getElementById('send-btn');if(btn)btn.disabled=true;
-  try{const d=await api('POST','/tasks',{text});if(d?.ok){showToast('已添加 '+(d.tasks?.length||0)+' 个任务');input.value='';input.style.height='auto'}else showToast(d?.error||'发送失败')}catch{showToast('网络错误')}
+  try{const d=await api('POST','/remote/tasks',{text});if(d?.ok){showToast('已添加 '+(d.tasks?.length||0)+' 个任务');input.value='';input.style.height='auto'}else showToast(d?.error||'发送失败')}catch{showToast('网络错误')}
   input.disabled=false;if(btn)btn.disabled=false;input.focus();
 }
 function renderTasks(){
