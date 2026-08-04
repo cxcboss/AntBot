@@ -9,10 +9,16 @@ let _onUrlChange = null;
 let _onStatusChange = null;
 let _log = null;
 let _stopped = false;
+let _deviceId = null;
+let _deviceName = null;
 
 const TUNNEL_ID = '843f2a80-cd75-4724-a9ce-2f6964227d2b';
 const TUNNEL_DOMAIN = 'remote.onebugmanai.online';
 const CONFIG_PATH = path.join(os.homedir(), '.cloudflared', 'config.yml');
+
+// 自动重启策略：最多 5 次、指数退避（5s → 10s → 20s → 40s → 80s）
+const MAX_RESTART_ATTEMPTS = 5;
+const RESTART_RESET_MS = 5 * 60 * 1000; // 稳定运行 5 分钟后重置计数
 
 function findCloudflared() {
   const { getManagedBinDir } = require('./dependencyManager');
@@ -40,19 +46,23 @@ function findCloudflared() {
   return null;
 }
 
-const HUB_URL = 'https://hub.onebugmanai.online';
+const { HUB_URL, HUB_SECRET, HUB_SECRET_HEADER } = require('./hubConfig');
 const CF_API = 'https://api.cloudflare.com/client/v4';
 const DOMAIN = 'onebugmanai.online';
 const HEARTBEAT_INTERVAL = 60_000; // 60 秒心跳
 
 let _heartbeatTimer = null;
 
-async function registerWithHub(deviceName, tunnelUrl) {
+function hubHeaders() {
+  return { 'Content-Type': 'application/json', [HUB_SECRET_HEADER]: HUB_SECRET };
+}
+
+async function registerWithHub(deviceId, deviceName, tunnelUrl) {
   try {
     const res = await fetch(`${HUB_URL}/api/register`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ deviceName, tunnelUrl })
+      headers: hubHeaders(),
+      body: JSON.stringify({ deviceId, deviceName, tunnelUrl })
     });
     return await res.json();
   } catch (e) {
@@ -60,20 +70,21 @@ async function registerWithHub(deviceName, tunnelUrl) {
   }
 }
 
-async function unregisterFromHub(deviceName) {
+async function unregisterFromHub(deviceId) {
+  if (!deviceId) return;
   try {
     await fetch(`${HUB_URL}/api/unregister`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ deviceName })
+      headers: hubHeaders(),
+      body: JSON.stringify({ deviceId })
     });
   } catch { /* best effort */ }
 }
 
-function startHeartbeat(deviceName) {
+function startHeartbeat() {
   stopHeartbeat();
   _heartbeatTimer = setInterval(() => {
-    if (_tunnelUrl) registerWithHub(deviceName, _tunnelUrl);
+    if (_tunnelUrl && _deviceId) registerWithHub(_deviceId, _deviceName || '', _tunnelUrl);
   }, HEARTBEAT_INTERVAL);
 }
 
@@ -171,13 +182,19 @@ async function setupNamedTunnel(cfToken, port) {
   return { tunnelId, fqdn: `https://${fqdn}`, configPath };
 }
 
-function startTunnel(port, { onUrl, onStatus, log, deviceName } = {}) {
+let _autoRestart = true;
+let _restartAttempts = 0;
+let _stableSince = 0;
+
+function startTunnel(port, { onUrl, onStatus, log, deviceId, deviceName } = {}) {
   return new Promise((resolve, reject) => {
     if (_tunnelProcess) {
       return resolve({ url: _tunnelUrl, alreadyRunning: true });
     }
     _stopped = false;
 
+    if (deviceId) _deviceId = deviceId;
+    if (deviceName) _deviceName = deviceName;
     _onUrlChange = onUrl || (() => {});
     _onStatusChange = onStatus || (() => {});
     _log = log || (() => {});
@@ -189,7 +206,10 @@ function startTunnel(port, { onUrl, onStatus, log, deviceName } = {}) {
 
     // 检查是否有命名隧道配置
     const hasConfig = fs.existsSync(CONFIG_PATH);
-    const useNamed = hasConfig && fs.readFileSync(CONFIG_PATH, 'utf-8').includes(TUNNEL_ID);
+    let useNamed = false;
+    if (hasConfig) {
+      try { useNamed = fs.readFileSync(CONFIG_PATH, 'utf-8').includes(TUNNEL_ID); } catch {}
+    }
 
     _log('info', `启动 Cloudflare Tunnel (端口 ${port})...`);
     _onStatusChange({ status: 'starting' });
@@ -203,6 +223,7 @@ function startTunnel(port, { onUrl, onStatus, log, deviceName } = {}) {
     } else {
       // 回退到 Quick Tunnel
       args = ['tunnel', '--url', `http://127.0.0.1:${port}`];
+      _tunnelUrl = null;
     }
 
     _tunnelProcess = spawn(cloudflared, args, {
@@ -212,6 +233,22 @@ function startTunnel(port, { onUrl, onStatus, log, deviceName } = {}) {
     });
 
     let resolved = false;
+
+    const onConnected = async () => {
+      if (resolved) return;
+      resolved = true;
+      _restartAttempts = 0;
+      _stableSince = Date.now();
+      _onUrlChange(_tunnelUrl);
+      _onStatusChange({ status: 'running', url: _tunnelUrl });
+      // 注册到 Hub
+      if (_deviceId && _tunnelUrl) {
+        const regResult = await registerWithHub(_deviceId, _deviceName || '', _tunnelUrl);
+        if (regResult.ok) { _log('info', '已注册到远程控制中心'); startHeartbeat(); }
+        else _log('error', '注册到 Hub 失败: ' + (regResult.error || '未知错误'));
+      }
+      resolve({ url: _tunnelUrl });
+    };
 
     const parseOutput = (data) => {
       const text = data.toString();
@@ -223,21 +260,9 @@ function startTunnel(port, { onUrl, onStatus, log, deviceName } = {}) {
       if (text.includes('ERR') || text.includes('error') || text.includes('failed')) {
         _log('error', `cloudflared: ${text.trim()}`);
       }
-      // 连接成功（Quick Tunnel 和命名隧道都走这里）
+      // 连接成功（Quick Tunnel 和命名隧道统一走这里）
       if (text.includes('Connection established') || text.includes('Registered tunnel connection')) {
-        if (!resolved) {
-          resolved = true;
-          _onUrlChange(_tunnelUrl);
-          _onStatusChange({ status: 'running', url: _tunnelUrl });
-          // 注册到 Hub
-          if (deviceName && _tunnelUrl) {
-            registerWithHub(deviceName, _tunnelUrl).then(r => {
-              if (r.ok) { _log('info', '已注册到远程控制中心'); startHeartbeat(deviceName); }
-              else _log('error', '注册到 Hub 失败: ' + (r.error || '未知错误'));
-            }).catch(e => _log('error', '注册到 Hub 异常: ' + e.message));
-          }
-          resolve({ url: _tunnelUrl });
-        }
+        onConnected();
       }
     };
 
@@ -253,18 +278,28 @@ function startTunnel(port, { onUrl, onStatus, log, deviceName } = {}) {
       _onStatusChange({ status: 'stopped' });
       _onUrlChange(null);
 
-      // 自动重启（非手动停止时）
+      // 自动重启（非手动停止时），带次数上限 + 指数退避
       if (_autoRestart && code !== 0) {
-        _log('info', '隧道意外断开，5秒后自动重连...');
+        // 稳定运行超过 RESTART_RESET_MS 后重置计数
+        if (_stableSince && Date.now() - _stableSince > RESTART_RESET_MS) {
+          _restartAttempts = 0;
+        }
+        if (_restartAttempts >= MAX_RESTART_ATTEMPTS) {
+          _log('error', `隧道连续重启 ${MAX_RESTART_ATTEMPTS} 次失败，停止重试（请检查网络或配置）`);
+          _onStatusChange({ status: 'error', error: '连续重启失败，已停止重试' });
+          return;
+        }
+        _restartAttempts += 1;
+        const delay = 5000 * Math.pow(2, _restartAttempts - 1);
+        _log('info', `隧道意外断开，${delay / 1000} 秒后自动重连 (${_restartAttempts}/${MAX_RESTART_ATTEMPTS})...`);
         _onStatusChange({ status: 'reconnecting' });
-        await new Promise(r => setTimeout(r, 5000));
+        await new Promise(r => setTimeout(r, delay));
         try {
-          const result = await startTunnel(port, { onUrl, onStatus, log, deviceName });
+          const result = await startTunnel(port, { onUrl, onStatus, log, deviceId: _deviceId, deviceName: _deviceName });
           _log('info', `自动重连成功: ${result.url}`);
-          // 重新注册到 Hub
-          if (deviceName && result.url) {
-            await registerWithHub(deviceName, result.url);
-            startHeartbeat(deviceName);
+          if (_deviceId && result.url) {
+            await registerWithHub(_deviceId, _deviceName || '', result.url);
+            startHeartbeat();
             _log('info', '已重新注册到远程控制中心');
           }
         } catch (e) {
@@ -281,26 +316,7 @@ function startTunnel(port, { onUrl, onStatus, log, deviceName } = {}) {
       if (!resolved) { resolved = true; reject(err); }
     });
 
-    // 命名隧道立即解析并注册到 Hub
-    if (useNamed) {
-      setTimeout(async () => {
-        if (_stopped) return;
-        if (!resolved) {
-          resolved = true;
-          _onUrlChange(_tunnelUrl);
-          _onStatusChange({ status: 'running', url: _tunnelUrl });
-          // 注册到 Hub 中心
-          if (deviceName) {
-            const regResult = await registerWithHub(deviceName, _tunnelUrl);
-            if (regResult.ok) { _log('info', '已注册到远程控制中心'); startHeartbeat(deviceName); }
-            else _log('error', '注册到 Hub 失败: ' + (regResult.error || '未知错误'));
-          }
-          resolve({ url: _tunnelUrl });
-        }
-      }, 3000);
-    }
-
-    // Quick Tunnel 超时
+    // Quick Tunnel / 命名隧道统一超时兜底
     setTimeout(() => {
       if (!resolved) {
         resolved = true;
@@ -310,14 +326,12 @@ function startTunnel(port, { onUrl, onStatus, log, deviceName } = {}) {
   });
 }
 
-let _autoRestart = true;
-
-function stopTunnel(deviceName) {
+function stopTunnel() {
   _stopped = true;
   if (_tunnelProcess) {
     _autoRestart = false; // 手动停止不自动重启
     stopHeartbeat();
-    if (deviceName) unregisterFromHub(deviceName);
+    if (_deviceId) unregisterFromHub(_deviceId);
     _log('info', '停止 Cloudflare Tunnel');
     _tunnelProcess.kill('SIGTERM');
     _tunnelProcess = null;
@@ -327,7 +341,7 @@ function stopTunnel(deviceName) {
   }
 }
 
-function getTunnelUrl() { return _tunnelUrl || `https://${TUNNEL_DOMAIN}`; }
+function getTunnelUrl() { return _tunnelUrl; }
 function isRunning() { return _tunnelProcess !== null; }
 function getStatus() { return { running: isRunning(), url: getTunnelUrl() }; }
 

@@ -114,12 +114,12 @@ function nodeGet(url, maxRedirects = 5) {
   });
 }
 
-function nodePost(url, body) {
+function nodePost(url, body, headers = {}) {
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify(body);
     const parsed = new URL(url);
     const mod = parsed.protocol === 'https:' ? https : http;
-    const options = { method: 'POST', hostname: parsed.hostname, port: parsed.port, path: parsed.pathname, headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }, timeout: 30000 };
+    const options = { method: 'POST', hostname: parsed.hostname, port: parsed.port, path: parsed.pathname, headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload), ...headers }, timeout: 30000 };
     const req = mod.request(options, (res) => {
       let data = '';
       res.on('data', (chunk) => { data += chunk; });
@@ -239,21 +239,23 @@ async function downloadUpdate(remote) {
   for (const filePath of files) {
     try {
       const content = await downloadWithRetry(filePath);
-      // 写入本地
-      const localPath = path.join(LOCAL_DIR, filePath);
-      await fs.mkdir(path.dirname(localPath), { recursive: true });
-      await fs.writeFile(localPath, content, 'utf-8');
 
-      // SHA256 校验（如果远程提供了）
+      // SHA256 校验必须先于写入：校验失败不能留下坏文件，
+      // 否则 getMobileHTML() 优先读本地文件 → 损坏页面实际生效
       const expectedHash = remote.files[filePath]?.sha256;
       if (expectedHash) {
         const actualHash = sha256(content);
         if (actualHash !== expectedHash) {
-          _log('warn', `[热更新] ${filePath} SHA256 校验失败，跳过`);
+          _log('warn', `[热更新] ${filePath} SHA256 校验失败，跳过（未写入）`);
           failed.push(filePath);
           continue;
         }
       }
+
+      // 校验通过后才写入本地
+      const localPath = path.join(LOCAL_DIR, filePath);
+      await fs.mkdir(path.dirname(localPath), { recursive: true });
+      await fs.writeFile(localPath, content, 'utf-8');
 
       downloaded.push(filePath);
       _log('info', `[热更新] 已下载: ${filePath}`);
@@ -270,11 +272,12 @@ async function downloadUpdate(remote) {
     await fs.writeFile(LOCAL_VERSION_FILE, JSON.stringify(remote, null, 2), 'utf-8');
     _log('info', `[热更新] 已更新到 v${remote.version}`);
 
-    // 推送 Hub HTML 到 Cloudflare Worker
+    // 推送 Hub HTML 到 Cloudflare Worker（带共享密钥鉴权）
     try {
+      const { HUB_SECRET, HUB_SECRET_HEADER } = require('./hubConfig');
       const hubHtml = await getLocalFile('hub/index.html');
       if (hubHtml) {
-        await nodePost('https://hub.onebugmanai.online/api/update-html', { html: hubHtml, version: remote.version });
+        await nodePost('https://hub.onebugmanai.online/api/update-html', { html: hubHtml, version: remote.version }, { [HUB_SECRET_HEADER]: HUB_SECRET });
         _log('info', `[热更新] Hub 页面已同步到云端`);
       }
     } catch (e) {

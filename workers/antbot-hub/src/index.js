@@ -16,6 +16,44 @@
 const ONLINE_TTL = 300;
 const ONLINE_THRESHOLD = 120;
 
+// 与 App 端共享的 API 密钥（wrangler secret put HUB_SECRET=xxx 可覆盖）
+const DEFAULT_HUB_SECRET = 'antbot-hub-2026-default-secret';
+
+// verify 限速：每设备 10 分钟内最多 5 次失败（内存态，单实例有效）
+const VERIFY_LIMIT = 5;
+const VERIFY_WINDOW_MS = 10 * 60 * 1000;
+const _rateLimit = new Map(); // deviceId -> { count, resetAt }
+
+function checkSecret(request, env) {
+  const secret = env.HUB_SECRET || DEFAULT_HUB_SECRET;
+  return request.headers.get('x-hub-secret') === secret;
+}
+
+function isRateLimited(deviceId) {
+  const now = Date.now();
+  const entry = _rateLimit.get(deviceId);
+  if (!entry || entry.resetAt < now) {
+    _rateLimit.set(deviceId, { count: 0, resetAt: now + VERIFY_WINDOW_MS });
+    return false;
+  }
+  if (entry.count >= VERIFY_LIMIT) return true;
+  return false;
+}
+
+function recordFailure(deviceId) {
+  const now = Date.now();
+  const entry = _rateLimit.get(deviceId);
+  if (!entry || entry.resetAt < now) {
+    _rateLimit.set(deviceId, { count: 1, resetAt: now + VERIFY_WINDOW_MS });
+    return;
+  }
+  entry.count += 1;
+}
+
+function clearRateLimit(deviceId) {
+  _rateLimit.delete(deviceId);
+}
+
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
@@ -137,7 +175,7 @@ function renderDevices(devices) {
   el.innerHTML = devices.map(d => {
     const online = d.online;
     const cls = online ? '' : ' offline';
-    return '<div class="device-card'+cls+'" data-url="'+escapeHtml(d.tunnelUrl)+'" data-name="'+escapeHtml(d.deviceName)+'" data-online="'+online+'">'
+    return '<div class="device-card'+cls+'" data-id="'+escapeHtml(d.deviceId)+'" data-url="'+escapeHtml(d.tunnelUrl)+'" data-name="'+escapeHtml(d.deviceName)+'" data-online="'+online+'">'
       + '<div class="device-icon">💻</div>'
       + '<div class="device-info">'
       + '<div class="device-name">'+escapeHtml(d.deviceName)+'</div>'
@@ -149,11 +187,11 @@ function renderDevices(devices) {
       + '</div>';
   }).join('');
   el.querySelectorAll('.device-card[data-online="true"]').forEach(card => {
-    card.addEventListener('click', () => showPasswordModal(card.dataset.name, card.dataset.url));
+    card.addEventListener('click', () => showPasswordModal(card.dataset.name, card.dataset.url, card.dataset.id));
   });
 }
 
-function showPasswordModal(deviceName, tunnelUrl) {
+function showPasswordModal(deviceName, tunnelUrl, deviceId) {
   const root = document.getElementById('modal-root');
   root.innerHTML = '<div class="modal-overlay" id="pw-modal">'
     + '<div class="modal">'
@@ -184,12 +222,12 @@ function showPasswordModal(deviceName, tunnelUrl) {
       const res = await fetch('/api/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ deviceName, password })
+        body: JSON.stringify({ deviceId, password })
       });
       const data = await res.json();
       if (data.ok) {
         const sep = tunnelUrl.includes('?') ? '&' : '?';
-        window.location.href = tunnelUrl + sep + 'hub_token=' + data.token + '&device_name=' + encodeURIComponent(deviceName);
+        window.location.href = tunnelUrl + sep + 'hub_token=' + data.token + '&device_id=' + encodeURIComponent(deviceId) + '&device_name=' + encodeURIComponent(deviceName);
       } else {
         error.textContent = data.error || '密码错误';
         confirm.disabled = false;
@@ -227,15 +265,15 @@ refreshTimer = setInterval(fetchDevices, REFRESH_INTERVAL);
 // ─── API 处理 ───
 
 async function handleRegister(request, env) {
-  const { deviceName, tunnelUrl } = await request.json();
-  if (!deviceName || !tunnelUrl) {
-    return json({ ok: false, error: '缺少 deviceName 或 tunnelUrl' }, 400);
+  const { deviceId, deviceName, tunnelUrl } = await request.json();
+  if (!deviceId || !deviceName || !tunnelUrl) {
+    return json({ ok: false, error: '缺少 deviceId / deviceName / tunnelUrl' }, 400);
   }
-  const key = `device:${deviceName}`;
+  const key = `device:${deviceId}`;
   const now = Date.now();
-  const value = JSON.stringify({ deviceName, tunnelUrl, lastSeen: now });
+  const value = JSON.stringify({ deviceId, deviceName, tunnelUrl, lastSeen: now });
   await env.DEVICES.put(key, value, { expirationTtl: ONLINE_TTL });
-  return json({ ok: true, deviceName });
+  return json({ ok: true, deviceId, deviceName });
 }
 
 async function handleDevices(request, env) {
@@ -248,7 +286,10 @@ async function handleDevices(request, env) {
     if (!raw) continue;
     try {
       const d = JSON.parse(raw);
+      // 跳过旧版格式记录（无 deviceId，等待 TTL 自动过期）
+      if (!d.deviceId) continue;
       devices.push({
+        deviceId: d.deviceId,
         deviceName: d.deviceName,
         tunnelUrl: d.tunnelUrl,
         online: (now - d.lastSeen) < ONLINE_THRESHOLD * 1000,
@@ -266,19 +307,24 @@ async function handleDevices(request, env) {
 }
 
 async function handleUnregister(request, env) {
-  const { deviceName } = await request.json();
-  if (!deviceName) return json({ ok: false, error: '缺少 deviceName' }, 400);
-  await env.DEVICES.delete(`device:${deviceName}`);
+  const { deviceId } = await request.json();
+  if (!deviceId) return json({ ok: false, error: '缺少 deviceId' }, 400);
+  await env.DEVICES.delete(`device:${deviceId}`);
+  clearRateLimit(deviceId);
   return json({ ok: true });
 }
 
 async function handleVerify(request, env) {
-  const { deviceName, password } = await request.json();
-  if (!deviceName || !password) {
+  const { deviceId, password } = await request.json();
+  if (!deviceId || !password) {
     return json({ ok: false, error: '缺少参数' }, 400);
   }
 
-  const raw = await env.DEVICES.get(`device:${deviceName}`);
+  if (isRateLimited(deviceId)) {
+    return json({ ok: false, error: '尝试次数过多，请稍后再试' }, 429);
+  }
+
+  const raw = await env.DEVICES.get(`device:${deviceId}`);
   if (!raw) return json({ ok: false, error: '设备不存在或已离线' }, 404);
 
   let device;
@@ -299,8 +345,10 @@ async function handleVerify(request, env) {
     clearTimeout(timeout);
     const data = await res.json();
     if (data.ok && data.token) {
+      clearRateLimit(deviceId);
       return json({ ok: true, token: data.token });
     }
+    recordFailure(deviceId);
     return json({ ok: false, error: data.error || '密码错误' }, 401);
   } catch (e) {
     if (e.name === 'AbortError') {
@@ -320,13 +368,21 @@ export default {
 
     if (method === 'OPTIONS') return options();
 
-    if (path === '/api/register' && method === 'POST') return handleRegister(request, env);
+    // 设备注册/注销/验证需要共享密钥鉴权（防止设备列表污染与钓鱼）
+    if (path === '/api/register' && method === 'POST') {
+      if (!checkSecret(request, env)) return json({ ok: false, error: '未授权' }, 401);
+      return handleRegister(request, env);
+    }
     if (path === '/api/devices' && method === 'GET') return handleDevices(request, env);
-    if (path === '/api/unregister' && method === 'POST') return handleUnregister(request, env);
+    if (path === '/api/unregister' && method === 'POST') {
+      if (!checkSecret(request, env)) return json({ ok: false, error: '未授权' }, 401);
+      return handleUnregister(request, env);
+    }
     if (path === '/api/verify' && method === 'POST') return handleVerify(request, env);
 
-    // 更新 Hub HTML（由 App 端调用）
+    // 更新 Hub HTML（由 App 端调用，需共享密钥）
     if (path === '/api/update-html' && method === 'POST') {
+      if (!checkSecret(request, env)) return json({ ok: false, error: '未授权' }, 401);
       const { html, version } = await request.json();
       if (!html) return json({ ok: false, error: '缺少 html' }, 400);
       await env.DEVICES.put('hub-html-cache', JSON.stringify({ html, version }), { expirationTtl: 86400 * 7 });

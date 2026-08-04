@@ -237,6 +237,19 @@ async function bootstrap() {
     systemControl
   });
   ipcCleanup = ipc.cleanup;
+
+  // 主进程远程自动启动（autoStart 设置），不依赖渲染端执行
+  try {
+    const { startRemoteAutoStart } = require('./services/remoteAutoStart');
+    startRemoteAutoStart({
+      store,
+      taskRunner,
+      mainWindowRef: () => mainWindow,
+      appLog: (level, msg) => console.log(`[${level}] ${msg}`),
+    });
+  } catch (e) {
+    console.log(`[remote] 自动启动初始化失败: ${e.message}`);
+  }
 }
 
 // 全局未处理异常捕获

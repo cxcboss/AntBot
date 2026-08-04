@@ -5,13 +5,19 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 
 const REMOTE_PORT = 18931;
+const TOKEN_TTL = 24 * 60 * 60 * 1000; // 会话 24 小时过期
+const MAX_BODY_BYTES = 1024 * 1024; // 请求体上限 1MB
+const MAX_LOGIN_FAILURES = 10; // 10 次登录失败
+const LOGIN_LOCK_MS = 15 * 60 * 1000; // 锁 15 分钟
 let _server = null;
 let _taskRunner = null;
 let _store = null;
 let _mainWindowRef = null;
 let _appLog = null;
 let _eventClients = new Set();
-let _sessions = new Map(); // token -> { username, createdAt }
+let _sessions = new Map(); // token -> { username, createdAt, expiresAt }
+let _loginFailures = []; // 失败时间戳数组（全局限速，隧道转发后拿不到真实 IP）
+let _loginLockUntil = 0;
 
 function log(level, msg) {
   if (_appLog) _appLog(level, `[remote] ${msg}`);
@@ -39,20 +45,68 @@ function sendHtml(res, html) {
   res.end(html);
 }
 
-function readBody(req) {
+function readBody(req, res) {
   return new Promise((resolve) => {
     let body = '';
-    req.on('data', chunk => body += chunk);
-    req.on('end', () => {
-      try { resolve(JSON.parse(body)); } catch { resolve({}); }
+    let size = 0;
+    let done = false;
+    const finish = (data) => {
+      if (done) return;
+      done = true;
+      resolve(data);
+    };
+    req.on('data', (chunk) => {
+      size += chunk.length;
+      if (size > MAX_BODY_BYTES) {
+        finish(null);
+        if (res && !res.headersSent) {
+          res.writeHead(413, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: '请求体过大' }));
+        }
+        req.destroy();
+        return;
+      }
+      body += chunk;
     });
+    req.on('end', () => {
+      try { finish(JSON.parse(body)); } catch { finish({}); }
+    });
+    req.on('error', () => finish({}));
   });
 }
 
 function authenticate(req) {
   const auth = req.headers['authorization'] || '';
   const token = auth.replace('Bearer ', '');
-  return _sessions.has(token);
+  const session = _sessions.get(token);
+  if (!session) return false;
+  if (session.expiresAt < Date.now()) {
+    _sessions.delete(token);
+    return false;
+  }
+  return true;
+}
+
+// 登录限速：1 小时内失败 MAX_LOGIN_FAILURES 次 → 锁 LOGIN_LOCK_MS
+function isLoginLocked() {
+  if (Date.now() < _loginLockUntil) return true;
+  const hourAgo = Date.now() - 60 * 60 * 1000;
+  _loginFailures = _loginFailures.filter((t) => t > hourAgo);
+  return false;
+}
+
+function recordLoginFailure() {
+  _loginFailures.push(Date.now());
+  if (_loginFailures.length >= MAX_LOGIN_FAILURES) {
+    _loginLockUntil = Date.now() + LOGIN_LOCK_MS;
+    _loginFailures = [];
+    log('warn', `登录失败次数过多，锁定 ${LOGIN_LOCK_MS / 60000} 分钟`);
+  }
+}
+
+function clearSessions() {
+  _sessions.clear();
+  log('info', '全部远程会话已失效（凭证变更）');
 }
 
 function broadcast(event, data) {
@@ -122,26 +176,33 @@ function startRemoteServer({ store, taskRunner, mainWindowRef, appLog }) {
 
       // Login
       if (method === 'POST' && pathname === '/remote/login') {
-        const body = await readBody(req);
-        // 从独立凭证文件读取
-        let remotePass = '';
-        try {
-          const credsPath = path.join(os.homedir(), 'AntBot', 'remote-credentials.json');
-          const creds = JSON.parse(await fs.readFile(credsPath, 'utf-8'));
-          remotePass = creds.password || '';
-        } catch {}
+        const body = await readBody(req, res);
+        if (!body) return;
+
+        // 从统一凭证模块读取（safeStorage 加密存储）
+        const { readCreds } = require('./remoteCredentials');
+        const creds = await readCreds();
+        const remotePass = creds.password || '';
 
         if (!remotePass) {
           return sendJson(res, 400, { ok: false, error: '请先在 App 中设置远程访问密码' });
         }
+        if (isLoginLocked()) {
+          return sendJson(res, 429, { ok: false, error: '尝试次数过多，请 15 分钟后再试' });
+        }
         if (body.password !== remotePass) {
+          recordLoginFailure();
           return sendJson(res, 401, { ok: false, error: '密码错误' });
         }
 
         const token = generateToken();
-        _sessions.set(token, { username: 'admin', createdAt: Date.now() });
+        _sessions.set(token, {
+          username: 'admin',
+          createdAt: Date.now(),
+          expiresAt: Date.now() + TOKEN_TTL,
+        });
         log('info', '登录成功');
-        return sendJson(res, 200, { ok: true, token });
+        return sendJson(res, 200, { ok: true, token, expiresIn: TOKEN_TTL });
       }
 
       // Mobile page
@@ -199,7 +260,8 @@ function startRemoteServer({ store, taskRunner, mainWindowRef, appLog }) {
 
       // POST /remote/tasks — submit new task
       if (method === 'POST' && pathname === '/remote/tasks') {
-        const body = await readBody(req);
+        const body = await readBody(req, res);
+        if (!body) return;
         const text = (body.text || '').trim();
         if (!text) return sendJson(res, 400, { ok: false, error: '请输入链接' });
 
@@ -250,14 +312,13 @@ function startRemoteServer({ store, taskRunner, mainWindowRef, appLog }) {
         } catch { return sendJson(res, 200, { ok: true, history: [] }); }
       }
 
-      // GET /remote/credentials — 读取用户名密码（不经过 getSettings 清空）
+      // GET /remote/credentials — 读取远程凭证（统一模块，与登录同源）
       if (method === 'GET' && pathname === '/remote/credentials') {
         try {
-          const storePath = path.join(os.homedir(), 'AntBot', 'antbot-store.json');
-          const data = JSON.parse(await fs.readFile(storePath, 'utf-8'));
-          const remote = data.users?.[0]?.settings?.remote || {};
-          return sendJson(res, 200, { ok: true, username: remote.username || '', password: remote.password || '' });
-        } catch { return sendJson(res, 200, { ok: true, username: '', password: '' }); }
+          const { readCreds } = require('./remoteCredentials');
+          const creds = await readCreds();
+          return sendJson(res, 200, { ok: true, username: creds.username || '', password: creds.password || '', deviceName: creds.deviceName || '' });
+        } catch { return sendJson(res, 200, { ok: true, username: '', password: '', deviceName: '' }); }
       }
 
       // GET /remote/settings — 读取设置（字幕/风格/音色等）
@@ -274,7 +335,21 @@ function startRemoteServer({ store, taskRunner, mainWindowRef, appLog }) {
 
       // POST /remote/settings — 更新设置
       if (method === 'POST' && pathname === '/remote/settings') {
-        const body = await readBody(req);
+        const body = await readBody(req, res);
+        if (!body) return;
+
+        // 拦截远程密码：写入统一凭证模块（safeStorage 加密），
+        // 旧实现写 store 会被强制清空且登录不读取 → 改密码永远不生效
+        if (body.remote && typeof body.remote === 'object') {
+          if (typeof body.remote.password === 'string' && body.remote.password !== '') {
+            const { writeCreds } = require('./remoteCredentials');
+            await writeCreds({ password: body.remote.password });
+            clearSessions();
+            log('info', '远程密码已更新，全部会话失效');
+          }
+          delete body.remote;
+        }
+
         await _store.updateSettings(body);
         // 广播设置变更到所有 SSE 客户端
         broadcast('settings-update', body);
@@ -302,7 +377,7 @@ function startRemoteServer({ store, taskRunner, mainWindowRef, appLog }) {
 
       // POST /remote/platform-login — 检测平台登录状态
       if (method === 'POST' && pathname === '/remote/platform-login') {
-        const loginBody = await readBody(req);
+        const loginBody = await readBody(req, res);
         const platform = loginBody?.platform || 'douyin';
         try {
           const { createBrowserPublishBridge } = require('./browserPublishBridge');
@@ -320,7 +395,7 @@ function startRemoteServer({ store, taskRunner, mainWindowRef, appLog }) {
 
       // POST /remote/select-account — 选择视频号账号
       if (method === 'POST' && pathname === '/remote/select-account') {
-        const selectBody = await readBody(req);
+        const selectBody = await readBody(req, res);
         const platform = selectBody?.platform || 'weixin';
         const accountIndex = Number(selectBody?.accountIndex) || 0;
         try {
@@ -362,6 +437,12 @@ function stopRemoteServer() {
   }
   _eventClients.clear();
   _sessions.clear();
+  _loginFailures = [];
+  _loginLockUntil = 0;
+}
+
+function isServerRunning() {
+  return _server !== null;
 }
 
 function getRemotePort() {
@@ -376,6 +457,8 @@ function broadcastTaskUpdate(task) {
 module.exports = {
   startRemoteServer,
   stopRemoteServer,
+  isServerRunning,
+  clearSessions,
   getRemotePort,
   broadcastTaskUpdate,
 };

@@ -2057,17 +2057,5 @@ async function init(){
   // 加载持久化的主控任务（重新发布状态）
   try { S.persistedTasks = await window.antbot.getPersistedTasks() || []; } catch { S.persistedTasks = []; }
   renderChat();
-
-  // 自动启动远程访问（如果开启）
-  try {
-    const creds = await window.antbot.remoteGetCredentials();
-    if (creds.autoStart && creds.password) {
-      const r = await window.antbot.remoteStart({ password: creds.password, deviceName: creds.deviceName || '' });
-      if (r.ok) {
-        const t = await window.antbot.remoteStartTunnel().catch(() => ({}));
-        if (t?.ok) console.log('[远程] 自动启动成功:', t.url);
-      }
-    }
-  } catch {}
 }
 init();

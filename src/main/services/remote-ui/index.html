@@ -144,18 +144,20 @@ let token=localStorage.getItem('antbot-token');
 let tasks=[];
 let sseSource=null;
 let currentPage='main';
-let userPassword=localStorage.getItem('antbot-pass')||'';
+let deviceId=localStorage.getItem('antbot-device-id')||'';
 let deviceName=localStorage.getItem('antbot-device')||'';
 let consecutiveErrors=0;
 let reconnectTimer=null;
 
-// 从 URL 参数获取 Hub 传递的 token 和设备名
+// 从 URL 参数获取 Hub 传递的 token 和设备标识
 const urlParams=new URLSearchParams(window.location.search);
 const hubToken=urlParams.get('hub_token');
+const hubDeviceId=urlParams.get('device_id');
 const hubDevice=urlParams.get('device_name');
 if(hubToken){
   token=hubToken;
   localStorage.setItem('antbot-token',token);
+  if(hubDeviceId){deviceId=hubDeviceId;localStorage.setItem('antbot-device-id',deviceId);}
   if(hubDevice){deviceName=hubDevice;localStorage.setItem('antbot-device',deviceName);}
   // 清除 URL 参数
   window.history.replaceState({},'',window.location.pathname);
@@ -168,30 +170,28 @@ async function login(password){
     const res=await fetch(API+'/remote/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:'admin',password})});
     const data=await res.json();
     if(data.ok){
-      token=data.token;userPassword=password;
+      token=data.token;
       localStorage.setItem('antbot-token',token);
-      localStorage.setItem('antbot-pass',password);
       initApp();
     }else{showToast(data.error||'登录失败')}
   }catch(e){showToast('网络错误')}
 }
 
 function logout(){
-  token=null;userPassword='';
+  token=null;
   if(reconnectTimer)clearTimeout(reconnectTimer);
   if(sseSource)sseSource.close();
   localStorage.removeItem('antbot-token');
-  localStorage.removeItem('antbot-pass');
   renderLogin();
 }
 
 function exitToHub(){
-  token=null;userPassword='';
+  token=null;
   if(reconnectTimer)clearTimeout(reconnectTimer);
   if(sseSource)sseSource.close();
   localStorage.removeItem('antbot-token');
-  localStorage.removeItem('antbot-pass');
   localStorage.removeItem('antbot-device');
+  localStorage.removeItem('antbot-device-id');
   window.location.href=HUB_URL;
 }
 
@@ -240,15 +240,15 @@ function connectSSE(){
 
 async function reconnectViaHub(){
   if(reconnectTimer)clearTimeout(reconnectTimer);
-  if(!deviceName)return;
+  if(!deviceId)return;
   try{
     const res=await fetch(HUB_URL+'/api/devices');
     const data=await res.json();
     if(data.ok){
-      const dev=data.devices.find(d=>d.deviceName===deviceName);
+      const dev=data.devices.find(d=>d.deviceId===deviceId);
       if(dev&&dev.tunnelUrl&&dev.tunnelUrl!==API){
         showBanner('newurl');API=dev.tunnelUrl;
-        setTimeout(()=>{const sep=API.includes('?')?'&':'?';window.location.href=API+sep+'hub_token='+(token||'')+'&device_name='+encodeURIComponent(deviceName)},1500);
+        setTimeout(()=>{const sep=API.includes('?')?'&':'?';window.location.href=API+sep+'hub_token='+(token||'')+'&device_id='+encodeURIComponent(deviceId)+'&device_name='+encodeURIComponent(deviceName)},1500);
         return;
       }
     }
@@ -314,7 +314,7 @@ function renderAppShell(){
     <button class="nav-item" data-page="remote"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>远程</button>
     <button class="nav-item" data-page="login"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>平台登录</button>
   </nav>
-  <div class="sidebar-version" id="sidebar-version">v1.1.1</div>
+  <div class="sidebar-version" id="sidebar-version">v1.2.0</div>
 </div>
 <div class="content" id="content">
   <div class="page active" id="page-main">

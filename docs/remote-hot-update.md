@@ -151,11 +151,27 @@ semver 比较版本号
 |------|------|
 | GitHub 不可达 | 静默忽略，使用本地缓存或内置版本 |
 | 下载单个文件失败 | 自动重试 3 次（间隔递增），仍失败则保留旧版本 |
-| SHA256 校验失败 | 跳过该文件，不更新版本号 |
+| SHA256 校验失败 | 跳过该文件且**不写入磁盘**（先校验后落盘），不更新版本号 |
 | 本地目录不存在 | 自动创建 |
 | KV 缓存过期 | Worker 回退到内嵌版本 |
 | App 未启动 | 不会自动更新，下次启动时检查 |
 | 更新后有问题 | 可从 `.backup/vX.X.X/` 目录恢复旧版本 |
+
+## Hub Worker 安全机制（v1.2.0 起）
+
+| 机制 | 说明 |
+|------|------|
+| 共享密钥鉴权 | `/api/register`、`/api/unregister`、`/api/update-html` 必须带 `x-hub-secret` 头；密钥 = `env.HUB_SECRET`（`wrangler secret put HUB_SECRET=xxx` 可覆盖），默认值与 App 端 `src/main/services/hubConfig.js` 一致 |
+| 设备唯一 ID | 设备注册 key 从 deviceName 改为 `deviceId`（App 生成 UUID 持久化在凭证文件），重名设备不再互踢，换设备名不残留旧注册 |
+| verify 限速 | 每设备 10 分钟最多 5 次密码失败（Worker 内存态） |
+| 设备端防护 | 远程登录 1 小时失败 10 次锁 15 分钟；会话 token 24 小时过期；改密码立即清空全部会话 |
+
+## 远程凭证存储（v1.2.0 起）
+
+- **唯一密码来源**：`~/AntBot/remote-credentials.json`（App 桌面端、远程页面改密、autoStart 全部走这里）
+- 密码用 Electron `safeStorage` 加密（macOS Keychain / Windows DPAPI），不再明文存储
+- 远程页面 localStorage 不再保存密码明文，只存 24h 过期的会话 token
+- 旧版写 `antbot-store.json` 的 `settings.remote.password` 路径已废弃（store 会强制清空且登录不读取）
 
 ## 网络说明
 
@@ -182,6 +198,7 @@ semver 比较版本号
 - [ ] `version.json` — 递增版本号（必须，semver 格式）
 - [ ] 如果修改了 IPC/API → 检查 `ipc.js`、`preload.js`、`remoteServer.js`
 - [ ] 如果修改了设置 UI → 检查 `index.html`、`app.js`
+- [ ] 如果修改了 Hub Worker API → 检查 `src/main/services/hubConfig.js` 的 `HUB_SECRET` 是否与 Worker 端一致
 - [ ] Hub Worker 有改动 → 重新 `wrangler deploy`
 - [ ] App 有改动 → 重新 `npm run build:mac`
 - [ ] 验证：App 启动后检查更新是否正常、页面是否加载最新版本

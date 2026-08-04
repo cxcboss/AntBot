@@ -5,60 +5,49 @@ const { shell } = require('electron');
 
 function register({ ipcMain, store, taskRunner, mainWindowRef, appLog }) {
   // 远程控制服务（延迟启动，按需开启）
-  let remoteServerStarted = false;
-  const { startRemoteServer, stopRemoteServer, getRemotePort, broadcastTaskUpdate } = require('../services/remoteServer');
+  const { startRemoteServer, stopRemoteServer, isServerRunning, getRemotePort, broadcastTaskUpdate, clearSessions } = require('../services/remoteServer');
   const tunnelManager = require('../services/tunnelManager');
+  const { readCreds, writeCreds, getDeviceId } = require('../services/remoteCredentials');
 
   // 主控任务进度推送到远程 SSE
   taskRunner.onProgress = ((originalOnProgress) => (payload) => {
     if (originalOnProgress) originalOnProgress(payload);
     // 推送到远程 SSE 客户端
-    if (remoteServerStarted) {
+    if (isServerRunning()) {
       for (const task of (payload.tasks || [])) {
         broadcastTaskUpdate(task);
       }
     }
   })(taskRunner.onProgress);
 
-  // 远程凭证独立存储（不经过 store.getSettings 清空）
-  const REMOTE_CREDS_PATH = path.join(os.homedir(), 'AntBot', 'remote-credentials.json');
-
-  async function readRemoteCreds() {
-    try {
-      return JSON.parse(await fs.readFile(REMOTE_CREDS_PATH, 'utf-8'));
-    } catch { return { username: '', password: '', autoStart: false }; }
-  }
-
-  async function writeRemoteCreds(creds) {
-    const dir = path.dirname(REMOTE_CREDS_PATH);
-    await fs.mkdir(dir, { recursive: true }).catch(() => {});
-    await fs.writeFile(REMOTE_CREDS_PATH, JSON.stringify(creds, null, 2));
-  }
-
   ipcMain.handle('remote:start', async (_event, { password, deviceName } = {}) => {
-    // 保存凭证到独立文件
-    if (password) {
-      await writeRemoteCreds({ password, deviceName: deviceName || '', autoStart: true });
+    // 保存凭证到独立文件（safeStorage 加密）；
+    // autoStart 保持用户设置，不因"保存并启用"被强制覆盖
+    if (password || deviceName) {
+      const existing = await readCreds();
+      await writeCreds({
+        password: password !== undefined ? password : existing.password,
+        deviceName: deviceName !== undefined ? deviceName : existing.deviceName,
+        autoStart: existing.autoStart,
+      });
+      if (password !== undefined && password !== existing.password) clearSessions();
     }
-    if (!remoteServerStarted) {
+    if (!isServerRunning()) {
       startRemoteServer({ store, taskRunner, mainWindowRef, appLog });
-      remoteServerStarted = true;
     }
     return { ok: true, port: getRemotePort() };
   });
 
   ipcMain.handle('remote:stop', async () => {
-    const creds = await readRemoteCreds();
     stopRemoteServer();
-    remoteServerStarted = false;
-    tunnelManager.stopTunnel(creds.deviceName || creds.username);
+    tunnelManager.stopTunnel();
     return { ok: true };
   });
 
   ipcMain.handle('remote:start-tunnel', async () => {
     try {
-      // 读取凭证用于注册到 Hub
-      const creds = await readRemoteCreds();
+      const creds = await readCreds();
+      const deviceId = await getDeviceId();
       const result = await tunnelManager.startTunnel(getRemotePort(), {
         onUrl: (url) => {
           const win = mainWindowRef();
@@ -69,7 +58,8 @@ function register({ ipcMain, store, taskRunner, mainWindowRef, appLog }) {
           if (win && !win.isDestroyed()) win.webContents.send('remote:tunnel-status', status);
         },
         log: appLog,
-        deviceName: creds.deviceName || creds.username || os.hostname(),
+        deviceId,
+        deviceName: creds.deviceName || os.hostname(),
       });
       return { ok: true, url: result.url };
     } catch (e) {
@@ -78,14 +68,13 @@ function register({ ipcMain, store, taskRunner, mainWindowRef, appLog }) {
   });
 
   ipcMain.handle('remote:stop-tunnel', async () => {
-    const creds = await readRemoteCreds();
-    tunnelManager.stopTunnel(creds.deviceName || creds.username);
+    tunnelManager.stopTunnel();
     return { ok: true };
   });
 
   ipcMain.handle('remote:status', async () => {
     return {
-      serverRunning: remoteServerStarted,
+      serverRunning: isServerRunning(),
       tunnel: tunnelManager.getStatus(),
       port: getRemotePort(),
     };
@@ -106,15 +95,19 @@ function register({ ipcMain, store, taskRunner, mainWindowRef, appLog }) {
   });
 
   ipcMain.handle('remote:get-credentials', async () => {
-    const creds = await readRemoteCreds();
+    const creds = await readCreds();
     if (!creds.deviceName) creds.deviceName = os.hostname();
     return creds;
   });
 
   ipcMain.handle('remote:update-credentials', async (_event, updates) => {
-    const existing = await readRemoteCreds();
+    const existing = await readCreds();
     const merged = { ...existing, ...updates };
-    await writeRemoteCreds(merged);
+    await writeCreds(merged);
+    // 桌面端改密码 → 远程会话全部失效
+    if (typeof updates.password === 'string' && updates.password !== existing.password) {
+      clearSessions();
+    }
     return { ok: true };
   });
 
