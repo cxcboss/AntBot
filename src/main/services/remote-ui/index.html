@@ -15,145 +15,250 @@
 })();
 </script>
 <style>
+/* ── Design Tokens（与 App 端 design-tokens.css 一致） ── */
 :root{
-  --bg:#fafafa;--card:#ffffff;--fg:#0a0a0a;--muted:#78716c;--muted-foreground:#78716c;
-  --border:#e7e5e2;--primary:#0d9488;--primary-hover:#0f766e;--primary-foreground:#ffffff;
-  --accent:#f0fdfa;--accent-fg:#0d9488;
-  --destructive:#dc2626;--destructive-bg:#fef2f2;
-  --success:#16a34a;--success-bg:#f0fdf4;
-  --warning:#d97706;--warning-bg:#fffbeb;
-  --radius:8px;--radius-lg:12px;--radius-xl:16px;
-  --shadow:0 4px 6px -1px rgba(0,0,0,.08);
-  --font:-apple-system,BlinkMacSystemFont,"SF Pro Display","PingFang SC","Inter",sans-serif;
+  color-scheme:light;
+  --background:#fafafa;--foreground:#0a0a0a;
+  --card:#ffffff;--card-foreground:#0a0a0a;
+  --popover:#ffffff;--popover-foreground:#0a0a0a;
+  --primary:#0d9488;--primary-hover:#0f766e;--primary-foreground:#ffffff;
+  --secondary:#f5f3f0;--secondary-foreground:#1a1d23;
+  --muted:#f0ede8;--muted-foreground:#78716c;
+  --accent:#f0fdfa;--accent-foreground:#0d9488;
+  --destructive:#dc2626;--destructive-foreground:#ffffff;
+  --success:#16a34a;--success-foreground:#ffffff;
+  --warning:#d97706;--warning-foreground:#ffffff;
+  --destructive-bg:#fef2f2;--success-bg:#f0fdf4;--warning-bg:#fffbeb;
+  --border:#e7e5e2;--input:#e7e5e2;--ring:#0d9488;
+  --radius-xs:4px;--radius-sm:6px;--radius:8px;--radius-lg:12px;--radius-xl:16px;--radius-full:9999px;
+  --shadow-xs:0 1px 2px rgba(0,0,0,.04);
+  --shadow-sm:0 1px 3px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.04);
+  --shadow:0 4px 6px -1px rgba(0,0,0,.07),0 2px 4px -2px rgba(0,0,0,.05);
+  --shadow-md:0 10px 15px -3px rgba(0,0,0,.08),0 4px 6px -4px rgba(0,0,0,.04);
+  --shadow-lg:0 20px 25px -5px rgba(0,0,0,.1),0 8px 10px -6px rgba(0,0,0,.06);
+  --transition-fast:120ms cubic-bezier(.4,0,.2,1);
+  --transition-normal:200ms cubic-bezier(.4,0,.2,1);
+  --transition-slow:300ms cubic-bezier(.4,0,.2,1);
+  --font-sans:-apple-system,BlinkMacSystemFont,"SF Pro Display","PingFang SC","Inter",sans-serif;
+  --space-1:4px;--space-2:8px;--space-3:12px;--space-4:16px;--space-5:20px;--space-6:24px;--space-8:32px;
+  --sidebar-w:220px;--header-h:48px;
 }
 .dark{
-  --bg:#09090b;--card:#18181b;--fg:#fafafa;--muted:#a1a1aa;--muted-foreground:#a1a1aa;
-  --border:#27272a;--primary:#5eead4;--primary-hover:#99f6e4;--primary-foreground:#000000;
-  --accent:#134e4a;--accent-fg:#5eead4;
-  --destructive:#ef4444;--destructive-bg:#2d1212;
-  --success:#22c55e;--success-bg:#0a2d12;
-  --warning:#f59e0b;--warning-bg:#2d1f0a;
-  --shadow:0 4px 6px -1px rgba(0,0,0,.3);
+  color-scheme:dark;
+  --background:#111113;--foreground:#fafafa;
+  --card:#1a1a1e;--card-foreground:#fafafa;
+  --popover:#1a1a1e;--popover-foreground:#fafafa;
+  --primary:#5eead4;--primary-hover:#99f6e4;--primary-foreground:#042f2e;
+  --secondary:#27272a;--secondary-foreground:#fafafa;
+  --muted:#27272a;--muted-foreground:#a1a1aa;
+  --accent:#134e4a;--accent-foreground:#5eead4;
+  --destructive:#ef4444;--destructive-foreground:#ffffff;
+  --success:#22c55e;--success-foreground:#ffffff;
+  --warning:#f59e0b;--warning-foreground:#0a0a0a;
+  --destructive-bg:#450a0a;--success-bg:#052e16;--warning-bg:#451a03;
+  --border:#2e2e32;--input:#2e2e32;--ring:#5eead4;
+  --shadow-xs:0 1px 2px rgba(0,0,0,.2);
+  --shadow-sm:0 1px 3px rgba(0,0,0,.3),0 1px 2px rgba(0,0,0,.2);
+  --shadow:0 4px 6px -1px rgba(0,0,0,.35),0 2px 4px -2px rgba(0,0,0,.25);
+  --shadow-md:0 10px 15px -3px rgba(0,0,0,.4),0 4px 6px -4px rgba(0,0,0,.3);
+  --shadow-lg:0 20px 25px -5px rgba(0,0,0,.5),0 8px 10px -6px rgba(0,0,0,.35);
 }
+
+/* ── 基础 ── */
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:var(--font);background:var(--bg);color:var(--fg);font-size:13px;height:100vh;overflow:hidden}
-.header{display:flex;align-items:center;padding:8px 12px;background:var(--card);border-bottom:1px solid var(--border);height:44px;gap:8px}
-.header-title{flex:1;font-size:15px;font-weight:600;text-align:center}
-.header-device{font-size:12px;color:var(--accent-fg);cursor:pointer;padding:4px 8px;border-radius:var(--radius);transition:background 120ms}
-.header-device:hover{background:var(--accent)}
-.nav-icon{width:18px;height:18px}
-.nav-item{background:none;border:none;color:var(--fg);cursor:pointer;padding:6px;border-radius:var(--radius);transition:background 120ms;display:flex;align-items:center;gap:6px;font-size:13px}
-.nav-item:hover{background:var(--border)}
-.sidebar-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:99;display:none}
-.sidebar-overlay.show{display:block}
-.sidebar{position:fixed;top:0;left:0;width:240px;height:100%;background:var(--card);border-right:1px solid var(--border);z-index:100;transform:translateX(-100%);transition:transform 200ms ease;display:flex;flex-direction:column}
-.sidebar.open{transform:translateX(0)}
-.sidebar-header{padding:16px;font-size:15px;font-weight:700;border-bottom:1px solid var(--border)}
-.sidebar-nav{flex:1;padding:8px;display:flex;flex-direction:column;gap:2px}
-.sidebar-nav .nav-item{width:100%;padding:10px 12px;border-radius:var(--radius);font-size:13px;justify-content:flex-start}
-.sidebar-nav .nav-item.active{background:var(--accent);color:var(--accent-fg)}
-.sidebar-footer{padding:12px;border-top:1px solid var(--border)}
-.sidebar-footer .nav-item{width:100%;color:var(--destructive);justify-content:center;font-size:12px}
-.sidebar-version{padding:8px 16px;font-size:10px;color:var(--muted-foreground);text-align:center;border-top:1px solid var(--border)}
-.content{height:calc(100vh - 44px);overflow:hidden}
-.page{display:none;height:100%;overflow-y:auto;padding:12px}
-.page.active{display:block}
-#page-main{padding:0;display:none;flex-direction:column}
-#page-main.active{display:flex}
-#page-subtitle.active,#page-remote.active{display:block}
-.form-group{margin-bottom:16px}
-.form-label{display:block;font-size:11px;font-weight:500;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px}
-.form-input{width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--fg);font-size:13px;outline:none;transition:border-color 120ms}
-.form-input:focus{border-color:var(--primary)}
-.btn{padding:8px 16px;border-radius:var(--radius);font-size:13px;font-weight:500;cursor:pointer;border:1px solid var(--border);background:var(--card);color:var(--fg);transition:all 120ms}
-.btn:hover{border-color:var(--primary)}
-.btn-primary{background:var(--primary);color:var(--primary-foreground);border-color:var(--primary)}
+html,body{height:100%}
+body{font-family:var(--font-sans);background:var(--background);color:var(--foreground);font-size:13px;overflow:hidden;-webkit-font-smoothing:antialiased}
+button{font-family:var(--font-sans)}
+input,textarea{font-family:var(--font-sans)}
+
+/* ── 按钮（App 规范） ── */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 14px;border-radius:var(--radius);font-size:13px;font-weight:500;cursor:pointer;border:1px solid transparent;background:var(--secondary);color:var(--foreground);transition:all var(--transition-fast);outline:none;text-decoration:none}
+.btn:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+.btn-primary{background:var(--primary);color:var(--primary-foreground);border-color:var(--primary);box-shadow:var(--shadow-xs)}
 .btn-primary:hover{background:var(--primary-hover)}
-.btn-ghost{background:none;border:none;color:var(--muted)}
-.btn-ghost:hover{color:var(--fg)}
-.btn-block{width:100%;display:block}
-.btn-sm{padding:4px 10px;font-size:11px;height:28px}
-.section-title{font-size:14px;font-weight:600;margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid var(--border)}
-.login-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px}
-.login-card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
-.login-platform-name{font-size:14px;font-weight:600}
-.login-status{font-size:11px;padding:2px 8px;border-radius:var(--radius-full);background:var(--muted);color:var(--muted-foreground)}
-.login-status.ok{background:var(--success-bg);color:var(--success)}
-.login-status.fail{background:var(--destructive-bg);color:var(--destructive)}
-.login-status.checking{background:var(--warning-bg);color:var(--warning)}
-.login-check-btn{width:100%}
-.login-qr-area{margin-top:12px;text-align:center;min-height:0}
-.login-qr-area img{max-width:100%;border-radius:var(--radius);border:1px solid var(--border);cursor:pointer}
-.login-qr-area .qr-tip{font-size:11px;color:var(--muted-foreground);margin-top:8px}
-.login-qr-area .qr-actions{display:flex;gap:8px;justify-content:center;margin-top:8px}
-.login-tip{font-size:11px;color:var(--muted-foreground);text-align:center;margin-top:8px}
-.qr-overlay{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:200;display:none;align-items:center;justify-content:center;flex-direction:column;padding:16px}
-.qr-overlay.show{display:flex}
-.qr-overlay img{max-width:100%;max-height:80vh;border-radius:var(--radius)}
-.qr-overlay .qr-actions{display:flex;gap:8px;margin-top:12px}
-.slider-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
-.slider-label{font-size:11px;color:var(--muted);width:32px;flex-shrink:0}
-.slider-val{font-size:11px;color:var(--muted);width:36px;text-align:right;flex-shrink:0}
-input[type=range]{flex:1;height:4px;-webkit-appearance:none;background:var(--border);border-radius:2px;outline:none}
-input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:var(--primary);cursor:pointer}
-.slider-h::-webkit-slider-thumb{background:hsl(var(--h,30),100%,50%)!important}
-.slider-s::-webkit-slider-thumb{background:hsl(var(--h,30),var(--s,100)%,50%)!important}
-.conn-banner{display:none;padding:6px 12px;font-size:11px;text-align:center;gap:6px;align-items:center;justify-content:center}
-.conn-banner.show{display:flex}
-.conn-banner.ok{background:var(--accent);color:var(--accent-fg)}
-.conn-banner.checking,.conn-banner.retry{background:var(--warning-bg);color:var(--warning)}
-.conn-banner.offline{background:var(--destructive-bg);color:var(--destructive)}
-.conn-spinner{width:12px;height:12px;border:2px solid var(--border);border-top-color:var(--primary);border-radius:50%;animation:spin .6s linear infinite;display:inline-block}
-@keyframes spin{to{transform:rotate(360deg)}}
-.chat{flex:1;overflow-y:auto;padding:12px}
-.chat-stream{display:flex;flex-direction:column;gap:8px}
-.input-bar{border-top:1px solid var(--border);padding:8px 12px;background:var(--card);position:sticky;bottom:0}
-.input-row{display:flex;gap:8px;align-items:flex-end}
-.input-field{flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--fg);font-size:13px;resize:none;outline:none;max-height:120px;font-family:var(--font);transition:border-color 120ms}
-.input-field:focus{border-color:var(--primary)}
-.send-btn{width:36px;height:36px;border-radius:50%;background:var(--primary);border:none;color:var(--primary-foreground);cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all 120ms}
-.send-btn:disabled{opacity:.3;cursor:not-allowed}
-.chips{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}
-.chip{font-size:10px;padding:2px 8px;border-radius:999px;background:var(--accent);color:var(--accent-fg)}
-.chip-spacer{flex:1}
-.task{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px;position:relative}
-.task-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px}
-.task-name{font-size:12px;font-weight:600}
-.task-badge{font-size:10px;padding:2px 8px;border-radius:999px;font-weight:500}
-.badge-pending{background:var(--accent);color:var(--accent-fg)}
+.btn-primary:active{transform:scale(.98)}
+.btn-ghost{background:var(--card);border:1px solid var(--border);color:var(--foreground)}
+.btn-ghost:hover{background:var(--muted);border-color:color-mix(in srgb,var(--border) 50%,var(--foreground))}
+.btn-danger{background:var(--destructive);color:var(--destructive-foreground)}
+.btn-danger:hover{opacity:.9}
+.btn-sm{height:28px;padding:0 10px;font-size:12px;border-radius:var(--radius-sm)}
+.btn-block{width:100%;display:flex}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+
+/* ── 输入框（App 规范） ── */
+.form-input,.input-field{height:32px;width:100%;padding:0 12px;border:1px solid var(--input);border-radius:var(--radius);background:var(--card);color:var(--foreground);font-size:13px;outline:none;transition:border-color var(--transition-fast),box-shadow var(--transition-fast)}
+.form-input:focus,.input-field:focus{border-color:var(--ring);box-shadow:0 0 0 3px color-mix(in srgb,var(--ring) 15%,transparent)}
+.input-field{height:auto;resize:none;padding:8px 12px;line-height:1.4;max-height:120px}
+.form-label{display:block;font-size:11px;font-weight:500;color:var(--muted-foreground);margin-bottom:6px;letter-spacing:.5px}
+.form-group{margin-bottom:var(--space-4)}
+input[type=range]{width:100%;height:4px;-webkit-appearance:none;background:var(--border);border-radius:2px;outline:none}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:var(--primary);cursor:pointer;border:none}
+input[type=number]{-moz-appearance:textfield}
+input[type=number]::-webkit-inner-spin-button{opacity:1}
+
+/* ── 卡片 ── */
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-xs);transition:border-color var(--transition-fast)}
+.section-title{font-size:16px;font-weight:600;margin-bottom:var(--space-4);padding-bottom:var(--space-2);border-bottom:1px solid var(--border)}
+
+/* ── 徽章 / 标签 ── */
+.badge{display:inline-flex;align-items:center;font-size:11px;font-weight:500;padding:2px 8px;border-radius:var(--radius-full)}
+.badge-pending{background:var(--accent);color:var(--accent-foreground)}
 .badge-running{background:var(--warning-bg);color:var(--warning)}
 .badge-completed{background:var(--success-bg);color:var(--success)}
 .badge-warning{background:var(--warning-bg);color:var(--warning)}
 .badge-failed{background:var(--destructive-bg);color:var(--destructive)}
-.task-msg{font-size:11px;color:var(--muted);margin-bottom:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.task-bar{height:4px;background:var(--border);border-radius:2px;overflow:hidden}
-.task-bar-fill{height:100%;background:var(--primary);border-radius:2px;transition:width 300ms}
+.badge-checking{background:var(--warning-bg);color:var(--warning)}
+.badge-ok{background:var(--success-bg);color:var(--success)}
+.badge-fail{background:var(--destructive-bg);color:var(--destructive)}
+
+/* ── Toast ── */
+.toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:var(--popover);border:1px solid var(--border);color:var(--foreground);padding:8px 16px;border-radius:var(--radius-lg);font-size:12px;z-index:300;box-shadow:var(--shadow-lg);animation:toast-in var(--transition-normal)}
+@keyframes toast-in{from{opacity:0;transform:translateX(-50%) translateY(8px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+
+/* ── 对话框（App 规范） ── */
+.dialog-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center;z-index:200;padding:var(--space-4)}
+.dialog-overlay.show{display:flex}
+.dialog{background:var(--popover);border:1px solid var(--border);border-radius:var(--radius-xl);box-shadow:var(--shadow-lg);width:100%;max-width:380px;max-height:80vh;overflow-y:auto;padding:var(--space-5);animation:dlg-in var(--transition-normal)}
+@keyframes dlg-in{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:scale(1)}}
+.dialog-title{font-size:15px;font-weight:600;margin-bottom:var(--space-3);display:flex;align-items:center;justify-content:space-between;gap:8px}
+.dialog-list{display:flex;flex-direction:column;gap:2px;max-height:50vh;overflow-y:auto}
+.dialog-item{display:flex;align-items:center;width:100%;padding:9px 12px;border:none;background:none;color:var(--foreground);font-size:13px;text-align:left;cursor:pointer;border-radius:var(--radius);transition:background var(--transition-fast)}
+.dialog-item:hover{background:var(--muted)}
+.dialog-item.active{background:var(--accent);color:var(--accent-foreground)}
+.dialog-item .check{margin-left:auto;opacity:0;color:var(--accent-foreground)}
+.dialog-item.active .check{opacity:1}
+.dialog-slider{padding:var(--space-2) 0}
+.dialog-slider label{display:block;font-size:12px;color:var(--muted-foreground);margin-bottom:var(--space-2)}
+.dialog-slider .sv{font-size:13px;color:var(--accent-foreground);text-align:center;margin-top:var(--space-2);font-weight:500}
+.dialog-close{background:none;border:none;color:var(--muted-foreground);cursor:pointer;font-size:16px;padding:4px;border-radius:var(--radius);line-height:1}
+.dialog-close:hover{background:var(--muted);color:var(--foreground)}
+.dialog-empty{padding:var(--space-4);text-align:center;font-size:12px;color:var(--muted-foreground)}
+
+/* ── 布局壳 ── */
+.app{display:flex;flex-direction:column;height:100vh}
+.header{display:flex;align-items:center;height:var(--header-h);padding:0 var(--space-3);background:var(--card);border-bottom:1px solid var(--border);gap:var(--space-2);flex-shrink:0}
+.header-logo{display:none;align-items:center;gap:8px;font-size:15px;font-weight:700;flex-shrink:0}
+.header-logo .logo-dot{width:22px;height:22px;border-radius:var(--radius-sm);background:var(--primary);display:flex;align-items:center;justify-content:center}
+.header-logo .logo-dot svg{width:14px;height:14px;color:var(--primary-foreground)}
+.header-title{flex:1;font-size:15px;font-weight:600;text-align:center}
+.header-device{font-size:12px;color:var(--accent-foreground);cursor:pointer;padding:4px 10px;border-radius:var(--radius);transition:background var(--transition-fast);display:inline-flex;align-items:center;gap:4px;flex-shrink:0}
+.header-device:hover{background:var(--accent)}
+.icon-btn{background:none;border:none;color:var(--foreground);cursor:pointer;padding:6px;border-radius:var(--radius);transition:background var(--transition-fast);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.icon-btn:hover{background:var(--muted)}
+.icon-btn svg{width:18px;height:18px}
+.app-body{flex:1;display:flex;overflow:hidden;position:relative}
+
+/* ── 侧边栏（手机抽屉 / 桌面常驻） ── */
+.sidebar-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:99;display:none}
+.sidebar-overlay.show{display:block}
+.sidebar{position:fixed;top:0;left:0;bottom:0;width:240px;background:var(--card);border-right:1px solid var(--border);z-index:100;transform:translateX(-100%);transition:transform var(--transition-normal);display:flex;flex-direction:column}
+.sidebar.open{transform:translateX(0)}
+.sidebar-header{padding:var(--space-4);font-size:15px;font-weight:700;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px}
+.sidebar-nav{flex:1;padding:var(--space-2);display:flex;flex-direction:column;gap:2px;overflow-y:auto}
+.nav-item{display:flex;align-items:center;gap:10px;width:100%;padding:9px 12px;border-radius:var(--radius);font-size:13px;color:var(--muted-foreground);cursor:pointer;border:none;background:none;text-align:left;transition:all var(--transition-fast);font-weight:500}
+.nav-item svg{width:18px;height:18px;flex-shrink:0}
+.nav-item:hover{background:var(--muted);color:var(--foreground)}
+.nav-item.active{background:var(--accent);color:var(--accent-foreground)}
+.sidebar-footer{padding:var(--space-3);border-top:1px solid var(--border);display:flex;flex-direction:column;gap:2px}
+.sidebar-footer .nav-item{color:var(--destructive)}
+.sidebar-version{padding:var(--space-2) var(--space-4);font-size:10px;color:var(--muted-foreground);text-align:center;border-top:1px solid var(--border)}
+
+/* ── 内容区 ── */
+.content{flex:1;overflow:hidden;display:flex;flex-direction:column;min-width:0}
+.page{display:none;height:100%;overflow-y:auto;padding:var(--space-4)}
+.page.active{display:block}
+#page-main{display:none;flex-direction:column;padding:0;overflow:hidden}
+#page-main.active{display:flex}
+
+/* ── 连接横幅 ── */
+.conn-banner{display:none;padding:6px var(--space-3);font-size:11px;text-align:center;gap:6px;align-items:center;justify-content:center;flex-shrink:0}
+.conn-banner.show{display:flex}
+.conn-banner.ok{background:var(--success-bg);color:var(--success)}
+.conn-banner.checking,.conn-banner.retry{background:var(--warning-bg);color:var(--warning)}
+.conn-banner.offline{background:var(--destructive-bg);color:var(--destructive)}
+.conn-spinner{width:12px;height:12px;border:2px solid var(--border);border-top-color:var(--primary);border-radius:50%;animation:spin .6s linear infinite;display:inline-block}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── 主控：任务流 + 输入条 ── */
+.chat{flex:1;overflow-y:auto;padding:var(--space-4);scroll-behavior:smooth}
+.chat-stream{display:flex;flex-direction:column;gap:var(--space-2);max-width:860px;margin:0 auto}
+.task{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--space-3) var(--space-4);box-shadow:var(--shadow-xs);transition:border-color var(--transition-fast)}
+@media(min-width:768px){.task:hover{border-color:color-mix(in srgb,var(--border) 40%,var(--foreground))}}
+.task-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:var(--space-2)}
+.task-name{font-size:13px;font-weight:600}
+.task-msg{font-size:12px;color:var(--muted-foreground);margin-bottom:var(--space-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.task-bar{height:4px;background:var(--muted);border-radius:2px;overflow:hidden}
+.task-bar-fill{height:100%;background:var(--primary);border-radius:2px;transition:width var(--transition-slow)}
 .task-bar-fill.done{background:var(--success)}
 .task-bar-fill.error{background:var(--destructive)}
-.task-actions{display:flex;gap:6px;margin-top:8px;justify-content:flex-end}
-.empty{text-align:center;padding:40px 16px;color:var(--muted);font-size:13px}
-.empty-icon{font-size:32px;margin-bottom:8px;opacity:.5}
-.toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:var(--card);border:1px solid var(--border);padding:8px 16px;border-radius:var(--radius);font-size:12px;z-index:200;box-shadow:var(--shadow)}
-.dialog-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center;z-index:200}
-.dialog-overlay.show{display:flex}
-.dialog{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-xl);padding:24px;width:90%;max-width:320px;box-shadow:var(--shadow)}
-.dialog-title{font-size:15px;font-weight:600;margin-bottom:8px}
-.dialog-text{font-size:13px;color:var(--muted);margin-bottom:16px}
-.dialog-actions{display:flex;gap:8px;justify-content:flex-end}
-.exit-menu{position:fixed;top:44px;right:8px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:4px;box-shadow:var(--shadow);z-index:150;display:none;min-width:160px}
+.task-actions{display:flex;gap:var(--space-2);margin-top:var(--space-2);justify-content:flex-end}
+.task-tag{font-size:10px;color:var(--muted-foreground);margin-left:6px}
+.empty{text-align:center;padding:var(--space-10) var(--space-4);color:var(--muted-foreground);font-size:13px}
+.empty-icon{font-size:32px;margin-bottom:var(--space-2);opacity:.5}
+
+/* ── 输入条 ── */
+.input-bar{border-top:1px solid var(--border);padding:var(--space-2) var(--space-4) var(--space-3);background:var(--card);flex-shrink:0}
+.input-row{display:flex;gap:var(--space-2);align-items:flex-end;max-width:860px;margin:0 auto}
+.send-btn{width:36px;height:36px;border-radius:50%;background:var(--primary);border:none;color:var(--primary-foreground);cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all var(--transition-fast);box-shadow:var(--shadow-sm)}
+.send-btn:hover{background:var(--primary-hover)}
+.send-btn:active{transform:scale(.96)}
+.send-btn:disabled{opacity:.3;cursor:not-allowed;box-shadow:none}
+.chips{display:flex;gap:var(--space-2);margin-top:var(--space-2);flex-wrap:wrap;max-width:860px;margin-left:auto;margin-right:auto}
+.chip{font-size:11px;padding:3px 10px;border-radius:var(--radius-full);background:var(--accent);color:var(--accent-foreground);border:none;cursor:pointer;transition:all var(--transition-fast);font-weight:500}
+.chip:hover{background:color-mix(in srgb,var(--accent) 80%,var(--primary))}
+.chip-spacer{flex:1}
+
+/* ── 登录页 ── */
+.login-wrap{display:flex;align-items:center;justify-content:center;height:100vh;padding:var(--space-6)}
+.login-card{width:100%;max-width:360px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius-xl);padding:var(--space-8) var(--space-6);box-shadow:var(--shadow-md)}
+.login-logo{width:48px;height:48px;border-radius:var(--radius-lg);background:var(--primary);display:flex;align-items:center;justify-content:center;margin:0 auto var(--space-4)}
+.login-logo svg{width:26px;height:26px;color:var(--primary-foreground)}
+.login-title{text-align:center;font-size:18px;font-weight:700;margin-bottom:var(--space-1)}
+.login-sub{text-align:center;font-size:13px;color:var(--muted-foreground);margin-bottom:var(--space-6)}
+.login-error{color:var(--destructive);font-size:12px;text-align:center;margin-top:var(--space-2)}
+
+/* ── 退出菜单 ── */
+.exit-menu{position:fixed;top:calc(var(--header-h) + 4px);right:var(--space-2);background:var(--popover);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--space-1);box-shadow:var(--shadow-md);z-index:150;display:none;min-width:160px}
 .exit-menu.show{display:block}
-.exit-menu-item{display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:var(--radius);font-size:13px;color:var(--fg);cursor:pointer;border:none;background:none;width:100%;text-align:left;transition:background 120ms}
-.exit-menu-item:hover{background:var(--border)}
+.exit-menu-item{display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:var(--radius);font-size:13px;color:var(--foreground);cursor:pointer;border:none;background:none;width:100%;text-align:left;transition:background var(--transition-fast)}
+.exit-menu-item:hover{background:var(--muted)}
 .exit-menu-item.danger{color:var(--destructive)}
-.chip-popup{position:fixed;background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:6px;box-shadow:var(--shadow);z-index:150;min-width:180px;max-height:280px;overflow-y:auto}
-.chip-popup .popup-item{display:block;width:100%;padding:8px 12px;border:none;background:none;color:var(--fg);font-size:13px;text-align:left;cursor:pointer;border-radius:var(--radius);transition:background 120ms}
-.chip-popup .popup-item:hover{background:var(--border)}
-.chip-popup .popup-item.active{background:var(--accent);color:var(--accent-fg)}
-.chip-popup .popup-slider{padding:8px 12px}
-.chip-popup .popup-slider label{display:block;font-size:11px;color:var(--muted);margin-bottom:6px}
-.chip-popup .popup-slider input[type=range]{width:100%}
-.chip-popup .popup-slider .sv{font-size:12px;color:var(--accent-fg);text-align:center;margin-top:4px}
-.chip-overlay{position:fixed;inset:0;z-index:149}
+
+/* ── 二维码 ── */
+.qr-overlay{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:250;display:none;align-items:center;justify-content:center;flex-direction:column;padding:var(--space-4)}
+.qr-overlay.show{display:flex}
+.qr-overlay img{max-width:100%;max-height:75vh;border-radius:var(--radius);box-shadow:var(--shadow-lg)}
+.qr-actions{display:flex;gap:var(--space-2);margin-top:var(--space-3)}
+
+/* ── 平台登录 ── */
+.platform-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--space-4);margin-bottom:var(--space-3);box-shadow:var(--shadow-xs)}
+.platform-card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-3)}
+.platform-name{font-size:14px;font-weight:600}
+.platform-qr{margin-top:var(--space-3);text-align:center;min-height:0}
+.platform-qr img{max-width:100%;border-radius:var(--radius);border:1px solid var(--border);cursor:pointer;box-shadow:var(--shadow-sm)}
+.qr-tip{font-size:11px;color:var(--muted-foreground);margin-top:var(--space-2)}
+.login-tip{font-size:11px;color:var(--muted-foreground);text-align:center;margin-top:var(--space-2)}
+
+/* ── 字幕页滑块 ── */
+.slider-row{display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-2)}
+.slider-label{font-size:11px;color:var(--muted-foreground);width:32px;flex-shrink:0}
+.slider-val{font-size:11px;color:var(--muted-foreground);width:36px;text-align:right;flex-shrink:0}
+.slider-h::-webkit-slider-thumb{background:hsl(var(--h,30),100%,50%)!important}
+.slider-s::-webkit-slider-thumb{background:hsl(var(--h,30),var(--s,100)%,50%)!important}
+
+/* ── 响应式：桌面（≥768px） ── */
+@media(min-width:768px){
+  .header{height:var(--header-h);padding:0 var(--space-4)}
+  .header-logo{display:flex}
+  .header-title{text-align:left;font-size:14px;font-weight:500;color:var(--muted-foreground)}
+  .sidebar{position:relative;transform:none;width:var(--sidebar-w);border-right:1px solid var(--border);z-index:auto}
+  .sidebar.open{transform:none}
+  .sidebar-overlay{display:none!important}
+  #sidebar-toggle{display:none}
+  .content{background:var(--background)}
+  .chat{padding:var(--space-5)}
+  .input-bar{padding:var(--space-3) var(--space-5)}
+}
 </style>
 </head>
 <body>
@@ -290,14 +395,15 @@ function hideBanner(){const b=document.getElementById('conn-banner');if(b){b.cla
 
 function renderLogin(){
   document.getElementById('app').innerHTML=
-    '<div style="display:flex;align-items:center;justify-content:center;height:100vh;padding:24px">'+
-    '<div style="width:100%;max-width:360px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:32px 24px;box-shadow:var(--shadow)">'+
-    '<div style="text-align:center;font-size:18px;font-weight:700;margin-bottom:4px">搬运蚁远程控制</div>'+
-    (deviceName?'<div style="text-align:center;font-size:13px;color:var(--accent-fg);margin-bottom:20px">'+esc(deviceName)+'</div>':'<div style="text-align:center;font-size:13px;color:var(--muted);margin-bottom:20px">输入密码连接到设备</div>')+
+    '<div class="login-wrap">'+
+    '<div class="login-card">'+
+    '<div class="login-logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="8" r="4"/><line x1="10" y1="12" x2="10" y2="20"/><line x1="4" y1="16" x2="10" y2="16"/><line x1="12" y1="4" x2="16" y2="4"/></svg></div>'+
+    '<div class="login-title">搬运蚁远程控制</div>'+
+    '<div class="login-sub">'+(deviceName?esc(deviceName):'输入密码连接到设备')+'</div>'+
     '<form id="login-form">'+
-    '<div style="margin-bottom:16px"><input class="form-input" id="login-pass" type="password" placeholder="访问密码" autocomplete="current-password" style="width:100%"></div>'+
+    '<div class="form-group"><input class="form-input" id="login-pass" type="password" placeholder="访问密码" autocomplete="current-password"></div>'+
     '<button class="btn btn-primary btn-block" type="submit">连接</button>'+
-    '</form><div id="login-error" style="color:var(--destructive);font-size:12px;text-align:center;margin-top:8px"></div>'+
+    '</form><div class="login-error" id="login-error"></div>'+
     '</div></div>';
   document.getElementById('login-form').addEventListener('submit',e=>{
     e.preventDefault();
@@ -317,91 +423,92 @@ function initApp(){
 }
 
 function renderAppShell(){
-  const h=`
-<div class="header">
-  <button class="nav-item" id="sidebar-toggle" style="width:auto;padding:6px;flex-shrink:0"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" x2="21" y1="6" y2="6"/><line x1="3" x2="21" y1="12" y2="12"/><line x1="3" x2="21" y1="18" y2="18"/></svg></button>
-  <span class="header-title" id="header-title">主控</span>
-  <span class="header-device" id="header-device">${esc(deviceName||'设备')}</span>
-</div>
-<div class="conn-banner" id="conn-banner"><span class="conn-spinner"></span><span id="conn-text"></span></div>
-<div class="exit-menu" id="exit-menu">
-  <button class="exit-menu-item danger" id="exit-btn">退出到设备列表</button>
-</div>
-<div class="sidebar-overlay" id="sidebar-overlay"></div>
-<div class="sidebar" id="sidebar">
-  <div class="sidebar-header">搬运蚁</div>
-  <nav class="sidebar-nav">
-    <button class="nav-item active" data-page="main"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>主控</button>
-    <button class="nav-item" data-page="subtitle"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>字幕</button>
-    <button class="nav-item" data-page="remote"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>远程</button>
-    <button class="nav-item" data-page="login"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>平台登录</button>
-  </nav>
-  <div class="sidebar-version" id="sidebar-version">v1.3.1</div>
-</div>
-<div class="content" id="content">
-  <div class="page active" id="page-main">
-    <div class="chat" id="chat"><div class="chat-stream" id="chat-stream"><div class="empty" id="empty-state"><div class="empty-icon"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg></div><div>粘贴视频链接开始下载</div></div></div></div>
+  return `
+<div class="app">
+  <div class="header">
+    <button class="icon-btn" id="sidebar-toggle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" x2="21" y1="6" y2="6"/><line x1="3" x2="21" y1="12" y2="12"/><line x1="3" x2="21" y1="18" y2="18"/></svg></button>
+    <div class="header-logo"><span class="logo-dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="8" r="4"/><line x1="10" y1="12" x2="10" y2="20"/><line x1="4" y1="16" x2="10" y2="16"/><line x1="12" y1="4" x2="16" y2="4"/></svg></span>搬运蚁</div>
+    <span class="header-title" id="header-title">主控</span>
+    <span class="header-device" id="header-device">${esc(deviceName||'设备')}</span>
   </div>
-  <div class="page" id="page-subtitle">
-    <div class="form-group"><label class="form-label">字幕颜色</label>
-      <div style="width:100%;height:28px;border-radius:var(--radius);border:1px solid var(--border);margin-bottom:8px" id="color-preview"></div>
-      <div class="slider-row"><span class="slider-label">色相</span><input type="range" id="color-h" min="0" max="360" value="30" class="slider-h"><span class="slider-val" id="color-h-val">30°</span></div>
-      <div class="slider-row"><span class="slider-label">饱和</span><input type="range" id="color-s" min="0" max="100" value="100" class="slider-s"><span class="slider-val" id="color-s-val">100%</span></div>
-      <div class="slider-row"><span class="slider-label">亮度</span><input type="range" id="color-l" min="0" max="100" value="50" class="slider-l"><span class="slider-val" id="color-l-val">50%</span></div>
-    </div>
-    <div class="form-group"><label class="form-label">描边颜色</label>
-      <div style="width:100%;height:28px;border-radius:var(--radius);border:1px solid var(--border);margin-bottom:8px" id="stroke-preview"></div>
-      <div class="slider-row"><span class="slider-label">色相</span><input type="range" id="stroke-h" min="0" max="360" value="0" class="slider-h"><span class="slider-val" id="stroke-h-val">0°</span></div>
-      <div class="slider-row"><span class="slider-label">饱和</span><input type="range" id="stroke-s" min="0" max="100" value="0" class="slider-s"><span class="slider-val" id="stroke-s-val">0%</span></div>
-      <div class="slider-row"><span class="slider-label">亮度</span><input type="range" id="stroke-l" min="0" max="100" value="0" class="slider-l"><span class="slider-val" id="stroke-l-val">0%</span></div>
-    </div>
-    <div class="form-group"><label class="form-label">字幕位置 (0-100)</label><input class="form-input" id="sub-position" type="number" min="0" max="100" value="12" /></div>
-    <button class="btn btn-primary btn-block" id="sub-save-btn" type="button">保存设置</button>
+  <div class="conn-banner" id="conn-banner"><span class="conn-spinner"></span><span id="conn-text"></span></div>
+  <div class="exit-menu" id="exit-menu">
+    <button class="exit-menu-item danger" id="exit-btn">退出到设备列表</button>
   </div>
-  <div class="page" id="page-remote">
-    <div class="section-title">远程设置</div>
-    <div class="form-group"><label class="form-label">密码</label><input class="form-input" id="remote-pass" type="password" /></div>
-    <button class="btn btn-primary btn-block" id="remote-save-btn" type="button">保存并重新登录</button>
+  <div class="app-body">
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">搬运蚁</div>
+      <nav class="sidebar-nav">
+        <button class="nav-item active" data-page="main"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>主控</button>
+        <button class="nav-item" data-page="subtitle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>字幕</button>
+        <button class="nav-item" data-page="remote"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>远程</button>
+        <button class="nav-item" data-page="login"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>平台登录</button>
+      </nav>
+      <div class="sidebar-version" id="sidebar-version">v1.4.0</div>
+    </aside>
+    <div class="content">
+      <div class="page active" id="page-main">
+        <div class="chat" id="chat"><div class="chat-stream" id="chat-stream"><div class="empty" id="empty-state"><div class="empty-icon">📋</div><div>粘贴视频链接开始下载</div></div></div></div>
+      </div>
+      <div class="page" id="page-subtitle">
+        <div class="form-group"><label class="form-label">字幕颜色</label>
+          <div style="width:100%;height:28px;border-radius:var(--radius);border:1px solid var(--border);margin-bottom:var(--space-2)" id="color-preview"></div>
+          <div class="slider-row"><span class="slider-label">色相</span><input type="range" id="color-h" min="0" max="360" value="30" class="slider-h"><span class="slider-val" id="color-h-val">30°</span></div>
+          <div class="slider-row"><span class="slider-label">饱和</span><input type="range" id="color-s" min="0" max="100" value="100" class="slider-s"><span class="slider-val" id="color-s-val">100%</span></div>
+          <div class="slider-row"><span class="slider-label">亮度</span><input type="range" id="color-l" min="0" max="100" value="50" class="slider-l"><span class="slider-val" id="color-l-val">50%</span></div>
+        </div>
+        <div class="form-group"><label class="form-label">描边颜色</label>
+          <div style="width:100%;height:28px;border-radius:var(--radius);border:1px solid var(--border);margin-bottom:var(--space-2)" id="stroke-preview"></div>
+          <div class="slider-row"><span class="slider-label">色相</span><input type="range" id="stroke-h" min="0" max="360" value="0" class="slider-h"><span class="slider-val" id="stroke-h-val">0°</span></div>
+          <div class="slider-row"><span class="slider-label">饱和</span><input type="range" id="stroke-s" min="0" max="100" value="0" class="slider-s"><span class="slider-val" id="stroke-s-val">0%</span></div>
+          <div class="slider-row"><span class="slider-label">亮度</span><input type="range" id="stroke-l" min="0" max="100" value="0" class="slider-l"><span class="slider-val" id="stroke-l-val">0%</span></div>
+        </div>
+        <div class="form-group"><label class="form-label">字幕位置 (0-100)</label><input class="form-input" id="sub-position" type="number" min="0" max="100" value="12"></div>
+        <button class="btn btn-primary btn-block" id="sub-save-btn" type="button">保存设置</button>
+      </div>
+      <div class="page" id="page-remote">
+        <div class="section-title">远程设置</div>
+        <div class="form-group"><label class="form-label">密码</label><input class="form-input" id="remote-pass" type="password"></div>
+        <button class="btn btn-primary btn-block" id="remote-save-btn" type="button">保存并重新登录</button>
+      </div>
+      <div class="page" id="page-login">
+        <div class="section-title">平台登录</div>
+        <div class="platform-card" id="login-douyin">
+          <div class="platform-card-header"><span class="platform-name">抖音</span><span class="badge badge-checking" id="login-status-douyin">未检测</span></div>
+          <button class="btn btn-sm btn-primary login-check-btn" data-platform="douyin" type="button" style="width:100%">检测登录</button>
+          <div class="platform-qr" id="login-qr-douyin"></div>
+        </div>
+        <div class="platform-card" id="login-weixin">
+          <div class="platform-card-header"><span class="platform-name">视频号</span><span class="badge badge-checking" id="login-status-weixin">未检测</span></div>
+          <button class="btn btn-sm btn-primary login-check-btn" data-platform="weixin" type="button" style="width:100%">检测登录</button>
+          <div class="platform-qr" id="login-qr-weixin"></div>
+        </div>
+        <div class="login-tip" id="login-tip" style="display:none">请使用对应平台 APP 扫描二维码登录，登录成功后状态会自动更新</div>
+      </div>
+    </div>
   </div>
-  <div class="page" id="page-login">
-    <div class="section-title">平台登录</div>
-    <div class="login-card" id="login-douyin">
-      <div class="login-card-header"><span class="login-platform-name">抖音</span><span class="login-status" id="login-status-douyin">未检测</span></div>
-      <button class="btn btn-sm btn-primary login-check-btn" data-platform="douyin" type="button">检测登录</button>
-      <div class="login-qr-area" id="login-qr-douyin"></div>
+  <div class="input-bar" id="input-bar">
+    <div class="input-row">
+      <textarea class="input-field" id="task-input" placeholder="粘贴视频链接..." rows="1"></textarea>
+      <button class="send-btn" id="send-btn" type="button" disabled><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg></button>
     </div>
-    <div class="login-card" id="login-weixin">
-      <div class="login-card-header"><span class="login-platform-name">视频号</span><span class="login-status" id="login-status-weixin">未检测</span></div>
-      <button class="btn btn-sm btn-primary login-check-btn" data-platform="weixin" type="button">检测登录</button>
-      <div class="login-qr-area" id="login-qr-weixin"></div>
-    </div>
-    <div class="login-tip" id="login-tip" style="display:none">请使用对应平台 APP 扫描二维码登录，登录成功后状态会自动更新</div>
+    <div class="chips" id="chips"></div>
   </div>
 </div>
 <div class="qr-overlay" id="qr-overlay">
   <img id="qr-overlay-img" src="" alt="登录二维码"/>
   <div class="qr-actions">
     <button class="btn btn-sm btn-primary" id="qr-save-btn" type="button">保存到手机</button>
-    <button class="btn btn-sm" id="qr-close-btn" type="button" style="background:var(--muted)">关闭</button>
+    <button class="btn btn-sm btn-ghost" id="qr-close-btn" type="button">关闭</button>
   </div>
-</div>
-</div>
-<div class="input-bar" id="input-bar">
-  <div class="input-row">
-    <textarea class="input-field" id="task-input" placeholder="粘贴视频链接..." rows="1"></textarea>
-    <button class="send-btn" id="send-btn" type="button" disabled><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg></button>
-  </div>
-  <div class="chips" id="chips"></div>
 </div>`;
-  return h;
 }
 
 function bindEvents(){
-  // 设备名点击 → 退出菜单
   document.getElementById('header-device')?.addEventListener('click',e=>{
     e.stopPropagation();
-    const menu=document.getElementById('exit-menu');
-    menu?.classList.toggle('show');
+    document.getElementById('exit-menu')?.classList.toggle('show');
   });
   document.addEventListener('click',()=>{
     document.getElementById('exit-menu')?.classList.remove('show');
@@ -463,17 +570,36 @@ function switchPage(page){
   document.getElementById('page-'+page)?.classList.add('active');
   document.querySelectorAll('.nav-item[data-page]').forEach(n=>n.classList.toggle('active',n.dataset.page===page));
   document.getElementById('header-title').textContent={main:'主控',subtitle:'字幕',remote:'远程',login:'平台登录'}[page]||'主控';
-  document.getElementById('sidebar')?.classList.remove('open');
-  document.getElementById('sidebar-overlay')?.classList.remove('show');
+  // 桌面侧边栏常驻不关闭；手机抽屉切换后关闭
+  if(window.innerWidth<768){
+    document.getElementById('sidebar')?.classList.remove('open');
+    document.getElementById('sidebar-overlay')?.classList.remove('show');
+  }
   const ib=document.getElementById('input-bar');if(ib)ib.style.display=page==='main'?'':'none';
   if(page==='subtitle')loadSubtitleSettings();
   if(page==='remote')loadRemoteSettings();
 }
 
+// ── 对话框（风格/音色/重试） ──
+let activeDialog=null;
+function openDialog(title,contentHtml){
+  closeDialog();
+  const overlay=document.createElement('div');overlay.className='dialog-overlay show';
+  overlay.innerHTML='<div class="dialog"><div class="dialog-title"><span>'+esc(title)+'</span><button class="dialog-close" type="button">✕</button></div>'+contentHtml+'</div>';
+  overlay.addEventListener('click',e=>{if(e.target===overlay)closeDialog();});
+  overlay.querySelector('.dialog-close')?.addEventListener('click',closeDialog);
+  document.body.appendChild(overlay);
+  activeDialog=overlay;
+  return overlay;
+}
+function closeDialog(){
+  if(activeDialog){activeDialog.remove();activeDialog=null;}
+}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeDialog();});
+
 async function loadSettings(){const d=await api('GET','/remote/settings');if(d){currentSettings=d;renderChips(d);}}
 let currentSettings=null;
-let activePopup=null;let activeOverlay=null;
-function closePopup(){if(activePopup){activePopup.remove();activePopup=null}if(activeOverlay){activeOverlay.remove();activeOverlay=null}}
+
 function renderChips(s){
   const c=document.getElementById('chips');if(!c)return;
   const style=s?.editDefaults?.style||'未设置';
@@ -484,76 +610,67 @@ function renderChips(s){
     +'<span class="chip-spacer"></span>'
     +'<button class="chip" data-chip="retry">重试'+retry+'次</button>';
   c.querySelectorAll('[data-chip]').forEach(btn=>{
-    btn.addEventListener('click',e=>{e.stopPropagation();showChipPopup(btn.dataset.chip,btn)});
+    btn.addEventListener('click',e=>{e.stopPropagation();showChipDialog(btn.dataset.chip)});
   });
 }
-function showChipPopup(type,anchor){
-  closePopup();
-  const overlay=document.createElement('div');overlay.className='chip-overlay';
-  overlay.addEventListener('click',closePopup);
-  document.body.appendChild(overlay);activeOverlay=overlay;
-  const popup=document.createElement('div');popup.className='chip-popup';
-  const rect=anchor.getBoundingClientRect();
-  popup.style.left=Math.max(8,rect.left)+'px';
-  popup.style.bottom=(window.innerHeight-rect.top+6)+'px';
-  popup.style.maxHeight=Math.min(280,rect.top-20)+'px';
 
+function showChipDialog(type){
   if(type==='style'){
-    popup.innerHTML='<div style="padding:6px 12px;font-size:11px;color:var(--muted)">加载中...</div>';
-    document.body.appendChild(popup);activePopup=popup;
+    const dlg=openDialog('选择风格','<div class="dialog-empty">加载中...</div>');
     api('GET','/remote/styles').then(d=>{
       const styles=d?.styles||[];
-      if(!styles.length){popup.innerHTML='<div style="padding:8px 12px;font-size:12px;color:var(--muted)">暂无风格，请先在App中学习</div>';return;}
+      if(!styles.length){dlg.querySelector('.dialog-list,.dialog-empty').innerHTML='暂无风格，请先在App中学习';return;}
       const cur=currentSettings?.editDefaults?.style||'';
-      popup.innerHTML=styles.map(s=>'<button class="popup-item'+(s.name===cur?' active':'')+'" data-val="'+esc(s.name)+'">'+esc(s.name)+'</button>').join('');
-      popup.querySelectorAll('.popup-item').forEach(btn=>{
+      const list=document.createElement('div');list.className='dialog-list';
+      list.innerHTML=styles.map(s=>'<button class="dialog-item'+(s.name===cur?' active':'')+'" data-val="'+esc(s.name)+'"><span>'+esc(s.name)+'</span><span class="check">✓</span></button>').join('');
+      const body=dlg.querySelector('.dialog');body.replaceChild(list,body.querySelector('.dialog-list,.dialog-empty'));
+      list.querySelectorAll('.dialog-item').forEach(btn=>{
         btn.addEventListener('click',async()=>{
           const val=btn.dataset.val;
           await api('POST','/remote/settings',{editDefaults:{...currentSettings?.editDefaults,style:val}});
           currentSettings.editDefaults={...currentSettings?.editDefaults,style:val};
-          renderChips(currentSettings);closePopup();showToast('风格: '+val);
+          renderChips(currentSettings);closeDialog();showToast('风格: '+val);
         });
       });
     });
     return;
   }
-
   if(type==='voice'){
-    popup.innerHTML='<div style="padding:6px 12px;font-size:11px;color:var(--muted)">加载中...</div>';
-    document.body.appendChild(popup);activePopup=popup;
+    const dlg=openDialog('选择音色','<div class="dialog-empty">加载中...</div>');
     api('GET','/remote/voices').then(d=>{
       const voices=d?.voices||[];
-      if(!voices.length){popup.innerHTML='<div style="padding:8px 12px;font-size:12px;color:var(--muted)">暂无音色，请先在App中克隆</div>';return;}
+      if(!voices.length){dlg.querySelector('.dialog-list,.dialog-empty').innerHTML='暂无音色，请先在App中克隆';return;}
       const cur=currentSettings?.editDefaults?.voice||'';
-      popup.innerHTML=voices.map(v=>'<button class="popup-item'+(v.name===cur?' active':'')+'" data-vname="'+esc(v.name)+'">'+esc(v.name)+'</button>').join('');
-      popup.querySelectorAll('.popup-item').forEach(btn=>{
+      const list=document.createElement('div');list.className='dialog-list';
+      list.innerHTML=voices.map(v=>'<button class="dialog-item'+(v.name===cur?' active':'')+'" data-vname="'+esc(v.name)+'"><span>'+esc(v.name)+'</span><span class="check">✓</span></button>').join('');
+      const body=dlg.querySelector('.dialog');body.replaceChild(list,body.querySelector('.dialog-list,.dialog-empty'));
+      list.querySelectorAll('.dialog-item').forEach(btn=>{
         btn.addEventListener('click',async()=>{
           const vname=btn.dataset.vname;
           await api('POST','/remote/settings',{editDefaults:{...currentSettings?.editDefaults,voice:vname}});
           currentSettings.editDefaults={...currentSettings?.editDefaults,voice:vname};
-          renderChips(currentSettings);closePopup();showToast('音色: '+vname);
+          renderChips(currentSettings);closeDialog();showToast('音色: '+vname);
         });
       });
     });
     return;
   }
-
   if(type==='retry'){
     const cur=Math.max(0,Number(currentSettings?.retry?.failedTaskRetries??0));
-    popup.innerHTML='<div class="popup-slider"><label>重试次数</label><input type="range" min="0" max="4" step="1" value="'+cur+'"><div class="sv">'+(cur===0?'不重试':cur+'次')+'</div></div>';
-    document.body.appendChild(popup);activePopup=popup;
-    const range=popup.querySelector('input[type=range]');
-    const val=popup.querySelector('.sv');
+    const dlg=openDialog('失败重试','<div class="dialog-slider"><label>重试次数</label><input type="range" min="0" max="4" step="1" value="'+cur+'"><div class="sv">'+(cur===0?'不重试':cur+'次')+'</div></div>');
+    const range=dlg.querySelector('input[type=range]');
+    const val=dlg.querySelector('.sv');
     range.addEventListener('input',()=>{const v=Number(range.value);val.textContent=v===0?'不重试':v+'次'});
     range.addEventListener('change',async()=>{
       const v=Number(range.value);
       await api('POST','/remote/settings',{retry:{failedTaskRetries:v}});
       currentSettings.retry={failedTaskRetries:v};
-      renderChips(currentSettings);closePopup();showToast(v===0?'不重试':'重试 '+v+' 次');
+      renderChips(currentSettings);closeDialog();showToast(v===0?'不重试':'重试 '+v+' 次');
     });
     return;
   }
 }
+
 async function loadSubtitleSettings(){
   const d=await api('GET','/remote/settings');if(!d)return;const s=d?.style||{};
   setColorFromHex('color',s.subtitleTextColor||'#FFA100');setColorFromHex('stroke',s.subtitleStrokeColor||'#000000');
@@ -563,32 +680,32 @@ async function loadRemoteSettings(){
   const d=await api('GET','/remote/credentials');if(!d)return;
   const p=document.getElementById('remote-pass');if(p)p.value=d.password||'';
 }
+
 async function checkPlatformLogin(platform){
   const statusEl=document.getElementById('login-status-'+platform);
   const qrEl=document.getElementById('login-qr-'+platform);
   const tipEl=document.getElementById('login-tip');
   if(!statusEl||!qrEl)return;
-  // 禁用所有检测按钮
   document.querySelectorAll('.login-check-btn').forEach(b=>{b.disabled=true;b.style.opacity='0.5';b.style.pointerEvents='none';});
-  statusEl.textContent='检测中...';statusEl.className='login-status checking';
+  statusEl.textContent='检测中...';statusEl.className='badge badge-checking';
   qrEl.innerHTML='';if(tipEl)tipEl.style.display='none';
   try{
     const r=await api('POST','/remote/platform-login',{platform});
-    if(!r){statusEl.textContent='请求失败';statusEl.className='login-status fail';return;}
+    if(!r){statusEl.textContent='请求失败';statusEl.className='badge badge-fail';return;}
     if(r.loggedIn){
-      statusEl.textContent='已登录';statusEl.className='login-status ok';
+      statusEl.textContent='已登录';statusEl.className='badge badge-ok';
       qrEl.innerHTML='';if(tipEl)tipEl.style.display='none';
     }else if(r.accountSelection&&r.accounts&&r.accounts.length>0){
-      statusEl.textContent='请选择账号';statusEl.className='login-status checking';
-      let html='<div style="margin-top:8px"><div style="font-size:12px;color:var(--muted-foreground);margin-bottom:8px">扫码成功，请选择要登录的视频号：</div>';
+      statusEl.textContent='请选择账号';statusEl.className='badge badge-checking';
+      let html='<div style="margin-top:var(--space-2)"><div style="font-size:12px;color:var(--muted-foreground);margin-bottom:var(--space-2)">扫码成功，请选择要登录的视频号：</div>';
       r.accounts.forEach(function(a,i){
-        html+='<div class="login-card" style="padding:10px;margin-bottom:6px;cursor:pointer" onclick="selectWeixinAccount('+i+')"><div style="display:flex;justify-content:space-between;align-items:center"><span style="font-weight:600">'+a.name+'</span><span class="login-status ok">'+a.role+'</span></div></div>';
+        html+='<div class="platform-card" style="padding:var(--space-2);margin-bottom:var(--space-2);cursor:pointer" onclick="selectWeixinAccount('+i+')"><div style="display:flex;justify-content:space-between;align-items:center"><span style="font-weight:600">'+a.name+'</span><span class="badge badge-ok">'+a.role+'</span></div></div>';
       });
       html+='</div>';
       qrEl.innerHTML=html;
       if(tipEl)tipEl.style.display='';
     }else{
-      statusEl.textContent='未登录';statusEl.className='login-status fail';
+      statusEl.textContent='未登录';statusEl.className='badge badge-fail';
       if(r.qrDataUrl){
         qrEl.innerHTML='<img src="'+r.qrDataUrl+'" alt="登录二维码" onclick="showQrOverlay(\''+r.qrDataUrl+'\')"/><div class="qr-tip">点击图片放大查看 · 请使用'+(platform==='weixin'?'微信':'抖音')+'扫码登录</div><div class="qr-actions"><button class="btn btn-sm btn-primary" onclick="saveQrImage(\''+r.qrDataUrl+'\')">保存截图</button><button class="btn btn-sm btn-primary" onclick="confirmScan(\''+platform+'\')">确认扫码</button></div>';
         if(tipEl)tipEl.style.display='';
@@ -597,11 +714,10 @@ async function checkPlatformLogin(platform){
       }
     }
   }catch(e){
-    statusEl.textContent='检测失败';statusEl.className='login-status fail';
+    statusEl.textContent='检测失败';statusEl.className='badge badge-fail';
     const isConnError=/ECONNREFUSED|桥接服务|未启动/.test(e.message);
-    qrEl.innerHTML='<div class="qr-tip">'+e.message+(isConnError?'<br><button class="btn btn-sm btn-primary" style="margin-top:8px" onclick="checkPlatformLogin(\''+platform+'\')">重新检测</button>':'')+'</div>';
+    qrEl.innerHTML='<div class="qr-tip">'+e.message+(isConnError?'<br><button class="btn btn-sm btn-primary" style="margin-top:var(--space-2)" onclick="checkPlatformLogin(\''+platform+'\')">重新检测</button>':'')+'</div>';
   }finally{
-    // 恢复所有检测按钮
     document.querySelectorAll('.login-check-btn').forEach(b=>{b.disabled=false;b.style.opacity='';b.style.pointerEvents='';});
   }
 }
@@ -609,29 +725,29 @@ async function checkPlatformLogin(platform){
 async function confirmScan(platform){
   const statusEl=document.getElementById('login-status-'+platform);
   const qrEl=document.getElementById('login-qr-'+platform);
-  if(statusEl){statusEl.textContent='确认中...';statusEl.className='login-status checking';}
+  if(statusEl){statusEl.textContent='确认中...';statusEl.className='badge badge-checking';}
   document.querySelectorAll('.login-check-btn').forEach(b=>{b.disabled=true;b.style.opacity='0.5';b.style.pointerEvents='none';});
   try{
     const r=await api('POST','/remote/platform-login',{platform});
-    if(!r){if(statusEl){statusEl.textContent='请求失败';statusEl.className='login-status fail';}return;}
+    if(!r){if(statusEl){statusEl.textContent='请求失败';statusEl.className='badge badge-fail';}return;}
     if(r.loggedIn){
-      if(statusEl){statusEl.textContent='已登录';statusEl.className='login-status ok';}
+      if(statusEl){statusEl.textContent='已登录';statusEl.className='badge badge-ok';}
       if(qrEl)qrEl.innerHTML='';
       showToast((platform==='weixin'?'视频号':'抖音')+'登录成功');
     }else if(r.accountSelection&&r.accounts&&r.accounts.length>0){
-      if(statusEl){statusEl.textContent='请选择账号';statusEl.className='login-status checking';}
-      let html='<div style="margin-top:8px"><div style="font-size:12px;color:var(--muted-foreground);margin-bottom:8px">扫码成功，请选择要登录的视频号：</div>';
+      if(statusEl){statusEl.textContent='请选择账号';statusEl.className='badge badge-checking';}
+      let html='<div style="margin-top:var(--space-2)"><div style="font-size:12px;color:var(--muted-foreground);margin-bottom:var(--space-2)">扫码成功，请选择要登录的视频号：</div>';
       r.accounts.forEach(function(a,i){
-        html+='<div class="login-card" style="padding:10px;margin-bottom:6px;cursor:pointer" onclick="selectWeixinAccount('+i+')"><div style="display:flex;justify-content:space-between;align-items:center"><span style="font-weight:600">'+a.name+'</span><span class="login-status ok">'+a.role+'</span></div></div>';
+        html+='<div class="platform-card" style="padding:var(--space-2);margin-bottom:var(--space-2);cursor:pointer" onclick="selectWeixinAccount('+i+')"><div style="display:flex;justify-content:space-between;align-items:center"><span style="font-weight:600">'+a.name+'</span><span class="badge badge-ok">'+a.role+'</span></div></div>';
       });
       html+='</div>';
       if(qrEl)qrEl.innerHTML=html;
     }else{
-      if(statusEl){statusEl.textContent='未检测到登录';statusEl.className='login-status fail';}
+      if(statusEl){statusEl.textContent='未检测到登录';statusEl.className='badge badge-fail';}
       showToast('请先在电脑上完成扫码，再点击确认');
     }
   }catch(e){
-    if(statusEl){statusEl.textContent='确认失败';statusEl.className='login-status fail';}
+    if(statusEl){statusEl.textContent='确认失败';statusEl.className='badge badge-fail';}
     showToast('确认失败: '+e.message);
   }finally{
     document.querySelectorAll('.login-check-btn').forEach(b=>{b.disabled=false;b.style.opacity='';b.style.pointerEvents='';});
@@ -653,17 +769,17 @@ async function selectWeixinAccount(index){
   const qrEl=document.getElementById('login-qr-weixin');
   const tipEl=document.getElementById('login-tip');
   document.querySelectorAll('.login-check-btn').forEach(b=>{b.disabled=true;b.style.opacity='0.5';b.style.pointerEvents='none';});
-  if(statusEl){statusEl.textContent='选择中...';statusEl.className='login-status checking';}
+  if(statusEl){statusEl.textContent='选择中...';statusEl.className='badge badge-checking';}
   try{
     const r=await api('POST','/remote/select-account',{platform:'weixin',accountIndex:index});
     if(r?.ok===false){showToast(r.error||'选择失败');return;}
     if(r?.loggedIn){
-      if(statusEl){statusEl.textContent='已登录';statusEl.className='login-status ok';}
+      if(statusEl){statusEl.textContent='已登录';statusEl.className='badge badge-ok';}
       if(qrEl)qrEl.innerHTML='';
       if(tipEl)tipEl.style.display='none';
       showToast('视频号登录成功');
     }else{
-      if(statusEl){statusEl.textContent='已选择，请确认';statusEl.className='login-status checking';}
+      if(statusEl){statusEl.textContent='已选择，请确认';statusEl.className='badge badge-checking';}
       showToast(r?.message||'已在电脑上选择，请确认');
     }
   }catch(e){
@@ -696,6 +812,7 @@ async function loadTasks(){
   }catch{}
   renderTasks();
 }
+
 async function sendTask(){
   const input=document.getElementById('task-input');if(!input)return;
   const text=input.value.trim();if(!text)return;
@@ -703,6 +820,7 @@ async function sendTask(){
   try{const d=await api('POST','/remote/tasks',{text});if(d?.ok){showToast('已添加 '+(d.tasks?.length||0)+' 个任务');input.value='';input.style.height='auto'}else showToast(d?.error||'发送失败')}catch{showToast('网络错误')}
   input.disabled=false;if(btn)btn.disabled=false;input.focus();
 }
+
 function renderTasks(){
   const el=document.getElementById('chat-stream'),empty=document.getElementById('empty-state');
   if(!el)return;
@@ -729,7 +847,7 @@ function renderTasks(){
     let acts='';
     if(!t.history&&st==='failed')acts+='<button class="btn btn-ghost btn-sm" data-action="retry" data-id="'+t.id+'">重试</button>';
     if(!t.history&&['pending','queued','running'].includes(st))acts+='<button class="btn btn-ghost btn-sm" data-action="stop" data-id="'+t.id+'">停止</button>';
-    return '<div class="task"><div class="task-head"><span class="task-name">'+esc(name)+(t.history?'<span style="font-size:10px;color:var(--muted);margin-left:6px">历史</span>':'')+'</span><span class="task-badge '+bc+'">'+bt+'</span></div>'+
+    return '<div class="task"><div class="task-head"><span class="task-name">'+esc(name)+(t.history?'<span class="task-tag">历史</span>':'')+'</span><span class="badge '+bc+'">'+bt+'</span></div>'+
       (msg?'<div class="task-msg">'+esc(msg)+'</div>':'')+
       '<div class="task-bar"><div class="task-bar-fill '+barC+'" style="width:'+pct+'%"></div></div>'+
       (acts?'<div class="task-actions">'+acts+'</div>':'')+'</div>';
