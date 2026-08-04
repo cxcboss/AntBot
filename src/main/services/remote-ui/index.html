@@ -4,16 +4,36 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>搬运蚁 远程控制</title>
+<script>
+// 跟随系统深浅色模式（在渲染前应用，避免闪烁）
+(function(){
+  function apply(){
+    document.documentElement.classList.toggle('dark',window.matchMedia('(prefers-color-scheme: dark)').matches);
+  }
+  apply();
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change',apply);
+})();
+</script>
 <style>
 :root{
-  --bg:#09090b;--card:#18181b;--fg:#fafafa;--muted:#a1a1aa;
-  --border:#27272a;--primary:#5eead4;--primary-hover:#99f6e4;
+  --bg:#fafafa;--card:#ffffff;--fg:#0a0a0a;--muted:#78716c;--muted-foreground:#78716c;
+  --border:#e7e5e2;--primary:#0d9488;--primary-hover:#0f766e;--primary-foreground:#ffffff;
+  --accent:#f0fdfa;--accent-fg:#0d9488;
+  --destructive:#dc2626;--destructive-bg:#fef2f2;
+  --success:#16a34a;--success-bg:#f0fdf4;
+  --warning:#d97706;--warning-bg:#fffbeb;
+  --radius:8px;--radius-lg:12px;--radius-xl:16px;
+  --shadow:0 4px 6px -1px rgba(0,0,0,.08);
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Display","PingFang SC","Inter",sans-serif;
+}
+.dark{
+  --bg:#09090b;--card:#18181b;--fg:#fafafa;--muted:#a1a1aa;--muted-foreground:#a1a1aa;
+  --border:#27272a;--primary:#5eead4;--primary-hover:#99f6e4;--primary-foreground:#000000;
   --accent:#134e4a;--accent-fg:#5eead4;
   --destructive:#ef4444;--destructive-bg:#2d1212;
-  --success:#22c55e;--warning:#f59e0b;
-  --radius:8px;--radius-lg:12px;--radius-xl:16px;
+  --success:#22c55e;--success-bg:#0a2d12;
+  --warning:#f59e0b;--warning-bg:#2d1f0a;
   --shadow:0 4px 6px -1px rgba(0,0,0,.3);
-  --font:-apple-system,BlinkMacSystemFont,"SF Pro Display","PingFang SC","Inter",sans-serif;
 }
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:var(--font);background:var(--bg);color:var(--fg);font-size:13px;height:100vh;overflow:hidden}
@@ -47,7 +67,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--fg);font-size:13px
 .form-input:focus{border-color:var(--primary)}
 .btn{padding:8px 16px;border-radius:var(--radius);font-size:13px;font-weight:500;cursor:pointer;border:1px solid var(--border);background:var(--card);color:var(--fg);transition:all 120ms}
 .btn:hover{border-color:var(--primary)}
-.btn-primary{background:var(--primary);color:#000;border-color:var(--primary)}
+.btn-primary{background:var(--primary);color:var(--primary-foreground);border-color:var(--primary)}
 .btn-primary:hover{background:var(--primary-hover)}
 .btn-ghost{background:none;border:none;color:var(--muted)}
 .btn-ghost:hover{color:var(--fg)}
@@ -58,9 +78,9 @@ body{font-family:var(--font);background:var(--bg);color:var(--fg);font-size:13px
 .login-card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
 .login-platform-name{font-size:14px;font-weight:600}
 .login-status{font-size:11px;padding:2px 8px;border-radius:var(--radius-full);background:var(--muted);color:var(--muted-foreground)}
-.login-status.ok{background:#dcfce7;color:#16a34a}
-.login-status.fail{background:#fef2f2;color:#dc2626}
-.login-status.checking{background:#fef9c3;color:#d97706}
+.login-status.ok{background:var(--success-bg);color:var(--success)}
+.login-status.fail{background:var(--destructive-bg);color:var(--destructive)}
+.login-status.checking{background:var(--warning-bg);color:var(--warning)}
 .login-check-btn{width:100%}
 .login-qr-area{margin-top:12px;text-align:center;min-height:0}
 .login-qr-area img{max-width:100%;border-radius:var(--radius);border:1px solid var(--border);cursor:pointer}
@@ -81,7 +101,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
 .conn-banner{display:none;padding:6px 12px;font-size:11px;text-align:center;gap:6px;align-items:center;justify-content:center}
 .conn-banner.show{display:flex}
 .conn-banner.ok{background:var(--accent);color:var(--accent-fg)}
-.conn-banner.checking,.conn-banner.retry{background:#2d1f0a;color:var(--warning)}
+.conn-banner.checking,.conn-banner.retry{background:var(--warning-bg);color:var(--warning)}
 .conn-banner.offline{background:var(--destructive-bg);color:var(--destructive)}
 .conn-spinner{width:12px;height:12px;border:2px solid var(--border);border-top-color:var(--primary);border-radius:50%;animation:spin .6s linear infinite;display:inline-block}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -91,18 +111,19 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
 .input-row{display:flex;gap:8px;align-items:flex-end}
 .input-field{flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--fg);font-size:13px;resize:none;outline:none;max-height:120px;font-family:var(--font);transition:border-color 120ms}
 .input-field:focus{border-color:var(--primary)}
-.send-btn{width:36px;height:36px;border-radius:50%;background:var(--primary);border:none;color:#000;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all 120ms}
+.send-btn{width:36px;height:36px;border-radius:50%;background:var(--primary);border:none;color:var(--primary-foreground);cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all 120ms}
 .send-btn:disabled{opacity:.3;cursor:not-allowed}
 .chips{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}
 .chip{font-size:10px;padding:2px 8px;border-radius:999px;background:var(--accent);color:var(--accent-fg)}
+.chip-spacer{flex:1}
 .task{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px;position:relative}
 .task-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px}
 .task-name{font-size:12px;font-weight:600}
 .task-badge{font-size:10px;padding:2px 8px;border-radius:999px;font-weight:500}
 .badge-pending{background:var(--accent);color:var(--accent-fg)}
-.badge-running{background:#2d1f0a;color:var(--warning)}
-.badge-completed{background:#0a2d12;color:var(--success)}
-.badge-warning{background:#2d1f0a;color:var(--warning)}
+.badge-running{background:var(--warning-bg);color:var(--warning)}
+.badge-completed{background:var(--success-bg);color:var(--success)}
+.badge-warning{background:var(--warning-bg);color:var(--warning)}
 .badge-failed{background:var(--destructive-bg);color:var(--destructive)}
 .task-msg{font-size:11px;color:var(--muted);margin-bottom:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .task-bar{height:4px;background:var(--border);border-radius:2px;overflow:hidden}
@@ -142,6 +163,7 @@ const HUB_URL='https://hub.onebugmanai.online';
 let API=window.location.origin;
 let token=localStorage.getItem('antbot-token');
 let tasks=[];
+let historyItems=[];
 let sseSource=null;
 let currentPage='main';
 let deviceId=localStorage.getItem('antbot-device-id')||'';
@@ -314,7 +336,7 @@ function renderAppShell(){
     <button class="nav-item" data-page="remote"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>远程</button>
     <button class="nav-item" data-page="login"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>平台登录</button>
   </nav>
-  <div class="sidebar-version" id="sidebar-version">v1.2.0</div>
+  <div class="sidebar-version" id="sidebar-version">v1.3.0</div>
 </div>
 <div class="content" id="content">
   <div class="page active" id="page-main">
@@ -455,7 +477,7 @@ function closePopup(){if(activePopup){activePopup.remove();activePopup=null}if(a
 function renderChips(s){
   const c=document.getElementById('chips');if(!c)return;
   const style=s?.editDefaults?.style||'未设置';
-  const voice=s?.voiceClone?.profileName||'未设置';
+  const voice=s?.editDefaults?.voice||'未设置';
   const retry=Math.max(0,Number(s?.retry?.failedTaskRetries??0));
   c.innerHTML='<button class="chip" data-chip="style">'+esc(style)+'</button>'
     +'<button class="chip" data-chip="voice">'+esc(voice)+'</button>'
@@ -502,13 +524,13 @@ function showChipPopup(type,anchor){
     api('GET','/remote/voices').then(d=>{
       const voices=d?.voices||[];
       if(!voices.length){popup.innerHTML='<div style="padding:8px 12px;font-size:12px;color:var(--muted)">暂无音色，请先在App中克隆</div>';return;}
-      const cur=currentSettings?.voiceClone?.voiceId||'';
-      popup.innerHTML=voices.map(v=>'<button class="popup-item'+(v.id===cur?' active':'')+'" data-vid="'+esc(v.id)+'" data-vname="'+esc(v.name)+'">'+esc(v.name)+'</button>').join('');
+      const cur=currentSettings?.editDefaults?.voice||'';
+      popup.innerHTML=voices.map(v=>'<button class="popup-item'+(v.name===cur?' active':'')+'" data-vname="'+esc(v.name)+'">'+esc(v.name)+'</button>').join('');
       popup.querySelectorAll('.popup-item').forEach(btn=>{
         btn.addEventListener('click',async()=>{
-          const vid=btn.dataset.vid,vname=btn.dataset.vname;
-          await api('POST','/remote/settings',{voiceClone:{...currentSettings?.voiceClone,voiceId:vid,profileName:vname}});
-          currentSettings.voiceClone={...currentSettings?.voiceClone,voiceId:vid,profileName:vname};
+          const vname=btn.dataset.vname;
+          await api('POST','/remote/settings',{editDefaults:{...currentSettings?.editDefaults,voice:vname}});
+          currentSettings.editDefaults={...currentSettings?.editDefaults,voice:vname};
           renderChips(currentSettings);closePopup();showToast('音色: '+vname);
         });
       });
@@ -660,7 +682,18 @@ function setupColorPicker(p,def){setColorFromHex(p,def);['h','s','l'].forEach(t=
 
 async function loadTasks(){
   const d=await api('GET','/remote/tasks');if(d?.tasks)tasks=d.tasks;
-  try{const h=await api('GET','/remote/history');if(h?.history)for(const r of h.history)if(r.items)for(const i of r.items)if(!tasks.find(t=>t.id===i.id))tasks.push({...i,_h:1})}catch{}
+  try{
+    const h=await api('GET','/remote/history');
+    const merged=[];
+    if(h?.history)for(const r of h.history)if(r.items)for(const i of r.items){
+      const id=i.taskId||i.id;
+      if(!id)continue;
+      merged.push({...i,id,history:true});
+    }
+    // 按 id 去重（历史记录可能跨批次重复）
+    const seen=new Set();
+    historyItems=merged.filter(x=>{if(seen.has(x.id))return false;seen.add(x.id);return true});
+  }catch{}
   renderTasks();
 }
 async function sendTask(){
@@ -672,24 +705,33 @@ async function sendTask(){
 }
 function renderTasks(){
   const el=document.getElementById('chat-stream'),empty=document.getElementById('empty-state');
-  if(!el)return;if(!tasks.length){if(empty)empty.style.display='';return}
+  if(!el)return;
+  // 历史项排除当前仍存活的 live 任务（同 id）
+  const liveIds=new Set(tasks.map(t=>t.id));
+  const hist=historyItems.filter(i=>!liveIds.has(i.id));
+  if(!tasks.length&&!hist.length){if(empty)empty.style.display='';return}
   if(empty)empty.style.display='none';
-  const sorted=[...tasks].sort((a,b)=>(a.index||a.queueIndex||0)-(b.index||b.queueIndex||0));
+  // live 任务按队列顺序在前，历史记录按时间倒序在后
+  const sorted=[
+    ...tasks.slice().sort((a,b)=>(a.index||a.queueIndex||0)-(b.index||b.queueIndex||0)),
+    ...hist.slice().sort((a,b)=>(b.submittedAt||b.endedAt||0)-(a.submittedAt||a.endedAt||0))
+  ];
   el.innerHTML=sorted.map(t=>{
     const st=t.status||'pending',pg=Math.max(0,Math.min(100,Number(t.progress||0)));
     const idx=t.index||t.queueIndex||0;
-    const name=idx?'任务'+idx:(t.isOriginal?'原创':(t.taskName||'任务'));
+    const name=idx?'任务'+idx:(t.taskName||'任务');
     const bc={running:'badge-running',completed:'badge-completed',warning:'badge-warning',failed:'badge-failed'}[st]||'badge-pending';
     const bt={pending:'等待',queued:'等待',running:'执行中',completed:'成功',warning:'部分完成',failed:'失败',stopped:'已停止'}[st]||st;
+    // 历史任务没有实时进度：终态直接显示满条
+    const pct=t.history?(st==='failed'||st==='completed'?100:0):pg;
     const barC=st==='completed'?'done':st==='failed'?'error':'';
-    const msg=t.message||'';
+    const msg=t.message||(t.rawLine?t.rawLine.slice(0,60):'');
     let acts='';
-    if(st==='failed')acts+='<button class="btn btn-ghost btn-sm" data-action="retry" data-id="'+t.id+'">重试</button>';
-    if(['pending','queued','running'].includes(st))acts+='<button class="btn btn-ghost btn-sm" data-action="stop" data-id="'+t.id+'">停止</button>';
-    return '<div class="task"><div class="task-head"><span class="task-name">'+esc(name)+'</span><span class="task-badge '+bc+'">'+bt+'</span></div>'+
-      (t.isOriginal?'<div style="margin-top:4px"><span style="font-size:10px;padding:1px 6px;border-radius:999px;background:var(--accent);color:var(--accent-fg)">原创</span></div>':'')+
+    if(!t.history&&st==='failed')acts+='<button class="btn btn-ghost btn-sm" data-action="retry" data-id="'+t.id+'">重试</button>';
+    if(!t.history&&['pending','queued','running'].includes(st))acts+='<button class="btn btn-ghost btn-sm" data-action="stop" data-id="'+t.id+'">停止</button>';
+    return '<div class="task"><div class="task-head"><span class="task-name">'+esc(name)+(t.history?'<span style="font-size:10px;color:var(--muted);margin-left:6px">历史</span>':'')+'</span><span class="task-badge '+bc+'">'+bt+'</span></div>'+
       (msg?'<div class="task-msg">'+esc(msg)+'</div>':'')+
-      '<div class="task-bar"><div class="task-bar-fill '+barC+'" style="width:'+pg+'%"></div></div>'+
+      '<div class="task-bar"><div class="task-bar-fill '+barC+'" style="width:'+pct+'%"></div></div>'+
       (acts?'<div class="task-actions">'+acts+'</div>':'')+'</div>';
   }).join('');
   const chat=document.getElementById('chat');if(chat)chat.scrollTop=chat.scrollHeight;
