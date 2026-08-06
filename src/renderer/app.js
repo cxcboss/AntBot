@@ -10,7 +10,7 @@ const el = {
   badge:$('#app-badge'), sidebar:$('#sidebar'), overlay:$('#sidebar-overlay'),
   sidebarToggle:$('#sidebar-toggle'), pageTitle:$('#page-title'),
   scroll:$('#chat-scroll'), stream:$('#chat-stream'),
-  input:$('#task-input'), runBtn:$('#run-btn'),
+  input:$('#task-input'), runBtn:$('#run-btn'), optBtn:$('#opt-btn'), previewBar:$('#preview-bar'),
   chips:$('#setting-chips'),
   editAddBtn:$('#edit-add-btn'), editStartBtn:$('#edit-start-btn'),
   resizeHandle:$('#resize-handle'), composer:$('#composer'), chatArea:$('#chat-area'),
@@ -37,7 +37,7 @@ const S = {
   app:null, settings:null, history:[],
   progress:{running:false,tasks:[],queueTasks:[]},
   startup:null, deps:null, dataInfo:null, hint:'',
-  preview:{count:0,items:[],error:'',empty:true},
+  preview:{count:0,items:[],warnings:[],source:'',defaults:null,error:'',empty:true,mode:'auto'},
   vc:{running:false,status:'idle',step:'等待',pct:0,logs:[]},
   pending:[], chatCount:20, sidebarOpen:window.innerWidth>720, statPeriod:'day',
   currentFeat:'main', selectedStyle:'', persistedTasks:[],
@@ -56,6 +56,20 @@ const statusText=(s)=>statusMap[s]||s;
 /* ── Icons ── */
 function injectIcons(){document.querySelectorAll('[data-icon]').forEach(e=>{const n=e.dataset.icon;if(ICONS[n])e.innerHTML=ICONS[n];})}
 function closeDlg(dlg){if(!dlg)return;dlg.classList.add('closing');setTimeout(()=>{dlg.close();dlg.classList.remove('closing');},180);}
+function confirmDialog(message,{danger=true,okText='确定'}={}){
+  return new Promise(resolve=>{
+    const dlg=document.createElement('dialog');dlg.className='dlg dlg-confirm';
+    dlg.innerHTML=`<div class="dlg-box"><div class="dlg-body confirm-body"><span class="icon confirm-icon${danger?' danger':''}" data-icon="${danger?'alertTriangle':'alertCircle'}"></span><span class="confirm-msg">${esc(message)}</span></div><div class="dlg-acts confirm-acts"><button type="button" class="btn btn-sm btn-ghost" data-confirm-no>取消</button><button type="button" class="btn btn-sm ${danger?'btn-danger':'btn-primary'}" data-confirm-yes>${esc(okText)}</button></div></div>`;
+    document.body.appendChild(dlg);
+    injectIcons();
+    const done=v=>{closeDlg(dlg);setTimeout(()=>{dlg.remove();resolve(v)},200)};
+    dlg.querySelector('[data-confirm-no]').addEventListener('click',()=>done(false));
+    dlg.querySelector('[data-confirm-yes]').addEventListener('click',()=>done(true));
+    dlg.addEventListener('cancel',e=>{e.preventDefault();done(false)});
+    dlg.addEventListener('click',e=>{if(e.target===dlg)done(false)});
+    dlg.showModal();
+  });
+}
 
 /* ── Toast ── */
 function toast(msg,type='info',ms=3000){const c=$('#toast-container');if(!c)return;const t=document.createElement('div');t.className=`toast ${type}`;const im={success:ICONS.check,error:ICONS.alertCircle,warning:ICONS.alertTriangle,info:ICONS.alertCircle};t.innerHTML=`<span class="icon">${im[type]||''}</span><span>${esc(msg)}</span>`;c.appendChild(t);setTimeout(()=>{t.classList.add('out');setTimeout(()=>t.remove(),200);},ms);}
@@ -238,6 +252,17 @@ function liveGroups(){
   S.pending.forEach(b=>{if(!gs.has(b.runId))gs.set(b.runId,{id:b.runId,at:b.createdAt,txt:b.txt,tasks:[]});gs.get(b.runId).txt=b.txt});
   return Array.from(gs.values()).map(g=>({...g,tasks:g.tasks.sort((a,b)=>(a.index||a.queueIndex||0)-(b.index||b.queueIndex||0)),txt:g.txt||g.tasks.map(t=>t.rawLine).filter(Boolean).join('\n')||g.tasks.map(t=>t.taskName).join('\n')})).sort((a,b)=>new Date(a.at)-new Date(b.at));
 }
+// 历史记录中同一任务多次尝试（重试）只保留最后一次（attempt 最大）
+function dedupeHistoryItems(items){
+  const map=new Map();
+  (items||[]).forEach((it,i)=>{
+    const key=String(it.taskId||it.id||'');
+    if(!key){map.set(`__${i}`,it);return}
+    const prev=map.get(key);
+    if(!prev||Number(it.attempt||1)>=Number(prev.attempt||1))map.set(key,it);
+  });
+  return [...map.values()];
+}
 function taskCard(t,live=false){
   const st=t.status||'pending';const pg=Math.max(0,Math.min(100,Number(t.progress||0)));
   const idx=t.index||t.queueIndex||0;const title=idx?`任务${idx}`:(t.isOriginal?'原创':(t.taskName||'任务'));
@@ -252,6 +277,7 @@ function taskCard(t,live=false){
 
   const tags=[];
   if(t.isOriginal)tags.push('<span class="task-tag task-tag-accent">原创</span>');
+  if(t.campaignName)tags.push(`<span class="task-tag task-tag-accent">活动:${esc(t.campaignName)}</span>`);
   if(t.publishAt){const d=new Date(t.publishAt);if(!isNaN(d)){const pad=n=>String(n).padStart(2,'0');const isExpired=d.getTime()<Date.now();if(isExpired&&st!=='running'&&st!=='queued'){tags.push(`<span class="task-tag" style="color:var(--destructive)">发布时间已过期 ${d.getMonth()+1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}</span>`)}else{tags.push(`<span class="task-tag">定时 ${d.getMonth()+1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}</span>`)}}}
   const tagsHtml=tags.length?`<div class="task-tags">${tags.join('')}</div>`:'';
 
@@ -272,16 +298,16 @@ function taskCard(t,live=false){
 function renderChat(opts={}){
   if(!el.stream)return;const stick=opts.stick,vis=(S.history||[]).slice(0,S.chatCount).reverse(),lg=liveGroups();
   const parts=[];let day='';
-  for(const r of vis){const d=fmtDay(r.startedAt);if(d&&d!==day){day=d;parts.push(`<div class="chat-day">${esc(d)}</div>`)}const txt=r.inputText||(r.items||[]).map(i=>i.rawLine||i.taskName).filter(Boolean).join('\n');parts.push(`<div class="msg-time">${esc(fmtDate(r.startedAt))}</div>`);if(txt)parts.push(`<div class="msg msg-user">${makeBubbleHtml(txt)}</div>`);parts.push(`<div class="msg-sys"><div class="task-stack">${(r.items||[]).map(i=>taskCard(i)).join('')}</div></div>`)}
+  for(const r of vis){const d=fmtDay(r.startedAt);if(d&&d!==day){day=d;parts.push(`<div class="chat-day">${esc(d)}</div>`)}const txt=r.inputText||(r.items||[]).map(i=>i.rawLine||i.taskName).filter(Boolean).join('\n');parts.push(`<div class="msg-time">${esc(fmtDate(r.startedAt))}</div>`);if(txt)parts.push(`<div class="msg msg-user" data-run-id="${esc(String(r.id||''))}">${makeBubbleHtml(txt)}</div>`);parts.push(`<div class="msg-sys" data-run-id="${esc(String(r.id||''))}"><div class="task-stack">${dedupeHistoryItems(r.items).map(i=>taskCard(i)).join('')}</div></div>`)}
   // 持久化的主控任务（重新发布状态，重启后保留）
   const historyIds=new Set((S.history||[]).flatMap(r=>(r.items||[]).map(i=>i.taskId)));
   const persisted=(S.persistedTasks||[]).filter(t=>!historyIds.has(t.taskId)&&(t.status==='warning'||t.status==='completed'));
   if(persisted.length){
     const byRun={};
     for(const t of persisted){const key=t.batchRunId||'persisted';if(!byRun[key])byRun[key]={tasks:[],at:t.submittedAt||t.updatedAt,inputText:t.inputText||''};byRun[key].tasks.push(t);}
-    for(const [,g] of Object.entries(byRun)){const d=fmtDay(g.at);if(d&&d!==day){day=d;parts.push(`<div class="chat-day">${esc(d)}</div>`)}parts.push(`<div class="msg-time">${esc(fmtDate(g.at))}</div>`);if(g.inputText)parts.push(`<div class="msg msg-user">${makeBubbleHtml(g.inputText)}</div>`);parts.push(`<div class="msg-sys"><div class="task-stack">${g.tasks.map(t=>taskCard(t)).join('')}</div></div>`)}
+    for(const [,g] of Object.entries(byRun)){const runId=esc(String(g.tasks[0]?.batchRunId||''));const pv=g.tasks[0]?.batchRunId?`data-run-id="${runId}" data-persisted="1"`:'';const d=fmtDay(g.at);if(d&&d!==day){day=d;parts.push(`<div class="chat-day">${esc(d)}</div>`)}parts.push(`<div class="msg-time">${esc(fmtDate(g.at))}</div>`);if(g.inputText)parts.push(`<div class="msg msg-user" ${pv}>${makeBubbleHtml(g.inputText)}</div>`);parts.push(`<div class="msg-sys" ${pv}><div class="task-stack">${g.tasks.map(t=>taskCard(t)).join('')}</div></div>`)}
   }
-  for(const g of lg){const d=fmtDay(g.at);if(d&&d!==day){day=d;parts.push(`<div class="chat-day">${esc(d)}</div>`)}parts.push(`<div class="msg-time">${esc(fmtDate(g.at))}</div>`);if(g.txt)parts.push(`<div class="msg msg-user">${makeBubbleHtml(g.txt)}</div>`);parts.push(`<div class="msg-sys"><div class="task-stack">${g.tasks.map(t=>taskCard(t,true)).join('')}</div></div>`)}
+  for(const g of lg){const runId=esc(String(g.id||''));const d=fmtDay(g.at);if(d&&d!==day){day=d;parts.push(`<div class="chat-day">${esc(d)}</div>`)}parts.push(`<div class="msg-time">${esc(fmtDate(g.at))}</div>`);if(g.txt)parts.push(`<div class="msg msg-user" data-run-id="${runId}">${makeBubbleHtml(g.txt)}</div>`);parts.push(`<div class="msg-sys" data-run-id="${runId}"><div class="task-stack">${g.tasks.map(t=>taskCard(t,true)).join('')}</div></div>`)}
   el.stream.innerHTML=parts.length?parts.join(''):'<div class="chat-empty">还没有任务。</div>';
   if(stick)requestAnimationFrame(()=>{el.scroll.scrollTop=el.scroll.scrollHeight});
 }
@@ -298,7 +324,9 @@ function renderChips(){
 
 /* ── Chip popups ── */
 let activePopup=null;
-function closeAllPopups(){if(activePopup){activePopup.remove();activePopup=null}}
+let activeCtxDismiss=null;
+function clearCtxDismiss(){if(activeCtxDismiss){document.removeEventListener('mousedown',activeCtxDismiss);activeCtxDismiss=null}}
+function closeAllPopups(){clearCtxDismiss();if(activePopup){activePopup.remove();activePopup=null}}
 function positionPopup(popup,anchor){
   document.body.appendChild(popup);
   const rect=anchor.getBoundingClientRect();
@@ -519,8 +547,111 @@ async function loadUISettings(){
 
 /* ── Preview ── */
 function autoInput(){if(!el.input)return;el.input.style.height='auto';el.input.style.height=`${Math.max(28,Math.min(el.input.scrollHeight,200))}px`}
-async function refreshPreview(){const raw=el.input?.value?.trim()||'',seq=++previewSeq;if(!raw){S.preview={count:0,items:[],error:'',empty:true};return}try{const p=await window.antbot.parseTasks(raw);if(seq!==previewSeq)return;S.preview={count:p.length,items:p.slice(0,5),error:p.length?'':'未识别到有效任务',empty:false}}catch(e){if(seq!==previewSeq)return;S.preview={count:0,items:[],error:compact(e?.message||'解析失败'),empty:false}}}
+function fmtPvTime(v){const d=new Date(v);if(isNaN(d))return'';const now=new Date();const pad=n=>String(n).padStart(2,'0');const t=`${pad(d.getHours())}:${pad(d.getMinutes())}`;if(d.toDateString()===now.toDateString())return t;if(d.getTime()<now.getTime())return`${d.getMonth()+1}/${d.getDate()} ${t}`;const tm=new Date(now);tm.setDate(now.getDate()+1);if(d.toDateString()===tm.toDateString())return`明天 ${t}`;return`${d.getMonth()+1}/${d.getDate()} ${t}`}
+function parsePvTimeText(text){
+  const s=String(text||'').trim();
+  if(!s)return null;
+  if(/^(立刻|立即|马上|现在|now)$/i.test(s))return null;
+  let m=s.match(/^明天\s*(\d{1,2})[:时](\d{1,2})分?$/);
+  if(m){const d=new Date();d.setDate(d.getDate()+1);d.setHours(+m[1],+m[2],0,0);return d;}
+  m=s.match(/^(\d{1,2})[:时](\d{1,2})分?$/);
+  if(m){const d=new Date();d.setHours(+m[1],+m[2],0,0);if(d.getTime()<=Date.now())d.setDate(d.getDate()+1);return d;}
+  const d=new Date(s);
+  return isNaN(d.getTime())?null:d;
+}
+function renderPreview(){
+  const bar=el.previewBar;if(!bar)return;
+  const p=S.preview;
+  if(p.empty||(!p.count&&!p.error)){bar.style.display='none';bar.innerHTML='';return}
+  bar.style.display='block';
+  const srcBadge=p.mode==='optimized'?'<span class="pv-badge pv-ai">AI 优化</span>':(p.source==='ai'?'<span class="pv-badge pv-ai">AI 识别</span>':(p.source==='regex'?'<span class="pv-badge">规则识别</span>':''));
+  const d=p.defaults;
+  const defTxt=d?`<span class="pv-def">默认：${(d.platforms||['视频号']).map(x=>x==='douyin'?'抖音':'视频号').join('+')} · ${d.isOriginal?'原创':'不原创'} · ${(d.topics||[]).length}个话题${d.intervalMinutes?` · 间隔${d.intervalMinutes[0]}-${d.intervalMinutes[1]}分`:''}</span>`:'';
+  const items=(p.items||[]).slice(0,5).map((t,i)=>{
+    const pf=(t.platforms||[]).map(x=>x==='douyin'?'抖音':'视频号').join('+');
+    const tags=[`<span class="pv-tag">${esc(pf)}</span>`,`<span class="pv-tag${t.isOriginal?' pv-tag-accent':''}">${t.isOriginal?'原创':'不原创'}</span>`];
+    if(t.publishAt)tags.push(`<span class="pv-tag">${esc(fmtPvTime(t.publishAt))}</span>`);else tags.push('<span class="pv-tag">立即发布</span>');
+    if(t.campaignName)tags.push(`<span class="pv-tag pv-tag-accent">活动:${esc(t.campaignName)}</span>`);
+    const title=t.taskName&&t.taskName!=='普通'?`<span class="pv-title">${esc(t.taskName)}</span>`:'';
+    return`<div class="pv-row"><button class="pv-edit" type="button" data-edit-pv="${i}" title="修改此任务">${esc('✎')}</button>${tags.join('')}${title}</div>`;
+  }).join('');
+  const more=p.count>p.items.length?`<div class="pv-more">…共 ${p.count} 条</div>`:'';
+  const warns=(p.warnings||[]).map(w=>`<div class="pv-warn">${esc(w)}</div>`).join('');
+  const err=p.error?`<div class="pv-warn">${esc(p.error)}</div>`:'';
+  const confirm=(p.items&&p.items.length)?`<div class="pv-acts"><button class="btn btn-sm btn-primary" type="button" data-pv-confirm>${p.mode==='optimized'?'确定发送':'发送'}</button></div>`:'';
+  bar.innerHTML=`<div class="pv-head">${srcBadge}<span class="pv-count">${p.count} 条任务</span>${defTxt}</div>${items}${more}${warns}${err}${confirm}`;
+}
+function openPvEditor(index,anchor){
+  const t=(S.preview.items||[])[index];if(!t)return;
+  closeAllPopups();
+  const popup=document.createElement('div');popup.className='chip-popup pv-popup';
+  const pf=(t.platforms||[]).map(x=>x==='douyin'?'douyin':'videoChannel');
+  const pfBtn=(v,label)=>`<button type="button" class="pv-pf-btn${pf.includes(v)?' on':''}" data-pv-pf="${v}">${label}</button>`;
+  const origLabel=t.isOriginal?'原创':'不原创';
+  const timeVal=t.publishAt?fmtPvTime(t.publishAt):'';
+  popup.innerHTML=`<div class="pv-ed-row"><span class="pv-ed-label">平台</span><div class="pv-pf-group">${pfBtn('videoChannel','视频号')}${pfBtn('douyin','抖音')}${pfBtn('videoChannel,douyin','两者')}</div></div>
+    <div class="pv-ed-row"><span class="pv-ed-label">原创</span><button type="button" class="pv-orig-btn" data-pv-orig="${t.isOriginal?'1':'0'}">${origLabel}（点击切换）</button></div>
+    <div class="pv-ed-row"><span class="pv-ed-label">时间</span><input class="pv-input" data-pv-time value="${esc(timeVal)}" placeholder="立即 / 16:00 / 明天 10:00" /></div>
+    <div class="pv-ed-row"><span class="pv-ed-label">标题</span><input class="pv-input" data-pv-title value="${esc(t.taskName&&t.taskName!=='普通'?t.taskName:'')}" placeholder="标题（空=普通）" /></div>
+    <div class="pv-ed-row"><span class="pv-ed-label">话题</span><input class="pv-input" data-pv-topics value="${esc((t.publishTopics||[]).join(' '))}" placeholder="#话题1 #话题2（空格分隔）" /></div>
+    <div class="pv-ed-row"><span class="pv-ed-label">活动</span><input class="pv-input" data-pv-campaign value="${esc(t.campaignName||'')}" placeholder="活动名（空=不参加）" /></div>
+    <div class="pv-ed-acts"><button type="button" class="btn btn-sm btn-primary" data-pv-save>保存</button><button type="button" class="btn btn-sm btn-ghost" data-pv-del>删除此任务</button><button type="button" class="btn btn-sm btn-ghost" data-pv-cancel>取消</button></div>`;
+  positionPopup(popup,anchor);activePopup=popup;
+  popup.querySelector('[data-pv-orig]').addEventListener('click',(e)=>{
+    const b=e.currentTarget;const next=b.dataset.pvOrig==='1';
+    b.dataset.pvOrig=next?'0':'1';b.textContent=(next?'不原创':'原创')+'（点击切换）';
+  });
+  popup.querySelectorAll('[data-pv-pf]').forEach(b=>{
+    b.addEventListener('click',()=>{
+      popup.querySelectorAll('[data-pv-pf]').forEach(x=>x.classList.remove('on'));
+      b.classList.add('on');
+    });
+  });
+  popup.querySelector('[data-pv-save]').addEventListener('click',()=>{
+    const pfSel=popup.querySelector('[data-pv-pf].on')?.dataset.pvPf;
+    const topics=String(popup.querySelector('[data-pv-topics]').value||'').trim().split(/[\s,，、]+/).filter(Boolean).map(x=>x.startsWith('#')?x:'#'+x).slice(0,5);
+    const newTime=parsePvTimeText(popup.querySelector('[data-pv-time]').value);
+    t.platforms=pfSel?pfSel.split(','):t.platforms;
+    t.isOriginal=popup.querySelector('[data-pv-orig]').dataset.pvOrig==='1';
+    t.publishAt=newTime;
+    t.taskName=String(popup.querySelector('[data-pv-title]').value||'').trim()||'普通';
+    t.publishTopics=topics;
+    t.campaignName=String(popup.querySelector('[data-pv-campaign]').value||'').trim();
+    closeAllPopups();S.preview.edited=true;renderPreview();
+  });
+  popup.querySelector('[data-pv-del]').addEventListener('click',()=>{
+    S.preview.items.splice(index,1);S.preview.count=S.preview.items.length;
+    closeAllPopups();S.preview.edited=true;renderPreview();
+  });
+  popup.querySelector('[data-pv-cancel]').addEventListener('click',()=>closeAllPopups());
+}
+async function refreshPreview(opts){
+  const raw=el.input?.value?.trim()||'',seq=++previewSeq;
+  const smart=Boolean(opts?.smart);
+  if(!raw){S.preview={count:0,items:[],warnings:[],source:'',defaults:null,error:'',empty:true,mode:'auto'};renderPreview();return}
+  try{
+    const p=await window.antbot.parseTasks(raw,{smart});
+    if(seq!==previewSeq)return;
+    S.preview={count:p.tasks?.length||0,items:p.tasks||[],warnings:p.warnings||[],source:p.source||'',defaults:p.defaults||null,error:'',empty:false,mode:smart?'optimized':'auto',edited:false};
+    renderPreview();
+  }catch(e){
+    if(seq!==previewSeq)return;
+    S.preview={count:0,items:[],warnings:[],source:'',defaults:null,error:compact(e?.message||'解析失败'),empty:false,mode:smart?'optimized':'auto'};
+    renderPreview();
+  }
+}
 function queuePreview(){if(previewTimer)clearTimeout(previewTimer);previewTimer=setTimeout(()=>refreshPreview().catch(()=>{}),160)}
+async function optimizeInput(){
+  const raw=el.input?.value?.trim();
+  if(!raw){toast('请先输入任务','info');return}
+  el.optBtn?.classList.add('busy');
+  try{
+    await refreshPreview({smart:true});
+    if(S.preview.error)toast(`优化失败: ${S.preview.error}`,'error');
+    else toast('已用 AI 优化，可编辑后确定发送','success');
+  }catch(e){toast(`优化失败: ${e.message}`,'error')}
+  finally{el.optBtn?.classList.remove('busy')}
+}
 
 /* ── Quick settings ── */
 function stepSetting(k,d){if(!S.settings)return;if(!S.settings.style)S.settings.style={};if(!S.settings.retry)S.settings.retry={};if(k==='voiceSpeed'){const c=Number(S.settings.style.voiceSpeed??1.1),n=Math.max(0.5,Math.min(2,Math.round((c+d*0.1)*10)/10));if(n!==c&&!Number.isNaN(n)){S.settings.style.voiceSpeed=n;renderChips();void qPatch({style:{voiceSpeed:n}},`语速 ${n.toFixed(1)}`)}}else if(k==='retry'){const c=Math.max(0,Number(S.settings.retry.failedTaskRetries??0)),n=Math.max(0,Math.min(20,c+d));if(n!==c){S.settings.retry.failedTaskRetries=n;renderChips();void qPatch({retry:{failedTaskRetries:n}},`重试 ${n}`)}}}
@@ -1267,7 +1398,7 @@ async function checkVoicebox() {
 }
 
 /* ── Actions ── */
-async function startTasks(){const raw=el.input?.value?.trim();if(!raw){toast('请输入任务','error');return}if(!S.editDefaults?.style&&!S.selectedStyle){toast('建议先在底部菜单选择风格，否则剪辑将无风格指导','info')}try{const r=await window.antbot.startTasks(raw);appendPending({runId:r.runId,inputText:raw});el.input.value='';autoInput();queuePreview();toast(r.queued?`已排队 (${r.queuePosition})`:`已启动 ${r.taskCount} 条`,'success');renderChat({stick:true})}catch(e){toast(`失败: ${e.message}`,'error')}}
+async function startTasks(forceItems){const raw=el.input?.value?.trim();const pv=S.preview;if(!raw&&!(pv.items&&pv.items.length)){toast('请输入任务','error');return}if(!S.editDefaults?.style&&!S.selectedStyle){toast('建议先在底部菜单选择风格，否则剪辑将无风格指导','info')}try{let payload=raw;const useItems=forceItems||((pv.items&&pv.items.length&&!pv.empty)&&(pv.mode==='optimized'||pv.edited));if(useItems){payload=pv.items.map(t=>({id:t.id,rawLine:t.rawLine,taskName:t.taskName,isOriginal:!!t.isOriginal,videoUrl:t.videoUrl,timeRange:t.timeRange||'',platforms:t.platforms||[],publishCopy:t.publishCopy||'',publishTopics:t.publishTopics||[],campaignName:t.campaignName||'',publishAt:t.publishAt?new Date(t.publishAt):null}))}const r=await window.antbot.startTasks(payload);appendPending({runId:r.runId,inputText:raw||''});el.input.value='';autoInput();queuePreview();if(r.warnings?.length)toast(r.warnings[0],'info');toast(r.queued?`已排队 (${r.queuePosition})`:`已启动 ${r.taskCount} 条`,'success');renderChat({stick:true})}catch(e){toast(`失败: ${e.message}`,'error')}}
 async function stopTasks(){if(!window.confirm('确认停止所有任务？'))return;try{await window.antbot.stopTasks();toast('已停止','success');await refreshAppState().catch(()=>{})}catch(e){toast(`失败: ${e.message}`,'error')}}
 async function saveSettings(){
   try{
@@ -1663,6 +1794,14 @@ function bind(){
   el.input?.addEventListener('input',()=>{autoInput();queuePreview();renderBtns();toggleSendBtn()});
   el.input?.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){e.preventDefault();void startTasks()}});
   el.runBtn?.addEventListener('click',()=>void startTasks());
+  el.optBtn?.addEventListener('click',()=>void optimizeInput());
+  // Preview edit
+  el.previewBar?.addEventListener('click',e=>{
+    const editBtn=e.target.closest('[data-edit-pv]');
+    if(editBtn)openPvEditor(Number(editBtn.dataset.editPv),editBtn);
+    const confirmBtn=e.target.closest('[data-pv-confirm]');
+    if(confirmBtn)void startTasks(true);
+  });
   // Chat actions
   el.stream?.addEventListener('click',e=>{
     const stopBtn=e.target.closest('[data-stop]');
@@ -1732,6 +1871,57 @@ function bind(){
       });
     }
   });
+  // Context menu: remove record (history / live / persisted) on user messages or task cards
+  el.stream?.addEventListener('contextmenu',e=>{
+    const holder=e.target.closest('.msg-user')||e.target.closest('.msg-sys');
+    if(!holder){closeAllPopups();return}
+    const runId=holder.dataset.runId;
+    const isPersisted=holder.dataset.persisted==='1';
+    e.preventDefault();
+    clearCtxDismiss();
+    closeAllPopups();
+    const menu=document.createElement('div');menu.className='ctx-menu';
+    menu.innerHTML=`<div class="ctx-head">历史记录</div><button type="button" class="ctx-item ctx-danger" data-ctx-remove-history><span class="icon" data-icon="trash"></span>删除此条记录（消息+任务）</button>`;
+    injectIcons();
+    document.body.appendChild(menu);
+    let left=e.clientX,top=e.clientY;
+    requestAnimationFrame(()=>{
+      if(left+menu.offsetWidth>window.innerWidth-8)left=window.innerWidth-menu.offsetWidth-8;
+      if(top+menu.offsetHeight>window.innerHeight-8)top=window.innerHeight-menu.offsetHeight-8;
+      menu.style.left=left+'px';menu.style.top=top+'px';
+    });
+    menu.style.left=left+'px';menu.style.top=top+'px';
+    activePopup=menu;
+    menu.querySelector('[data-ctx-remove-history]')?.addEventListener('click',async()=>{
+      closeAllPopups();
+      try{
+        // 1. 停止运行中的任务
+        const liveTasks=[...(S.progress?.tasks||[]),...(S.progress?.queueTasks||[])].filter(t=>String(t.batchRunId||t.id)===String(runId));
+        for(const t of liveTasks){await window.antbot.stopTask(t.id).catch(()=>{})}
+        // 2. 删除持久化记录
+        if(isPersisted){await window.antbot.removePersistedByRun(runId).catch(()=>{})}
+        // 3. 删除历史记录
+        const r=await window.antbot.removeHistory(runId);
+        if(r?.ok===false&&!liveTasks.length&&!isPersisted){
+          toast(r?.message||'删除失败：记录不存在或已删除','error');
+          renderChat();
+          return;
+        }
+        // 4. 前端同步移除
+        S.history=(S.history||[]).filter(h=>String(h.id)!==String(runId));
+        S.progress.tasks=(S.progress.tasks||[]).filter(t=>String(t.batchRunId||t.id)!==String(runId));
+        S.progress.queueTasks=(S.progress.queueTasks||[]).filter(t=>String(t.batchRunId||t.id)!==String(runId));
+        S.pending=(S.pending||[]).filter(p=>String(p.runId)!==String(runId));
+        S.persistedTasks=(S.persistedTasks||[]).filter(t=>String(t.batchRunId||t.id)!==String(runId));
+        renderChat();renderStats();toast('记录已删除','success');
+      }catch(err){toast(err.message,'error')}
+    });
+    const dismiss=e2=>{
+      if(!menu.contains(e2.target)){closeAllPopups();clearCtxDismiss()}
+    };
+    activeCtxDismiss=dismiss;
+    setTimeout(()=>document.addEventListener('mousedown',dismiss),0);
+  });
   // Chips
   el.chips?.addEventListener('click',e=>{
     const tgt=e.target.closest('[data-act]');if(!tgt)return;
@@ -1744,7 +1934,7 @@ function bind(){
     if(act==='style-ref'){showStylePopup(tgt);return}
   });
   // Close popups on outside click
-  document.addEventListener('mousedown',e=>{if(activePopup&&!e.target.closest('.chip-popup')&&!e.target.closest('[data-act]'))closeAllPopups()});
+  document.addEventListener('mousedown',e=>{if(activePopup&&!e.target.closest('.chip-popup')&&!e.target.closest('.ctx-menu')&&!e.target.closest('[data-act]'))closeAllPopups()});
   // Chat scroll
   el.scroll?.addEventListener('scroll',()=>{if(!el.scroll||el.scroll.scrollTop>80||S.chatCount>=S.history.length)return;const ph=el.scroll.scrollHeight,pt=el.scroll.scrollTop;S.chatCount=Math.min(S.chatCount+20,S.history.length);renderChat();requestAnimationFrame(()=>{el.scroll.scrollTop=el.scroll.scrollHeight-ph+pt})});
   // IPC

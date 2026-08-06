@@ -226,7 +226,12 @@ function setupUpdater(key, { checkFn, downloadFn, installFn, noRestart }) {
                     showDownloadCompleteDialog(installResult.appPath, installResult.appDir);
                   } else {
                     resetUI(newVer);
-                    toast('更新成功', 'success');
+                    if (noRestart) {
+                      log('更新成功，请到 chrome://extensions 重新加载浏览器插件', 'success');
+                      toast('更新成功，请到 chrome://extensions 重新加载插件', 'success');
+                    } else {
+                      toast('更新成功', 'success');
+                    }
                   }
                 }
               }
