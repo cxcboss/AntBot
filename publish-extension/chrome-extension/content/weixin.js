@@ -330,6 +330,11 @@ class WeixinPublisher {
     step('查找上传入口...');
     let uploadInput = await this.findUploadInputInDocument();
     if (!uploadInput) {
+      // 可能是上次发布遗留的活动下拉遮挡：先收起再重试
+      await this.collapseOpenActivityPanel();
+      uploadInput = await this.findUploadInputInDocument();
+    }
+    if (!uploadInput) {
       uploadInput = await this.simulateDragUpload(videoPath, video.name, video.path);
     }
     if (!uploadInput) {
@@ -383,8 +388,8 @@ class WeixinPublisher {
     } else if (useAI && aiContent.description) {
       fullDescription = aiContent.description;
     } else {
-      // 兜底：使用上传视频的文件名（去扩展名）作为标题/描述
-      fullDescription = String(video.name || '').replace(/\.[^.]+$/, '');
+      // 无 AI 识别且无发布文案：不填文件名，仅使用话题
+      fullDescription = '';
     }
     if (Array.isArray(settings.publishTopics) && settings.publishTopics.length) {
       topics = settings.publishTopics.slice(0, 5);
@@ -418,12 +423,7 @@ class WeixinPublisher {
     const videoNameHasOriginal = video.name.includes('原创');
     if (activityName && !videoNameHasOriginal) {
       step(`选择活动: ${activityName}`);
-      let actOk = await this.joinActivity(activityName);
-      if (!actOk) {
-        step('活动选择失败，重试...');
-        await this.delay(800);
-        actOk = await this.joinActivity(activityName);
-      }
+      const actOk = await this.joinActivity(activityName);
       step(`活动选择${actOk ? '成功' : '失败'}`);
       if (!actOk) throw new Error(`活动「${activityName}」选择失败，请手动选择活动后重新发布`);
       if (this.aborted) return;
@@ -621,8 +621,8 @@ class WeixinPublisher {
     } else if (aiContent.description) {
       fullDescription = aiContent.description;
     } else {
-      // 兜底：使用上传视频的文件名（去扩展名）作为标题/描述
-      fullDescription = String(video.name || '').replace(/\.[^.]+$/, '');
+      // 无 AI 识别且无发布文案：不填文件名，仅使用话题
+      fullDescription = '';
     }
     if (Array.isArray(settings.publishTopics) && settings.publishTopics.length) {
       topics = settings.publishTopics.slice(0, 5);
@@ -652,11 +652,7 @@ class WeixinPublisher {
     const videoNameHasOriginal = video.name.includes('原创');
     
     if (activityName && !videoNameHasOriginal) {
-      let actOk = await this.joinActivity(activityName);
-      if (!actOk) {
-        await this.delay(800);
-        actOk = await this.joinActivity(activityName);
-      }
+      const actOk = await this.joinActivity(activityName);
       if (!actOk) throw new Error(`活动「${activityName}」选择失败，请手动选择活动后重新发布`);
       if (this.aborted) return;
       await this.randomDelay();
@@ -861,7 +857,9 @@ class WeixinPublisher {
   }
 
   /**
-   * 【重要】选择活动
+   * 【重要】选择活动（3 轮重试 + 模糊匹配）
+   * 打开下拉 → 输入活动名 → 停留 2 秒 → 模糊匹配并点击 → 验证
+   * 未找到匹配/验证失败 → 收起下拉重新打开重输，最多 3 轮，仍失败返回 false
    */
   async joinActivity(activityName) {
     console.log('[视频号发布助手] 开始选择活动:', activityName);
@@ -873,141 +871,173 @@ class WeixinPublisher {
     }
     const shadow = wujieApp.shadowRoot;
 
-    // 步骤1: 点击 activity-display 打开下拉
     const activityWrap = shadow.querySelector('.activity-display-wrap') ||
                          shadow.querySelector('.activity-display');
     if (!activityWrap) {
       console.log('[视频号发布助手] 未找到 activity-display');
       return false;
     }
+
+    // 打开下拉（首次）
     console.log('[视频号发布助手] 点击活动区域打开下拉...');
     activityWrap.click();
     await this.delay(2000);
 
-    // 步骤2: 查找搜索框
-    let searchInput = null;
-    const filterWrap = shadow.querySelector('.activity-filter-wrap');
-    if (filterWrap) {
-      const inp = filterWrap.querySelector('input');
-      if (inp) {
-        const r = inp.getBoundingClientRect();
-        if (r.width > 0) searchInput = inp;
-      }
-    }
-    if (!searchInput) {
-      // 找所有可见 input
-      for (const inp of shadow.querySelectorAll('input')) {
-        const r = inp.getBoundingClientRect();
-        if (r.width > 30 && r.height > 5 && r.width < 500) {
-          searchInput = inp;
-          break;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      // 查找搜索框
+      let searchInput = null;
+      const filterWrap = shadow.querySelector('.activity-filter-wrap');
+      if (filterWrap) {
+        const inp = filterWrap.querySelector('input');
+        if (inp) {
+          const r = inp.getBoundingClientRect();
+          if (r.width > 0) searchInput = inp;
         }
       }
-    }
+      if (!searchInput) {
+        for (const inp of shadow.querySelectorAll('input')) {
+          const r = inp.getBoundingClientRect();
+          if (r.width > 30 && r.height > 5 && r.width < 500) {
+            searchInput = inp;
+            break;
+          }
+        }
+      }
+      if (!searchInput) {
+        console.log('[视频号发布助手] 未找到搜索框（第', attempt + 1, '轮）');
+        if (attempt < 2) {
+          await this.collapseAndReopenActivity(activityWrap);
+          continue;
+        }
+        return false;
+      }
 
-    // 步骤3: 输入活动名称
-    if (searchInput) {
-      console.log('[视频号发布助手] 找到搜索框，输入:', activityName);
+      // 清空并逐字输入活动名
       searchInput.focus();
       await this.delay(300);
-      // 清空
       searchInput.value = '';
       searchInput.dispatchEvent(new Event('input', { bubbles: true }));
       await this.delay(200);
-      // 逐字输入
       for (const char of activityName) {
         searchInput.value += char;
         searchInput.dispatchEvent(new InputEvent('input', { bubbles: true, data: char, inputType: 'insertText' }));
-        await this.delay(120);
+        await this.delay(80);
       }
       searchInput.dispatchEvent(new Event('change', { bubbles: true }));
-      console.log('[视频号发布助手] 输入完成，等待搜索结果...');
-      await this.delay(3000);
-    } else {
-      console.log('[视频号发布助手] 未找到搜索框');
-      return false;
-    }
+      console.log('[视频号发布助手] 第', attempt + 1, '轮输入完成，停留 2 秒等待搜索结果...');
+      await this.delay(2000);
 
-    // 步骤4: 在下拉列表中查找并点击匹配项
-    // 搜索区域：activity-filter-wrap 或整个 shadow
-    const listArea = shadow.querySelector('.activity-filter-wrap') || shadow;
-    let clicked = false;
-
-    // 策略1: 找 activity-item（最精准）
-    const activityItems = listArea.querySelectorAll('.activity-item');
-    for (const item of activityItems) {
-      const r = item.getBoundingClientRect();
-      if (r.width === 0 || r.height === 0) continue; // 跳过隐藏项
-      const text = (item.textContent || '').trim();
-      if (text.includes(activityName)) {
-        console.log('[视频号发布助手] 找到匹配 activity-item:', text.substring(0, 40));
-        item.click();
-        clicked = true;
-        break;
-      }
-    }
-
-    // 策略2: 找 option-item
-    if (!clicked) {
-      const optionItems = listArea.querySelectorAll('.option-item');
-      for (const item of optionItems) {
-        const r = item.getBoundingClientRect();
-        if (r.width === 0 || r.height === 0) continue;
-        const text = (item.textContent || '').trim();
-        if (text.includes(activityName)) {
-          console.log('[视频号发布助手] 找到匹配 option-item:', text.substring(0, 40));
-          item.click();
-          clicked = true;
-          break;
+      // 模糊匹配并点击
+      const clicked = this.findAndClickActivityItem(shadow, activityName);
+      if (!clicked) {
+        console.log('[视频号发布助手] 第', attempt + 1, '轮未找到匹配活动，收起重开...');
+        if (attempt < 2) {
+          await this.collapseAndReopenActivity(activityWrap);
+          continue;
         }
-      }
-    }
-
-    // 策略3: 模糊匹配所有可见的小元素
-    if (!clicked) {
-      console.log('[视频号发布助手] 精确匹配失败，模糊搜索...');
-      const allEls = listArea.querySelectorAll('div, li, span, a');
-      for (const el of allEls) {
-        const r = el.getBoundingClientRect();
-        if (r.width === 0 || r.height === 0 || r.height > 80) continue;
-        const text = (el.textContent || '').trim();
-        if (text.includes(activityName) && text.length < 60 && el.children.length <= 2) {
-          console.log('[视频号发布助手] 模糊匹配到:', text.substring(0, 40), 'tag:', el.tagName);
-          el.click();
-          clicked = true;
-          break;
-        }
-      }
-    }
-
-    if (!clicked) {
-      console.log('[视频号发布助手] 未找到匹配的活动选项');
-      return false;
-    }
-
-    await this.delay(2000);
-
-    // 步骤5: 验证选择结果
-    const display = shadow.querySelector('.activity-display') ||
-                    shadow.querySelector('.activity-display-wrap');
-    if (display) {
-      const displayText = (display.textContent || '').trim();
-      console.log('[视频号发布助手] 验证: 活动显示文本 =', displayText);
-      if (displayText.includes(activityName)) {
-        console.log('[视频号发布助手] 活动选择验证通过');
-        await this.clearShortTitleInput();
-        return true;
-      } else if (displayText.includes('不参与') || displayText.includes('不参加') || !displayText) {
-        console.log('[视频号发布助手] 验证失败: 仍显示不参与活动');
         return false;
+      }
+
+      await this.delay(2000);
+
+      // 验证选择结果
+      const display = shadow.querySelector('.activity-display') ||
+                      shadow.querySelector('.activity-display-wrap');
+      if (display) {
+        const displayText = (display.textContent || '').trim();
+        console.log('[视频号发布助手] 验证: 活动显示文本 =', displayText);
+        if (this.fuzzyActivityMatch(displayText, activityName)) {
+          console.log('[视频号发布助手] 活动选择验证通过');
+          await this.clearShortTitleInput();
+          return true;
+        }
+        console.log('[视频号发布助手] 验证失败（显示:', displayText, '），收起重开...');
       } else {
-        console.log('[视频号发布助手] 验证失败: 选择了其他活动:', displayText, '期望:', activityName);
-        return false;
+        console.log('[视频号发布助手] 未找到活动显示元素，收起重开...');
+      }
+      if (attempt < 2) {
+        await this.collapseAndReopenActivity(activityWrap);
+      }
+    }
+    return false;
+  }
+
+  /**
+   * 模糊匹配：忽略空格/分隔符后互相包含即匹配（如 "赵云与阿斗" vs "微信小游戏 · 赵云与阿斗推广"）
+   */
+  fuzzyActivityMatch(text, keyword) {
+    const norm = (s) => String(s || '').replace(/[\s·—、，。:：|/\\-]/g, '').toLowerCase();
+    const t = norm(text);
+    const k = norm(keyword);
+    if (!t || !k) return false;
+    if (t.includes(k)) return true;
+    if (k.includes(t) && t.length >= 2) return true;
+    const core = k.slice(0, Math.max(2, Math.floor(k.length * 0.6)));
+    return core.length >= 2 && t.includes(core);
+  }
+
+  /**
+   * 在下拉列表中查找并点击匹配的活动项（activity-item / option-item / 模糊小元素）
+   */
+  findAndClickActivityItem(shadow, activityName) {
+    const listArea = shadow.querySelector('.activity-filter-wrap') || shadow;
+
+    const items = listArea.querySelectorAll('.activity-item, .option-item');
+    for (const item of items) {
+      const r = item.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) continue;
+      const text = (item.textContent || '').trim();
+      if (this.fuzzyActivityMatch(text, activityName)) {
+        console.log('[视频号发布助手] 找到匹配活动项:', text.substring(0, 50));
+        item.click();
+        return true;
       }
     }
 
-    console.log('[视频号发布助手] 无法验证，跳过');
+    const allEls = listArea.querySelectorAll('div, li, span, a');
+    for (const el of allEls) {
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0 || r.height > 80) continue;
+      const text = (el.textContent || '').trim();
+      if (text.length < 60 && text.length >= 2 && el.children.length <= 2 && this.fuzzyActivityMatch(text, activityName)) {
+        console.log('[视频号发布助手] 模糊匹配到:', text.substring(0, 50), 'tag:', el.tagName);
+        el.click();
+        return true;
+      }
+    }
     return false;
+  }
+
+  /**
+   * 收起活动下拉并重新打开（网页偶发"输入后列表消失"，重开重试）
+   */
+  async collapseAndReopenActivity(activityWrap) {
+    try {
+      activityWrap.click();
+      await this.delay(1200);
+    } catch {}
+    activityWrap.click();
+    await this.delay(2000);
+    return true;
+  }
+
+  /**
+   * 若活动下拉处于打开状态则收起（防止遮挡上传入口/其他元素）
+   */
+  async collapseOpenActivityPanel() {
+    const wujieApp = document.querySelector('wujie-app');
+    if (!wujieApp?.shadowRoot) return;
+    const shadow = wujieApp.shadowRoot;
+    const wrap = shadow.querySelector('.activity-display-wrap') || shadow.querySelector('.activity-display');
+    const filterWrap = shadow.querySelector('.activity-filter-wrap');
+    if (wrap && filterWrap) {
+      const fr = filterWrap.getBoundingClientRect();
+      if (fr.width > 0 && fr.height > 0) {
+        console.log('[视频号发布助手] 收起可能打开的活动下拉');
+        wrap.click();
+        await this.delay(1200);
+      }
+    }
   }
 
   async verifySelectedActivity(expectedActivityText) {
