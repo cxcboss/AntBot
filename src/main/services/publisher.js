@@ -92,11 +92,15 @@ async function publishVideo(taskContext) {
   if (extensionConfig?.enabled) {
     const bridge = createBrowserPublishBridge({
       baseUrl: extensionConfig.baseUrl,
-      timeoutMs: 5 * 60 * 1000
+      timeoutMs: extensionConfig.timeoutMs || 5 * 60 * 1000
     });
     try {
       const bridgeStatus = await bridge.getStatus();
-      log(`桥接状态: ${bridgeStatus.status}`);
+      log(`桥接状态: ${bridgeStatus.status}, 插件连接: ${bridgeStatus.extensionConnected ? '是' : '否'}`);
+      // H1: 插件未连接时快速失败，避免 60s 登录检测 + 90s 发布等待后才报超时
+      if (!bridgeStatus.extensionConnected) {
+        throw new Error('浏览器插件未连接，请确认 Chrome 已打开、插件已加载并保持启用');
+      }
       if (bridgeStatus.status === 'ready' || bridgeStatus.status === 'busy') {
         // 发布前检测平台登录状态
         for (const platform of platforms) {
@@ -113,6 +117,7 @@ async function publishVideo(taskContext) {
           }
         }
         const allResults = [];
+        let anyPartial = false;
         for (const platform of platforms) {
           const platformLabel = platform === 'videoChannel' ? '视频号' : '抖音';
           const videoStat = await fs.stat(outputPath);
@@ -125,6 +130,7 @@ async function publishVideo(taskContext) {
             }],
             settings: {
               isOriginal: Boolean(task.isOriginal),
+              campaignName: task.campaignName || '',
               scheduledPublish: Boolean(task.publishAt),
               scheduleTime: task.publishAt ? new Date(task.publishAt).toISOString() : '',
               publishCopy: task.publishCopy || '',
@@ -137,14 +143,23 @@ async function publishVideo(taskContext) {
             platform: platform === 'videoChannel' ? 'weixin' : platform,
             onProgress: event => log(`[${platformLabel}] ${event.step || event.detail || event.status || ''}`)
           });
-          log(`${platformLabel}发布成功`);
+          // H3: 部分成功（如批量多视频中有失败）不当作整体失败
+          if (bridgeResult?.partialSuccess) {
+            anyPartial = true;
+            const failed = (bridgeResult.records || []).filter(r => r && r.status !== 'success');
+            log(`[${platformLabel}]部分发布成功，${failed.length} 个视频失败: ${failed.map(r => r.videoName || r.error || '').join('、') || bridgeResult.error || '未知原因'}`);
+          } else {
+            log(`${platformLabel}发布成功`);
+          }
           allResults.push(...(bridgeResult.results || bridgeResult.records || []));
         }
         return {
           mode: 'browser-extension',
           scheduleAt,
           platforms,
-          results: allResults
+          results: allResults,
+          partialSuccess: anyPartial,
+          partialFailed: anyPartial ? allResults.filter(r => r && r.status !== 'success') : []
         };
       }
     } catch (error) {
