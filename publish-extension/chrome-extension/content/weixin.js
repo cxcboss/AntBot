@@ -382,6 +382,9 @@ class WeixinPublisher {
       fullDescription = String(settings.publishCopy).trim();
     } else if (useAI && aiContent.description) {
       fullDescription = aiContent.description;
+    } else {
+      // 兜底：使用上传视频的文件名（去扩展名）作为标题/描述
+      fullDescription = String(video.name || '').replace(/\.[^.]+$/, '');
     }
     if (Array.isArray(settings.publishTopics) && settings.publishTopics.length) {
       topics = settings.publishTopics.slice(0, 5);
@@ -411,10 +414,11 @@ class WeixinPublisher {
     await this.setLocationNone();
 
     // ── 步骤9: 选择活动 ──
+    const activityName = String(settings.campaignName || '').trim() || videoInfo.activityName;
     const videoNameHasOriginal = video.name.includes('原创');
-    if (videoInfo.activityName && !videoNameHasOriginal) {
-      step(`选择活动: ${videoInfo.activityName}`);
-      const actOk = await this.joinActivity(videoInfo.activityName);
+    if (activityName && !videoNameHasOriginal) {
+      step(`选择活动: ${activityName}`);
+      const actOk = await this.joinActivity(activityName);
       step(`活动选择${actOk ? '成功' : '失败'}`);
       if (this.aborted) return;
     }
@@ -606,15 +610,18 @@ class WeixinPublisher {
     let fullDescription = '';
     let topics = [];
 
-    if (useAI) {
-      if (aiContent.description) {
-        fullDescription = aiContent.description;
-      }
-      if (aiContent.topics && aiContent.topics.length > 0) {
-        topics = aiContent.topics.slice(0, 5);
-      } else {
-        topics = this.defaultTopics;
-      }
+    if (String(settings.publishCopy || '').trim()) {
+      fullDescription = String(settings.publishCopy).trim();
+    } else if (aiContent.description) {
+      fullDescription = aiContent.description;
+    } else {
+      // 兜底：使用上传视频的文件名（去扩展名）作为标题/描述
+      fullDescription = String(video.name || '').replace(/\.[^.]+$/, '');
+    }
+    if (Array.isArray(settings.publishTopics) && settings.publishTopics.length) {
+      topics = settings.publishTopics.slice(0, 5);
+    } else if (useAI && aiContent.topics?.length > 0) {
+      topics = aiContent.topics.slice(0, 5);
     } else {
       topics = this.defaultTopics;
     }
@@ -635,10 +642,11 @@ class WeixinPublisher {
     if (this.aborted) return;
     await this.randomDelay();
 
+    const activityName = String(settings.campaignName || '').trim() || videoInfo.activityName;
     const videoNameHasOriginal = video.name.includes('原创');
     
-    if (videoInfo.activityName && !videoNameHasOriginal) {
-      await this.joinActivity(videoInfo.activityName);
+    if (activityName && !videoNameHasOriginal) {
+      await this.joinActivity(activityName);
       if (this.aborted) return;
       await this.randomDelay();
     } else if (videoNameHasOriginal) {
