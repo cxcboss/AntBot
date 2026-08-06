@@ -59,7 +59,8 @@ async function handleLoginCheck(platform, commandId) {
   }
 
   if (!tabExists) {
-    const tab = await chrome.tabs.create({ url, active: true });
+    // M3: 后台创建标签页，不抢占用户焦点（debugger 截图不要求窗口可见）
+    const tab = await chrome.tabs.create({ url, active: false });
     tabId = tab.id;
     loginCheckTabs[platform] = tabId;
     await waitForTabComplete(tabId, 15000);
@@ -131,6 +132,9 @@ async function handleLoginCheck(platform, commandId) {
     } catch (e) {
       console.log('[BG] debugger 截图失败:', e.message);
       try {
+        // fallback 需要窗口可见 + 标签页激活，仅在此时短暂激活
+        await chrome.tabs.update(tabId, { active: true });
+        await sleep(400);
         const tabInfo = await chrome.tabs.get(tabId);
         qrDataUrl = await chrome.tabs.captureVisibleTab(tabInfo.windowId, { format: 'png' });
       } catch {}
@@ -384,17 +388,12 @@ async function attachDebugger(tabId) {
   try {
     await chrome.debugger.attach({ tabId }, '1.3');
     if (publishState.platform === 'weixin') {
+      // 仅视频号需要 Fetch 拦截（改写定时发布的 effectiveTime）
       await chrome.debugger.sendCommand({ tabId }, 'Fetch.enable', {
         patterns: [{ urlPattern: '*channels.weixin.qq.com*/post_create*', requestStage: 'Request' }]
       });
-    } else if (publishState.platform === 'douyin') {
-      await chrome.debugger.sendCommand({ tabId }, 'Fetch.enable', {
-        patterns: [
-          { urlPattern: '*creator.douyin.com*/upload*', requestStage: 'Request' },
-          { urlPattern: '*creator.douyin.com*/api*', requestStage: 'Request' }
-        ]
-      });
     }
+    // M5: 抖音不再拦截 /api、/upload 请求 —— 拦截无用途且会拖慢/卡住页面请求
     debuggerTargets.set(tabId, true);
     publishState.debuggerAttached = true;
     return true;
@@ -406,25 +405,42 @@ async function detachDebugger(tabId) {
   try { await chrome.debugger.detach({ tabId }); debuggerTargets.delete(tabId); } catch (_) {}
 }
 
+// M4: 改写发布请求中的定时时间 effectiveTime，支持 JSON 与 multipart/form-data 两种 body
+function rewriteEffectiveTime(postData, effectiveTimeSeconds) {
+  const ts = String(effectiveTimeSeconds);
+  // JSON body：直接改写字段
+  try {
+    const bodyObj = JSON.parse(postData);
+    if (bodyObj && typeof bodyObj === 'object') {
+      bodyObj.effectiveTime = effectiveTimeSeconds;
+      return btoa(unescape(encodeURIComponent(JSON.stringify(bodyObj))));
+    }
+  } catch (_) {}
+  // multipart/form-data：替换 name="effectiveTime" 字段的值
+  const m = /(name="effectiveTime"[\s\S]*?\r?\n\r?\n)[^\r\n]*/.exec(postData);
+  if (m && m[1].length < m[0].length) {
+    const replaced = postData.slice(0, m.index + m[1].length) + ts + postData.slice(m.index + m[0].length);
+    return btoa(unescape(encodeURIComponent(replaced)));
+  }
+  return null;
+}
+
 chrome.debugger.onEvent.addListener(async (source, method, params) => {
   if (method === 'Fetch.requestPaused') {
     if (params.request.url.includes('post_create') && publishState.expectedTimestamp) {
       let modifiedBodyBase64 = null;
       if (params.request.postData) {
+        modifiedBodyBase64 = rewriteEffectiveTime(params.request.postData, Math.floor(publishState.expectedTimestamp / 1000));
+      }
+      if (modifiedBodyBase64) {
         try {
-          const bodyObj = JSON.parse(params.request.postData);
-          bodyObj.effectiveTime = Math.floor(publishState.expectedTimestamp / 1000);
-          modifiedBodyBase64 = btoa(unescape(encodeURIComponent(JSON.stringify(bodyObj))));
+          await chrome.debugger.sendCommand(source, 'Fetch.continueRequest', { requestId: params.requestId, postData: modifiedBodyBase64 });
+          return;
         } catch (_) {}
+      } else if (params.request.postData) {
+        // M4: 无法注入定时时间 → 明确通知，不再静默继续
+        sendProgress('定时时间注入失败（发布请求格式无法改写），定时发布可能失效', 'publishing', publishState.currentIndex, publishState.videos.length);
       }
-      try {
-        const cp = { requestId: params.requestId };
-        if (modifiedBodyBase64) cp.postData = modifiedBodyBase64;
-        await chrome.debugger.sendCommand(source, 'Fetch.continueRequest', cp);
-      } catch (_) {
-        try { await chrome.debugger.sendCommand(source, 'Fetch.continueRequest', { requestId: params.requestId }); } catch (_) {}
-      }
-      return;
     }
     try { await chrome.debugger.sendCommand(source, 'Fetch.continueRequest', { requestId: params.requestId }); } catch (_) {}
   }
@@ -488,6 +504,7 @@ function stopPublishCompletely() {
   publishState.isPublishing = false;
   _doneLock = false;
   _finishCalled = false;
+  publishState.bridgeCommandId = null; // M2: 防止残留旧命令引用导致 stop 竞态
   clearPublishTimeout();
   if (publishState.nextVideoTimer) { clearTimeout(publishState.nextVideoTimer); publishState.nextVideoTimer = null; }
   if (publishState.targetTabId) {
@@ -661,11 +678,16 @@ async function finishAllPublish() {
   }
   for (const r of publishState.publishRecords) await savePublishRecord(r);
   if (publishState.bridgeCommandId) {
+    const records = publishState.publishRecords.slice();
+    const succeeded = records.some(record => record.status === 'success');
+    const failed = records.some(record => record.status !== 'success');
+    // H3: 部分成功（有成功也有失败）→ partialSuccess，App 端不再整体判失败
     await bridgeResult(publishState.bridgeCommandId, {
-      success: publishState.publishRecords.every(record => record.status === 'success'),
-      status: publishState.publishRecords.some(record => record.status === 'failed') ? 'failed' : 'completed',
-      records: publishState.publishRecords.slice(),
-      platforms: [...new Set(publishState.publishRecords.map(record => record.platform))]
+      success: records.every(record => record.status === 'success'),
+      status: failed ? (succeeded ? 'completed' : 'failed') : 'completed',
+      partialSuccess: succeeded && failed,
+      records,
+      platforms: [...new Set(records.map(record => record.platform))]
     });
     publishState.bridgeCommandId = null;
   }
@@ -701,6 +723,28 @@ async function handleDouyinPublishDone(message) {
     videoName: message.videoName, videoPath: message.videoPath || publishState.videoPath || '',
     platform: 'douyin', publishTime: new Date().toISOString(),
     status: 'success', scheduled: message.scheduled || false, scheduledTime: publishState.scheduledTime
+  });
+  if (publishState.targetTabId) detachDebugger(publishState.targetTabId);
+  publishState.currentIndex++; publishState.debuggerAttached = false; publishState.commandSent = false;
+  if (publishState.currentIndex < publishState.videos.length) {
+    const old = publishState.targetTabId; publishState.targetTabId = null;
+    if (old) setTimeout(() => chrome.tabs.remove(old).catch(() => {}), 3000);
+    publishState.nextVideoTimer = setTimeout(() => publishNextVideo(), 8000);
+  } else { await finishAllPublish(); }
+}
+
+// S3: 内容脚本明确报告发布失败 → 记录失败记录并推进，避免任务挂死到 App 端 90s 超时
+async function handleContentScriptFailure(video, errorMessage) {
+  if (!publishState.isPublishing || _doneLock) return;
+  _doneLock = true;
+  clearPublishTimeout();
+  const idx = publishState.currentIndex;
+  sendProgress(`发布失败: ${errorMessage}`, 'error', idx + 1, publishState.videos.length);
+  publishState.publishRecords.push({
+    videoName: video.name, videoPath: publishState.videoPath || '',
+    platform: publishState.platform, publishTime: new Date().toISOString(),
+    status: 'failed', error: errorMessage,
+    scheduled: false, scheduledTime: null
   });
   if (publishState.targetTabId) detachDebugger(publishState.targetTabId);
   publishState.currentIndex++; publishState.debuggerAttached = false; publishState.commandSent = false;
@@ -769,10 +813,14 @@ async function sendPublishCommand(tabId) {
   publishState.commandSent = true;
   const video = publishState.videos[publishState.currentIndex];
   try {
-    await chrome.tabs.sendMessage(tabId, {
+    const response = await chrome.tabs.sendMessage(tabId, {
       action: 'startPublish', videos: [video], settings: publishState.settings,
       videoPath: publishState.videoPath, videoIndex: publishState.currentIndex, totalVideos: publishState.totalVideos
     });
+    // S3: 内容脚本明确报告失败 → 立即记录失败并推进下一个视频，不再挂等 App 端超时
+    if (response && response.success === false) {
+      await handleContentScriptFailure(video, response.error || '发布失败');
+    }
   } catch (e) {
     console.error('[BG] 发送发布命令失败:', e.message, '等待超时重试...');
     publishState.commandSent = false;

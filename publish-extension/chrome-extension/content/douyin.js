@@ -193,9 +193,10 @@ class DouyinPublisher {
 
     // 步骤6: 填写描述
     const requestedDescription = String(settings.publishCopy || '').trim();
-    if (requestedDescription || (settings.autoGenerate && aiContent.description)) {
+    const fallbackDescription = String(video.name || '').replace(/\.[^.]+$/, '');
+    if (requestedDescription || (settings.autoGenerate && aiContent.description) || fallbackDescription) {
       this.notifyProgress('填写描述文案...', idx, totalVideos);
-      const description = requestedDescription || aiContent.description;
+      const description = requestedDescription || (settings.autoGenerate ? aiContent.description : '') || fallbackDescription;
       let descOk = await this.fillDescription(description);
       if (!descOk) { await this.delay(500); descOk = await this.fillDescription(description); }
       if (!descOk) step('描述填写失败');

@@ -23,7 +23,7 @@ class WeixinPublisher {
     this.isReady = false;
     this.isInIframe = window !== window.top;
     this.domReady = false;
-    this.defaultTopics = ['#动画', '#奇葩游戏', '#游戏视频', '#小游戏', '#休闲游戏'];
+    this.defaultTopics = ['#动画', '#奇葩游戏', '#游戏', '#小游戏', '#休闲游戏'];
     this.defaultDescription = '';
     this.init();
   }
@@ -418,8 +418,14 @@ class WeixinPublisher {
     const videoNameHasOriginal = video.name.includes('原创');
     if (activityName && !videoNameHasOriginal) {
       step(`选择活动: ${activityName}`);
-      const actOk = await this.joinActivity(activityName);
+      let actOk = await this.joinActivity(activityName);
+      if (!actOk) {
+        step('活动选择失败，重试...');
+        await this.delay(800);
+        actOk = await this.joinActivity(activityName);
+      }
       step(`活动选择${actOk ? '成功' : '失败'}`);
+      if (!actOk) throw new Error(`活动「${activityName}」选择失败，请手动选择活动后重新发布`);
       if (this.aborted) return;
     }
 
@@ -646,7 +652,12 @@ class WeixinPublisher {
     const videoNameHasOriginal = video.name.includes('原创');
     
     if (activityName && !videoNameHasOriginal) {
-      await this.joinActivity(activityName);
+      let actOk = await this.joinActivity(activityName);
+      if (!actOk) {
+        await this.delay(800);
+        actOk = await this.joinActivity(activityName);
+      }
+      if (!actOk) throw new Error(`活动「${activityName}」选择失败，请手动选择活动后重新发布`);
       if (this.aborted) return;
       await this.randomDelay();
     } else if (videoNameHasOriginal) {
@@ -982,17 +993,16 @@ class WeixinPublisher {
     if (display) {
       const displayText = (display.textContent || '').trim();
       console.log('[视频号发布助手] 验证: 活动显示文本 =', displayText);
-      if (displayText.includes(activityName) || displayText.includes('小游戏')) {
+      if (displayText.includes(activityName)) {
         console.log('[视频号发布助手] 活动选择验证通过');
         await this.clearShortTitleInput();
         return true;
-      } else if (displayText.includes('不参与') || displayText.includes('不参加')) {
+      } else if (displayText.includes('不参与') || displayText.includes('不参加') || !displayText) {
         console.log('[视频号发布助手] 验证失败: 仍显示不参与活动');
         return false;
       } else {
-        console.log('[视频号发布助手] 验证: 选择了其他活动:', displayText);
-        await this.clearShortTitleInput();
-        return true;
+        console.log('[视频号发布助手] 验证失败: 选择了其他活动:', displayText, '期望:', activityName);
+        return false;
       }
     }
 
