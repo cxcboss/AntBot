@@ -260,7 +260,24 @@ process.on('uncaughtException', (err) => {
   console.error('[uncaughtException]', err);
 });
 
+// 单实例锁：防止多开导致 store 文件互相覆盖（删除历史/设置写入被另一个实例覆盖）
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+}
+
 app.whenReady().then(async () => {
+  if (!gotSingleInstanceLock) {
+    app.quit();
+    return;
+  }
   // 配置系统代理（影响渲染进程和 net 模块的请求）
   try {
     await session.defaultSession.setProxy({

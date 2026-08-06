@@ -3,7 +3,7 @@ const fsSync = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { app, dialog, ipcMain, shell } = require('electron');
-const { parseTaskInput } = require('./services/parser');
+const { parseTaskInputSmart } = require('./services/aiTaskParser');
 const { resolveDependencyPath } = require('./services/dependencyManager');
 
 // ── App logger ──
@@ -268,19 +268,65 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
     return result.canceled || !result.filePaths?.length ? '' : result.filePaths[0];
   });
 
-  ipcMain.handle('task:parse', async (_event, inputText) => parseTaskInput(inputText));
+  ipcMain.handle('task:parse', async (_event, inputText, opts = {}) => {
+    const smart = Boolean(opts?.smart);
+    let apiConfig = null;
+    const settings = await store.getSettings();
+    if (smart) {
+      const apiCfg = settings?.api || {};
+      apiConfig = apiCfg.apiKey || (apiCfg.apiKeys || []).length
+        ? { baseUrl: apiCfg.baseUrl, apiKey: apiCfg.apiKey, apiKeys: apiCfg.apiKeys || [apiCfg.apiKey].filter(Boolean), modelId: apiCfg.modelId }
+        : null;
+    }
+    const taskDefaults = settings?.taskDefaults || null;
+    return await parseTaskInputSmart(String(inputText || ''), { apiConfig, taskDefaults, log: (msg) => appLog('info', `[ai-parse] ${msg}`) });
+  });
 
   ipcMain.handle('task:start', async (_event, inputText) => {
-    const tasks = Array.isArray(inputText)
-      ? inputText.filter(t => t && typeof t === 'object' && typeof t.taskName === 'string')
-      : parseTaskInput(inputText);
-    if (!tasks.length) throw new Error('请输入至少一条任务。');
-    const scheduled = taskRunner.enqueueTasks(tasks, {}, String(inputText || '').trim());
+    let parsed;
+    if (Array.isArray(inputText)) {
+      parsed = { tasks: inputText.filter(t => t && typeof t === 'object' && typeof t.taskName === 'string'), warnings: [], source: 'provided' };
+    } else {
+      // 直接发送：走纯规则解析（无 AI），与旧版行为一致
+      const settings = await store.getSettings();
+      parsed = await parseTaskInputSmart(String(inputText || ''), { apiConfig: null, taskDefaults: settings?.taskDefaults || null, log: (msg) => appLog('info', `[rule-parse] ${msg}`) });
+    }
+    const tasks = parsed.tasks;
+    if (!tasks.length) throw new Error(parsed.warnings?.[0] || '请输入至少一条任务。');
+    const displayText = Array.isArray(inputText)
+      ? tasks.map(t => t.rawLine || t.taskName || '').filter(Boolean).join('\n')
+      : String(inputText || '').trim();
+    const scheduled = taskRunner.enqueueTasks(tasks, {}, displayText);
     scheduled.promise.catch((error) => {
       const win = mainWindowRef();
       if (win && !win.isDestroyed()) win.webContents.send('task:log', { runId: '', taskId: '', level: 'error', timestamp: new Date().toISOString(), message: error.message });
     });
-    return { started: true, queued: scheduled.queued, queuePosition: scheduled.queuePosition, taskCount: tasks.length, runId: scheduled.runId, taskIds: scheduled.taskIds };
+    return { started: true, queued: scheduled.queued, queuePosition: scheduled.queuePosition, taskCount: tasks.length, runId: scheduled.runId, taskIds: scheduled.taskIds, warnings: parsed.warnings || [], source: parsed.source || '' };
+  });
+
+  ipcMain.handle('history:clear', async () => {
+    try {
+      await store.clearHistory();
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, message: error.message };
+    }
+  });
+
+  ipcMain.handle('history:remove', async (_event, recordId) => {
+    try {
+      const removed = await store.removeHistoryItem(String(recordId || ''));
+      appLog('info', `[history] remove record=${recordId} removed=${removed}`);
+      return { ok: removed };
+    } catch (error) {
+      appLog('error', `[history] remove record=${recordId} failed: ${error.message}`);
+      return { ok: false, message: error.message };
+    }
+  });
+
+  ipcMain.handle('task:remove-persisted-run', async (_event, runId) => {
+    await taskRunner.removePersistedTasksByRun(String(runId || ''));
+    return { ok: true };
   });
 
   ipcMain.handle('task:stop', async () => { await taskRunner.stop({}); return { stopped: true }; });
@@ -308,7 +354,7 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
       const publishEnabled = settings?.publish?.enabled !== false;
       if (!publishEnabled) return { ok: false, error: '自动发布已关闭' };
       taskRunner.setTaskState(taskId, { status: 'running', step: '发布', progress: 95, message: '重新发布中...' });
-      const task = { id: taskId, rawLine: row?.rawLine || historyItem?.rawLine || persistedItem?.rawLine || '', publishCopy: row?.publishCopy || historyItem?.publishCopy || persistedItem?.publishCopy || '', publishTopics: row?.publishTopics || historyItem?.publishTopics || persistedItem?.publishTopics || [], platforms: row?.platforms || historyItem?.platforms || persistedItem?.platforms || [] };
+      const task = { id: taskId, rawLine: row?.rawLine || historyItem?.rawLine || persistedItem?.rawLine || '', publishCopy: row?.publishCopy || historyItem?.publishCopy || persistedItem?.publishCopy || '', publishTopics: row?.publishTopics || historyItem?.publishTopics || persistedItem?.publishTopics || [], platforms: row?.platforms || historyItem?.platforms || persistedItem?.platforms || [], campaignName: row?.campaignName || historyItem?.campaignName || persistedItem?.campaignName || '' };
       const result = await publishVideo({ task, settings, outputPath, log: (msg) => appLog('info', `[republish] ${msg}`) });
       const publishedPlatforms = result?.platforms || [];
       const platformNames = publishedPlatforms.map(p => p === 'videoChannel' ? '视频号' : '抖音').join('、');

@@ -439,13 +439,34 @@ function fillForm(){
     keysList.innerHTML = keys.length ? keys.map((k, i) => `<div class="s-input-row"><input name="apiKey" type="password" value="${esc(k)}" placeholder="Key ${i + 1}" /><button type="button" class="btn btn-sm btn-ghost s-key-vis" title="显示/隐藏">👁</button><button type="button" class="btn btn-sm btn-ghost s-key-del" title="删除">✕</button></div>`).join('') : `<div class="s-input-row"><input name="apiKey" type="password" placeholder="Key 1" /><button type="button" class="btn btn-sm btn-ghost s-key-vis" title="显示/隐藏">👁</button><button type="button" class="btn btn-sm btn-ghost s-key-del" title="删除">✕</button></div>`;
   }
   const fr=document.getElementById('s-frameRate');if(fr)fr.value=String(s.edit?.frameRate??1);
+  const td=s.taskDefaults||{};
+  set('s-task-platform',(td.platforms||[]).join(','));
+  const to=document.getElementById('s-task-original');if(to)to.value=td.isOriginal?'true':'false';
+  set('s-task-topics',(td.topics||[]).join(' '));
+  const iv=td.intervalMinutes||[40,70];
+  set('s-task-interval-min',iv[0]);set('s-task-interval-max',iv[1]);
   const ms=document.getElementById('s-apiModelId');
   if(ms){const m=s.api?.availableModels||[],c=s.api?.modelId||'';ms.innerHTML=m.length?m.map(x=>`<option value="${esc(x.id)}"${x.id===c?' selected':''}>${esc(x.name)}</option>`).join(''):'<option value="">请先获取模型</option>';}
 }
 function readForm(){
   const get=(id)=>{const e=document.getElementById(id);return e?.value?.trim()||'';};
   const apiKeys=[...document.querySelectorAll('#api-keys-list input[name="apiKey"]')].map(e=>e.value.trim()).filter(Boolean);
-  return{dataDir:get('s-dataDir'),paths:{outputBaseDir:get('s-outputBaseDir')},style:S.settings?.style||{},voiceClone:S.settings?.voiceClone||{},edit:{frameRate:parseFloat(get('s-frameRate'))||1},api:{baseUrl:get('s-apiBaseUrl')||'https://apihub.agnes-ai.com/v1',apiKeys,apiKey:apiKeys[0]||'',modelId:get('s-apiModelId'),availableModels:S.settings?.api?.availableModels||[]}};
+  const ivMin=Math.max(1,parseInt(get('s-task-interval-min'))||40);
+  const ivMax=Math.max(ivMin,parseInt(get('s-task-interval-max'))||70);
+  return{
+    dataDir:get('s-dataDir'),
+    paths:{outputBaseDir:get('s-outputBaseDir')},
+    style:S.settings?.style||{},
+    voiceClone:S.settings?.voiceClone||{},
+    edit:{frameRate:parseFloat(get('s-frameRate'))||1},
+    taskDefaults:{
+      platforms:get('s-task-platform')?get('s-task-platform').split(','):[],
+      isOriginal:get('s-task-original')==='true',
+      topics:get('s-task-topics').split(/[\s,，、]+/).filter(Boolean).map(x=>x.startsWith('#')?x:'#'+x),
+      intervalMinutes:[ivMin,ivMax]
+    },
+    api:{baseUrl:get('s-apiBaseUrl')||'https://apihub.agnes-ai.com/v1',apiKeys,apiKey:apiKeys[0]||'',modelId:get('s-apiModelId'),availableModels:S.settings?.api?.availableModels||[]}
+  };
 }
 
 async function loadApiUsage() {

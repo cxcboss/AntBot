@@ -94,6 +94,12 @@ const BASE_DEFAULT_SETTINGS = {
       timeoutMs: 30 * 60 * 1000
     }
   },
+  taskDefaults: {
+    platforms: ['videoChannel'],
+    isOriginal: false,
+    topics: ['#动画', '#奇葩游戏', '#游戏', '#小游戏', '#休闲游戏'],
+    intervalMinutes: [40, 70]
+  },
   subtitle: {},
   retry: {
     failedTaskRetries: 0

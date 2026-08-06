@@ -608,6 +608,7 @@ class TaskRunner {
       platforms: Array.isArray(task.platforms) ? task.platforms.slice() : [],
       publishCopy: task.publishCopy || '',
       publishTopics: Array.isArray(task.publishTopics) ? task.publishTopics.slice() : [],
+      campaignName: task.campaignName || '',
       publishAt: task.publishAt instanceof Date
         ? task.publishAt
         : (task.publishAt ? new Date(task.publishAt) : null)
@@ -660,6 +661,7 @@ class TaskRunner {
         platforms: row.platforms || [],
         publishCopy: row.publishCopy || '',
         publishTopics: row.publishTopics || [],
+        campaignName: row.campaignName || '',
         batchRunId: row.batchRunId,
         submittedAt: row.submittedAt,
         updatedAt: nowIso()
@@ -686,6 +688,17 @@ class TaskRunner {
       let tasks = await this.loadPersistedTasks();
       tasks = tasks.filter(t => t.id !== taskId);
       await fs.writeFile(this.persistedTasksFile, JSON.stringify(tasks, null, 2));
+    } catch {}
+  }
+
+  async removePersistedTasksByRun(runId) {
+    try {
+      let tasks = await this.loadPersistedTasks();
+      const before = tasks.length;
+      tasks = tasks.filter(t => String(t.batchRunId || t.id) !== String(runId));
+      if (tasks.length !== before) {
+        await fs.writeFile(this.persistedTasksFile, JSON.stringify(tasks, null, 2));
+      }
     } catch {}
   }
 
@@ -729,6 +742,7 @@ class TaskRunner {
       retryCount: 0,
       retryLimit: 0,
       outputPath: '',
+      campaignName: task.campaignName || '',
       batchRunId: job.runId,
       submittedAt: job.enqueuedAt,
       updatedAt: nowIso()
@@ -868,8 +882,8 @@ class TaskRunner {
         if (expiredPublishMessage) {
           this.setTaskState(task.id, { status: 'failed', step: '失败', message: expiredPublishMessage, attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit });
           this.log(task.id, expiredPublishMessage, 'error');
-          runRecord.items.push(this.buildRunItem(job, task, row, 'failed', { message: expiredPublishMessage, finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, retryable: true }));
-          return { status: 'failed', retryable: true };
+          runRecord.items.push(this.buildRunItem(job, task, row, 'failed', { message: expiredPublishMessage, finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, retryable: false }));
+          return { status: 'failed', retryable: false };
         }
 
         // 检查下载结果（重试时如果之前下载成功则跳过）
@@ -941,6 +955,8 @@ class TaskRunner {
           // ── 新剪辑流程: prepareEditVideo + composeEditVideo ──
           const voiceoverEnabled = settings?.style?.voiceoverEnabled !== false;
           const subtitleEnabled = voiceoverEnabled && settings?.style?.subtitleEnabled !== false;
+          // 配音和字幕都关闭：无需抽帧/AI 识别/字幕，直接使用下载的视频
+          const needsEdit = voiceoverEnabled || subtitleEnabled;
 
           // 构建 apiConfig（与剪辑页面一致）
           const apiCfg = settings?.api || {};
@@ -964,31 +980,42 @@ class TaskRunner {
             try { await fs.rm(ttf.tmpDir, { recursive: true, force: true }); } catch {}
           }
 
-          // 3a. prepareEditVideo: 抽帧 → AI识别 → 生成SRT
-          const prepareResult = await this.runStep(task, 'prepare', () => prepareEditVideo({
-            taskId: task.id,
-            videoPath: dlResult.outputPath,
-            stylePrompt,
-            apiConfig,
-            language: settings?.language || 'zh',
-            frameRate: settings?.edit?.frameRate || 1,
-            dataDir: path.join(os.homedir(), 'AntBot'),
-            log: (msg) => this.log(task.id, msg),
-            progress: (p) => this.setTaskState(task.id, {
-              progress: 25 + Math.round((p.percent || 0) * 0.25),
-              step: p.step || '准备中',
-              message: p.message || ''
-            })
-          }), 50);
+          // 3a. prepareEditVideo: 抽帧 → AI识别 → 生成SRT（仅当需要配音或字幕时）
+          let prepareResult = null;
 
-          // 记录临时文件路径用于清理
-          if (ttf) ttf.tmpDir = prepareResult.tmpDir;
-
-          // 输出路径
+          // 输出路径（先确定输出目录）
           const dayDir = new Date().toISOString().slice(0, 10).replace(/-/g, '');
           outDir = path.join(mainControlOutputDir, dayDir);
           await ensureDir(outDir);
-          outPath = path.join(outDir, `${prepareResult.videoName || task._baseName}.mp4`);
+
+          if (needsEdit) {
+            prepareResult = await this.runStep(task, 'prepare', () => prepareEditVideo({
+              taskId: task.id,
+              videoPath: dlResult.outputPath,
+              stylePrompt,
+              apiConfig,
+              language: settings?.language || 'zh',
+              frameRate: settings?.edit?.frameRate || 1,
+              dataDir: path.join(os.homedir(), 'AntBot'),
+              log: (msg) => this.log(task.id, msg),
+              progress: (p) => this.setTaskState(task.id, {
+                progress: 25 + Math.round((p.percent || 0) * 0.25),
+                step: p.step || '准备中',
+                message: p.message || ''
+              })
+            }), 50);
+
+            // 记录临时文件路径用于清理
+            if (ttf) ttf.tmpDir = prepareResult.tmpDir;
+
+            // 输出路径
+            outPath = path.join(outDir, `${prepareResult.videoName || task._baseName}.mp4`);
+          } else {
+            this.log(task.id, '旁白和字幕均关闭，跳过 AI 识别与字幕生成，直接使用下载视频');
+            const ext = path.extname(dlResult.outputPath) || '.mp4';
+            const base = task._baseName || path.basename(dlResult.outputPath, ext);
+            outPath = path.join(outDir, `${base}.mp4`);
+          }
 
           // 3b. composeEditVideo: 合成视频 (配音+字幕+音频混合)
           const voiceClone = settings?.voiceClone || {};
@@ -1000,7 +1027,7 @@ class TaskRunner {
 
           await this.runStep(task, 'compose', () => composeEditVideo({
             videoPath: dlResult.outputPath,
-            srtPath: prepareResult.srtPath,
+            srtPath: prepareResult?.srtPath || null,
             outputPath: outPath,
             voiceProfileId: voiceClone.voiceId || '',
             voiceProfileName: voiceClone.profileName || '',
@@ -1087,14 +1114,20 @@ class TaskRunner {
             : (publishEnabled && Array.isArray(task.platforms) && task.platforms.length ? task.platforms : []);
 
           const platformNames = publishedPlatforms.map(p => p === 'videoChannel' ? '视频号' : '抖音').join('、');
-          const completionMsg = platformNames ? `已发布到 ${platformNames}` : '任务完成';
-          this.setTaskState(task.id, { status: 'completed', progress: 100, step: '完成', message: completionMsg, attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit, outputPath: outPath });
+          // H3: 部分发布成功 → 任务标记为"部分完成"，不重试（避免重复发布）
+          const partial = Boolean(publishResult?.partialSuccess);
+          const partialFailed = Array.isArray(publishResult?.partialFailed) ? publishResult.partialFailed : [];
+          const completionMsg = partial
+            ? `部分发布成功：${partialFailed.length} 个视频失败（${partialFailed.map(r => r.videoName || '未知').join('、')}）`
+            : (platformNames ? `已发布到 ${platformNames}` : '任务完成');
+          this.setTaskState(task.id, { status: partial ? 'warning' : 'completed', progress: 100, step: partial ? '部分完成' : '完成', message: completionMsg, attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit, outputPath: outPath });
           this.savePersistedTask(this.progressRows.find(r => r.id === task.id));
 
-          runRecord.items.push(this.buildRunItem(job, task, row, 'completed', {
+          runRecord.items.push(this.buildRunItem(job, task, row, partial ? 'warning' : 'completed', {
             outputPath: outPath, publishAt: task.publishAt ? task.publishAt.toISOString() : '',
             publishedPlatforms, publishMode: publishEnabled ? (publishResult?.mode || '') : 'disabled',
-            finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex
+            finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex,
+            message: partial ? completionMsg : ''
           }));
 
           if (publishEnabled && publishedPlatforms.length) {

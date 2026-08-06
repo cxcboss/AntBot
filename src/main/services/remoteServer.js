@@ -350,17 +350,54 @@ function startRemoteServer({ store, taskRunner, mainWindowRef, appLog }) {
         return sendJson(res, 200, { ok: true, ...status });
       }
 
+      // POST /remote/parse — 规则识别 / AI 优化解析（主控输入预览）
+      if (method === 'POST' && pathname === '/remote/parse') {
+        const body = await readBody(req, res);
+        if (!body) return;
+        const text = String(body.text || '').trim();
+        if (!text) return sendJson(res, 400, { ok: false, error: '请输入任务' });
+        const smart = Boolean(body.smart);
+        try {
+          const { parseTaskInputSmart } = require('./aiTaskParser');
+          let apiConfig = null;
+          let taskDefaults = null;
+          if (_store) {
+            const settings = await _store.getSettings();
+            taskDefaults = settings?.taskDefaults || null;
+            const apiCfg = settings?.api || {};
+            if (smart && (apiCfg.apiKey || (apiCfg.apiKeys || []).length)) {
+              apiConfig = { baseUrl: apiCfg.baseUrl, apiKey: apiCfg.apiKey, apiKeys: apiCfg.apiKeys || [apiCfg.apiKey].filter(Boolean), modelId: apiCfg.modelId };
+            }
+          }
+          const parsed = await parseTaskInputSmart(text, { apiConfig, taskDefaults, log: (m) => log('info', `[parse${smart ? '-ai' : ''}] ${m}`) });
+          return sendJson(res, 200, { ok: true, tasks: parsed.tasks, warnings: parsed.warnings || [], source: parsed.source || '', defaults: parsed.defaults || null });
+        } catch (e) {
+          return sendJson(res, 400, { ok: false, error: e.message });
+        }
+      }
+
       // POST /remote/tasks — submit new task
       if (method === 'POST' && pathname === '/remote/tasks') {
         const body = await readBody(req, res);
         if (!body) return;
         const text = (body.text || '').trim();
-        if (!text) return sendJson(res, 400, { ok: false, error: '请输入链接' });
+        const tasksBody = Array.isArray(body.tasks) ? body.tasks : null;
 
         try {
-          const { parseTaskInput } = require('./parser');
-          const tasks = parseTaskInput(text);
-          if (!tasks.length) return sendJson(res, 400, { ok: false, error: '未识别到有效链接' });
+          let tasks;
+          if (tasksBody) {
+            tasks = tasksBody.filter(t => t && typeof t === 'object' && typeof t.taskName === 'string')
+              .map(t => ({ ...t, publishAt: t.publishAt ? new Date(t.publishAt) : null }));
+            if (!tasks.length) return sendJson(res, 400, { ok: false, error: '任务列表为空' });
+          } else {
+            if (!text) return sendJson(res, 400, { ok: false, error: '请输入链接' });
+            // 直接发送：纯规则解析（无 AI），与桌面端行为一致
+            const { parseTaskInputSmart } = require('./aiTaskParser');
+            const settings = _store ? await _store.getSettings() : null;
+            const parsed = await parseTaskInputSmart(text, { apiConfig: null, taskDefaults: settings?.taskDefaults || null });
+            tasks = parsed.tasks;
+            if (!tasks.length) return sendJson(res, 400, { ok: false, error: parsed.warnings?.[0] || '未识别到有效链接' });
+          }
 
           const result = await _taskRunner.enqueueTasks(tasks, {}, text);
           log('info', `远程提交 ${tasks.length} 个任务`);

@@ -621,6 +621,26 @@ class StoreService {
     return this.appendHistoryForUser(this.getActiveUserRecord().id, runRecord);
   }
 
+  async clearHistory() {
+    await this.load();
+    const user = this.getActiveUserRecord();
+    user.history = [];
+    this.touchUser(user);
+    await this.persist();
+    return true;
+  }
+
+  async removeHistoryItem(recordId) {
+    await this.load();
+    const user = this.getActiveUserRecord();
+    const before = user.history.length;
+    user.history = user.history.filter(r => String(r.id) !== String(recordId));
+    if (user.history.length === before) return false;
+    this.touchUser(user);
+    await this.persist();
+    return true;
+  }
+
   async appendHistoryForUser(userId, runRecord) {
     await this.load();
     const user = this.getActiveUserRecord();
