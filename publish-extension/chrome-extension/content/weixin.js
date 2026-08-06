@@ -231,9 +231,15 @@ class WeixinPublisher {
 
   async publishFromMainPage(message) {
     await this.waitForDomReady();
-    await this.delay(3000);
-    
-    const uploadInput = await this.findUploadInputInDocument();
+
+    // 等待上传入口渲染（SPA 最长 30 秒）
+    let uploadInput = null;
+    for (let i = 0; i < 30; i++) {
+      uploadInput = await this.findUploadInputInDocument();
+      if (uploadInput) break;
+      if (i === 3) await this.collapseOpenActivityPanel();
+      await this.delay(1000);
+    }
     if (uploadInput) {
       await this.doUpload(uploadInput, message);
       return;
@@ -326,13 +332,19 @@ class WeixinPublisher {
     if (this.aborted) return;
     step('页面加载完成');
 
-    // ── 步骤2: 查找上传入口 ──
+    // ── 步骤2: 查找上传入口（等待 SPA 渲染，最长 30 秒） ──
     step('查找上传入口...');
-    let uploadInput = await this.findUploadInputInDocument();
-    if (!uploadInput) {
-      // 可能是上次发布遗留的活动下拉遮挡：先收起再重试
-      await this.collapseOpenActivityPanel();
+    let uploadInput = null;
+    for (let i = 0; i < 30; i++) {
+      if (this.aborted) return;
       uploadInput = await this.findUploadInputInDocument();
+      if (uploadInput) break;
+      if (i === 3) {
+        // 可能是上次发布遗留的活动下拉遮挡：收起后继续等
+        await this.collapseOpenActivityPanel();
+      }
+      step(`等待发布页渲染 (${i + 1}/30)...`);
+      await this.delay(1000);
     }
     if (!uploadInput) {
       uploadInput = await this.simulateDragUpload(videoPath, video.name, video.path);

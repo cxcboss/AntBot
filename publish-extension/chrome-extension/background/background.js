@@ -794,6 +794,9 @@ async function sendPublishCommand(tabId) {
     publishState.commandSent = false;
     return;
   }
+  // 内容脚本已就绪，但 SPA 可能仍在渲染（上传区/表单未出现），再等待几秒
+  await sleep(3000);
+  if (!publishState.isPublishing) return;
   // 发布前检测登录状态
   try {
     const loginResult = await chrome.tabs.sendMessage(tabId, { action: 'loginCheck' });
