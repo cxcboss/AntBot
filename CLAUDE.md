@@ -4,7 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 回答风格（永久规则）
 
-回答必须简洁、突出重点：不要贴代码（除非用户要求）、不要重复用户已知道的信息、不要客套话；方案用短清单，改动直接说结论。
+回答必须简洁、突出重点：不要贴代码（除非用户要求）、不要重复用户已知道的信息、不要客套话；方案用短清单，改动直接说结论。有不理解或者不清楚的问题要问用户。
+
+## 做事风格
+一个问题多伦修复依旧错误的时候，就要派出多个代理去深度排查，必要时可以排查整个项目，找出最终问题所在。
 
 ## Project
 
@@ -63,6 +66,7 @@ composeEditVideo (smartEditor.js)     →  { outputPath }
 
 - **Module docs:** Read `docs/modules/*.md` before modifying any service module. Update the doc after changing module behavior.
 - **远程页面热更新:** 修改远程控制页面（remote-ui、Hub 页面）前必须先读 `docs/remote-hot-update.md`，了解热更新机制、GitHub 仓库、版本号更新流程和 checklist。
+- **打包准则:** 每次打包或打包测试前必须先读 `docs/packaging.md`（版本号 +0.0.1 递增、产物类型与移动位置、打包记录表）
 - **发布准则:** 发布 App、浏览器插件、远程页面更新前必须先读 `docs/release-guidelines.md`，遵守版本号规范、打包要求和发布流程。
 - **No gradients:** CSS uses solid colors only. Theme color `var(--primary)` only on key interactive elements.
 - **Design system:** All UI changes MUST follow the design system defined below. Read the "Design System" section before modifying any CSS or adding new components.
@@ -86,18 +90,20 @@ composeEditVideo (smartEditor.js)     →  { outputPath }
 
 ## Design System
 
-**基于 shadcn/ui 设计理念。所有新增 UI 或样式改动必须遵守以下规范。**
+**基于中性极简理念（Linear 风格）。所有新增 UI 或样式改动必须遵守以下规范。**
 
 设计 token 定义在 `src/renderer/design-tokens.css`，通过 CSS 变量全局生效。图标使用 [Lucide Icons](https://lucide.dev)（`lucide-static` 包），定义在 `src/renderer/icons.js`。
 
-### 主题色
+**设计原则：层级靠灰阶和间距，主题色只说话（主按钮/焦点/进行中），语义色只说事（成功/警告/失败）。**
+
+### 主题色（中性，无彩色）
 
 | Token | 亮色 | 暗色 | 用途 |
 |-------|------|------|------|
-| `--primary` | `#0D9488` (Teal-600) | `#5EEAD4` (Teal-300) | 按钮、强调、链接 |
-| `--primary-hover` | `#0F766E` | `#99F6E4` | hover 态 |
-| `--accent` | `#F0FDFA` | `#134E4A` | 选中背景、激活态 |
-| `--accent-foreground` | `#0D9488` | `#5EEAD4` | 选中文字 |
+| `--primary` | `#111111` | `#FAFAFA` | 主按钮（暗色下为白色按钮）、开关 on、进度条 |
+| `--primary-hover` | `#2B2B2B` | `#D4D4D8` | hover 态 |
+| `--accent` | `#F4F4F5` | `#26262A` | 选中背景、激活态 |
+| `--accent-foreground` | `#111111` | `#FAFAFA` | 选中文字 |
 
 ### 语义色
 
@@ -105,24 +111,24 @@ composeEditVideo (smartEditor.js)     →  { outputPath }
 |-------|------|------|
 | `--success` | `#16A34A` / `#22C55E` | 成功状态、完成 |
 | `--destructive` | `#DC2626` / `#EF4444` | 错误、删除、危险操作 |
-| `--warning` | `#D97706` / `#F59E0B` | 警告、进行中 |
+| `--warning` | `#D97706` / `#F59E0B` | 警告、部分完成 |
 | `--info` | `#2563EB` / `#3B82F6` | 信息提示 |
 
-每个语义色都有对应的 `-bg` 背景色和 `-foreground` 前景色。
+每个语义色都有对应的 `-bg` 背景色和 `-foreground` 前景色。语义色仅用于对应状态场景，禁止用于装饰（hover、边框、tab 等一律用中性灰阶）。
 
 ### 基础色
 
 | Token | 亮色 | 暗色 | 用途 |
 |-------|------|------|------|
-| `--background` | `#FAFAFA` | `#09090B` | 页面底色 |
-| `--card` | `#FFFFFF` | `#111113` | 卡片、面板、侧边栏 |
-| `--foreground` | `#0A0A0A` | `#FAFAFA` | 主文字 |
-| `--muted-foreground` | `#78716C` | `#A1A1AA` | 次要文字、标签 |
-| `--border` | `#E7E5E2` | `#27272A` | 边框、分割线 |
-| `--muted` | `#F0EDE8` | `#1C1C1F` | 静默背景、hover |
-| `--secondary` | `#F5F3F0` | `#1C1C1F` | 次级背景 |
-| `--input` | `#E7E5E2` | `#27272A` | 输入框边框 |
-| `--ring` | `#0D9488` | `#5EEAD4` | focus ring |
+| `--background` | `#FFFFFF` | `#0A0A0B` | 页面底色 |
+| `--card` | `#FFFFFF` | `#141416` | 卡片、弹窗、输入容器 |
+| `--foreground` | `#111111` | `#FAFAFA` | 主文字 |
+| `--muted-foreground` | `#71717A` | `#A1A1AA` | 次要文字、标签 |
+| `--border` | `#E4E4E7` | `#26262A` | 边框、分割线 |
+| `--muted` | `#F0F0EF` | `#232326` | 静默背景、hover |
+| `--secondary` | `#F5F5F4` | `#1C1C1E` | 次级背景 |
+| `--input` | `#E4E4E7` | `#26262A` | 输入框边框 |
+| `--ring` | `#111111` | `#FAFAFA` | focus ring |
 
 ### 圆角
 
@@ -174,26 +180,33 @@ composeEditVideo (smartEditor.js)     →  { outputPath }
 
 | 用途 | 字号 | 字重 |
 |------|------|------|
-| 页面标题 (h1) | 18px | 700 |
+| 页面标题 (h1) | 18px | 600 |
 | 区块标题 (h2) | 16px | 600 |
 | 卡片标题 (h3) | 15px | 600 |
 | 正文 | 13px | 400 |
 | 辅助文字 | 12px | 400 |
 | 标签/徽章 | 11px | 500 |
-| 极小文字 | 10px | 400 |
+
+**规则：** 不使用 10px 字号；辅助层级靠 `--muted-foreground` 表达，不靠缩小字号。
 
 ### 组件规范
 
-**按钮** — 3 种尺寸 + 4 种变体：
+**按钮** — 4 种尺寸 + 3 种变体：
+- `xs`: h-24px, px-8px, text-11px, `--radius-sm`（仅表格内小操作）
 - `sm`: h-28px, px-10px, text-12px, `--radius-sm`
 - 默认: h-32px, px-14px, text-13px, `--radius`
 - `lg`: h-36px, px-18px, text-14px, `--radius`
-- 变体: `.btn-primary` / `.btn-ghost` / `.btn-danger` / `.btn-sm`
+- 变体: `.btn-primary`（近黑实心/暗色近白）/ `.btn-ghost`（边框，hover 灰底）/ `.btn-danger`（红）/ `.btn-sm` / `.btn-xs`
+- hover 一律灰阶变化（`--primary-hover` 或 `--muted`），禁止 hover 变彩色
 - 所有按钮必须有 `focus-visible` 样式：`outline: 2px solid var(--ring); outline-offset: 2px`
 
-**输入框** — 统一 h-32px, `--radius`, `--input` 边框, focus 时 `--ring` 边框 + `box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 15%, transparent)`
+**输入框** — 统一 `.input`/`.select` 类, h-32px, `--radius`, `--input` 边框, focus 时 `--ring` 边框 + `box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 15%, transparent)`
 
-**卡片** — `--card` 背景, `--border` 边框, `--radius-lg` 圆角, `--shadow-xs` 静止阴影, hover 时边框变深
+**卡片** — `--card` 背景, `--border` 边框, `--radius-lg` 圆角, 无静止阴影（阴影留给浮层）；hover 时边框变深
+
+**状态表达** — 任务/列表项的状态用左侧 3px 色条 + 状态文字色（成功绿/失败红/警告橙/进行中主题色），禁止整卡染色
+
+**Tab** — 文字 tab + 底部 2px 指示条（`--foreground`），禁止胶囊+边框+背景组合
 
 **对话框** — `--radius-xl` 圆角, `backdrop-filter: blur(4px)`, `--shadow-lg` 阴影, `--popover` 背景
 
@@ -222,6 +235,9 @@ composeEditVideo (smartEditor.js)     →  { outputPath }
 - ❌ 不过度使用主题色（仅关键交互元素）
 - ❌ 不使用 `@media(prefers-color-scheme:dark)`（用 `.dark` class）
 - ❌ 不使用废弃别名 `--brand` / `--bg` / `--surface` / `--t2` / `--t3` / `--r-sm` 等
+- ❌ 不使用 daisyUI 组件类（`input-bordered` / `select-bordered` / `card-border` / `join` / `loading-spinner` 等）——组件类统一在 `style.css` 定义
+
+**CSS 架构**：`app.css` 仅含 `@import "tailwindcss"`（无插件，工具类用于布局，编译产物 `output.css`）；组件样式全部在 `style.css`（自建组件库）。新增组件类时加入 `style.css`，不要引入新 UI 框架。
 
 ## Windows 适配要点
 

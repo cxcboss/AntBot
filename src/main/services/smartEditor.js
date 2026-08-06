@@ -7,7 +7,7 @@ const crypto = require('node:crypto');
 const { editVideo } = require('./editor');
 const { createClipArtifactManager } = require('./clipArtifacts');
 const { resolveDependencyPath } = require('./dependencyManager');
-const { callApiWithKeyRotation, callApi } = require('./apiClient');
+const { callApiWithKeyRotation, callApi, hasApiConfig } = require('./apiClient');
 const { parseSrt, fmtMs, entriesToSrt } = require('./subtitleParser');
 
 /* ── Subtitle text cleanup (professional subtitle standards) ── */
@@ -202,7 +202,7 @@ async function recognizeVideoContent(framePaths, apiConfig, progress, abortSigna
       }
       const ctx = prevContext.length ? `\n\n前面已识别：\n${prevContext.slice(-1).join('\n').slice(-500)}` : '';
 
-      const r = await callApiWithKeyRotation(apiConfig.baseUrl, apiConfig.apiKeys || [apiConfig.apiKey], apiConfig.modelId, [{ role: 'user', content: [{ type: 'text', text: `这些是一个视频的截图（每秒1帧，共${framePaths.length}秒），第${i + 1}-${Math.min(i + batch.length, framePaths.length)}秒。请详细描述内容，保持连贯性。${ctx}` }, ...content] }], 2000, abortSignal);
+      const r = await callApiWithKeyRotation(apiConfig, [{ role: 'user', content: [{ type: 'text', text: `这些是一个视频的截图（每秒1帧，共${framePaths.length}秒），第${i + 1}-${Math.min(i + batch.length, framePaths.length)}秒。请详细描述内容，保持连贯性。${ctx}` }, ...content] }], 2000, abortSignal);
 
       results[batchIdx] = r;
       completedCount++;
@@ -341,9 +341,7 @@ ${truncatedContent}
 请根据视频内容生成字幕。`;
 
   return callApiWithKeyRotation(
-    apiConfig.baseUrl,
-    apiConfig.apiKeys || [apiConfig.apiKey],
-    apiConfig.modelId,
+    apiConfig,
     [
       { role: 'system', content: systemMessage },
       { role: 'user', content: userMessage }
@@ -380,9 +378,7 @@ ${String(rawSrt || '').slice(0, 8000)}
 请根据以上内容重新生成字幕。`;
 
   return callApiWithKeyRotation(
-    apiConfig.baseUrl,
-    apiConfig.apiKeys || [apiConfig.apiKey],
-    apiConfig.modelId,
+    apiConfig,
     [
       { role: 'system', content: systemMessage },
       { role: 'user', content: userMessage }
@@ -409,7 +405,7 @@ async function generateVideoName(recognizedContent, apiConfig, abortSignal) {
   const prompt = `根据以下内容起一个简短中文名（不超过8字，无标点）。直接输出名字本身，不要解释，不要复述指令，不要任何多余文字：\n${recognizedContent.slice(0, 500)}`;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const r = await callApiWithKeyRotation(apiConfig.baseUrl, apiConfig.apiKeys || [apiConfig.apiKey], apiConfig.modelId, [{ role: 'user', content: prompt }], 500, abortSignal);
+      const r = await callApiWithKeyRotation(apiConfig, [{ role: 'user', content: prompt }], 500, abortSignal);
       const name = sanitizeVideoName(r);
       if (name) return name;
     } catch { /* 重试一次 */ }
@@ -887,7 +883,7 @@ async function prepareEditVideo({
   abortSignal, log = () => {}, progress = () => {}
 }) {
   if (!videoPath) throw new Error('请选择视频文件');
-  if (!apiConfig?.baseUrl || (!apiConfig?.apiKey && !apiConfig?.apiKeys?.length)) throw new Error('请先配置 API');
+  if (!hasApiConfig(apiConfig)) throw new Error('请先配置 API');
   const checkAbort = () => { if (abortSignal?.aborted) throw new Error('已取消'); };
 
   log(`视频: ${path.basename(videoPath)}`);

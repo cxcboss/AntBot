@@ -32,3 +32,26 @@ test('bridge queue rejects duplicate IDs and supports cancellation', () => {
   assert.equal(cancelled.status, 'cancelled');
   assert.equal(cancelled.result.error, '已取消');
 });
+
+test('bridge queue allows reusing a terminal command ID', () => {
+  const queue = createBridgeQueue();
+  queue.enqueue({ id: 'req-3', action: 'publish.start' });
+  queue.claim();
+  queue.resolve('req-3', { success: true, status: 'completed', records: [] });
+  assert.equal(queue.get('req-3').status, 'completed');
+  const reused = queue.enqueue({ id: 'req-3', action: 'publish.start' });
+  assert.equal(reused.id, 'req-3');
+  assert.equal(reused.status, 'queued');
+  assert.equal(queue.get('req-3').status, 'queued');
+  assert.equal(queue.snapshot().pending.length, 0);
+});
+
+test('bridge queue treats login-required as terminal', () => {
+  const queue = createBridgeQueue();
+  queue.enqueue({ id: 'req-4', action: 'publish.start' });
+  queue.claim();
+  const resolved = queue.resolve('req-4', { success: false, status: 'login-required', error: '未登录' });
+  assert.equal(resolved.status, 'login-required');
+  const reused = queue.enqueue({ id: 'req-4', action: 'publish.start' });
+  assert.equal(reused.status, 'queued');
+});

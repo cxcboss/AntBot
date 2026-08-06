@@ -136,8 +136,9 @@ function register({ ipcMain, store, mainWindowRef, appLog }) {
 
   ipcMain.handle('api:usage', async () => {
     const { getUsageSummary } = require('../services/usageTracker');
+    const { normalizeApiKeys } = require('../services/apiClient');
     const settings = await store.getSettings();
-    const keys = settings.api?.apiKeys || (settings.api?.apiKey ? [settings.api.apiKey] : []);
+    const keys = normalizeApiKeys(settings.api).map(k => k.key);
     return getUsageSummary(keys);
   });
 

@@ -138,8 +138,10 @@ const BASE_DEFAULT_SETTINGS = {
     provider: 'agnes',
     baseUrl: 'https://apihub.agnes-ai.com/v1',
     apiKey: '',
+    apiKeys: [],
     modelId: '',
-    availableModels: []
+    availableModels: [],
+    keys: []
   },
   models: {
     useHfMirror: false

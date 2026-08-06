@@ -42,3 +42,9 @@ IPC handler 的注册中心。核心逻辑委托给 `ipc/` 子模块，本文件
 - 业务逻辑委托给各 services 模块
 - 状态变更通过 `webContents.send()` 推送
 - App 退出时调用 `editScheduler.shutdown()`，中断活动剪辑任务并清理其缓存
+
+## 任务解析（task:parse / task:start）
+
+- `task:parse`：调用 `aiTaskParser.parseTaskInputSmart()`，返回 `{ tasks, warnings, source, defaults }`（旧版返回纯数组，契约已升级，见 `docs/modules/aiTaskParser.md`）
+- `task:start`：同样走智能解析；兼容传入已解析任务数组（跳过解析）
+- AI 解析使用设置页同一套 API 配置（`settings.api` 的 baseUrl/apiKeys/modelId），无 key 时自动降级规则解析

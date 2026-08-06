@@ -114,11 +114,19 @@ function register({ ipcMain, store, mainWindowRef, appLog }) {
   });
 
   ipcMain.handle('publish:stop', async (_event, requestId) => {
-    appLog('info', `[publish] 停止发布: ${requestId}`);
+    appLog('info', `[publish] 停止发布: ${requestId || '(未指定)'}`);
     const { createBrowserPublishBridge } = require('../services/browserPublishBridge');
     const settings = await store.getSettings();
     const config = settings.publish?.browserExtension || {};
-    return createBrowserPublishBridge({ baseUrl: config.baseUrl }).invoke('publish.stop', {}, { id: requestId });
+    try {
+      // M2: 不传 id 时由服务端生成，避免重复 stop / 复用旧 id 触发"命令 ID 已存在"
+      return await createBrowserPublishBridge({ baseUrl: config.baseUrl }).invoke('publish.stop', {}, requestId ? { id: requestId } : {});
+    } catch (error) {
+      if (/ECONNREFUSED|ECONNRESET/.test(error.message)) {
+        throw new Error('桥接服务未运行，无法停止发布');
+      }
+      throw error;
+    }
   });
 
   // 发布记录持久化

@@ -1,5 +1,5 @@
 const dayjs = require('dayjs');
-const { callApiWithKeyRotation } = require('./apiClient');
+const { callApiWithKeyRotation, hasApiConfig } = require('./apiClient');
 const { parseTaskInput, parsePublishTime, PLATFORM_KEYS } = require('./parser');
 
 const DEFAULT_PLATFORMS = [PLATFORM_KEYS.VIDEO_CHANNEL];
@@ -217,14 +217,11 @@ function parseAIJson(content) {
 }
 
 async function callAIParser(inputText, apiConfig, log = () => {}) {
-  const keys = apiConfig?.apiKeys || [apiConfig?.apiKey].filter(Boolean);
-  if (!apiConfig?.baseUrl || !keys.length || !apiConfig?.modelId) {
+  if (!hasApiConfig(apiConfig)) {
     throw new Error('未配置 AI 解析所需的 API 配置');
   }
   const content = await callApiWithKeyRotation(
-    apiConfig.baseUrl,
-    keys,
-    apiConfig.modelId,
+    apiConfig,
     [
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: inputText }

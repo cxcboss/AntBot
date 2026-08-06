@@ -273,10 +273,8 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
     let apiConfig = null;
     const settings = await store.getSettings();
     if (smart) {
-      const apiCfg = settings?.api || {};
-      apiConfig = apiCfg.apiKey || (apiCfg.apiKeys || []).length
-        ? { baseUrl: apiCfg.baseUrl, apiKey: apiCfg.apiKey, apiKeys: apiCfg.apiKeys || [apiCfg.apiKey].filter(Boolean), modelId: apiCfg.modelId }
-        : null;
+      const { hasApiConfig } = require('./services/apiClient');
+      apiConfig = hasApiConfig(settings?.api) ? settings.api : null;
     }
     const taskDefaults = settings?.taskDefaults || null;
     return await parseTaskInputSmart(String(inputText || ''), { apiConfig, taskDefaults, log: (msg) => appLog('info', `[ai-parse] ${msg}`) });

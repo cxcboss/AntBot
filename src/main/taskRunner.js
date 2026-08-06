@@ -664,7 +664,9 @@ class TaskRunner {
         campaignName: row.campaignName || '',
         batchRunId: row.batchRunId,
         submittedAt: row.submittedAt,
-        updatedAt: nowIso()
+        updatedAt: nowIso(),
+        duration: row.duration || 0,
+        _exec: row._exec || null
       };
       if (idx >= 0) tasks[idx] = entry;
       else tasks.push(entry);
@@ -868,13 +870,27 @@ class TaskRunner {
 
       // ── Phase 2: 串行执行 subtitle → edit → publish ──
       const runSingleTask = async (task, attemptIndex = 0) => {
+        const t0 = Date.now();
+        // 执行配置快照（任务实际使用的风格/音色/旁白/字幕）
+        const voiceoverEnabled = settings?.style?.voiceoverEnabled !== false;
+        const execSnapshot = {
+          styleName: task._styleName || '',
+          voiceName: settings?.voiceClone?.profileName || settings?.voiceClone?.voiceId || '',
+          voiceover: voiceoverEnabled,
+          subtitle: voiceoverEnabled && settings?.style?.subtitleEnabled !== false,
+        };
+        const commitItem = (status, extra = {}) => this.buildRunItem(job, task, row, status, {
+          ...extra,
+          _exec: execSnapshot,
+          duration: Math.round((Date.now() - t0) / 1000)
+        });
         const row = this.progressRows.find((item) => item.id === task.id);
         if (!row) return { status: 'skipped', retryable: false };
 
         if (task.__stopped) {
           this.setTaskState(task.id, { status: 'stopped', step: '已停止', message: '任务已停止' });
           runRecord.status = 'stopped';
-          runRecord.items.push(this.buildRunItem(job, task, row, 'stopped', { message: '执行前被停止', finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, retryable: false }));
+          runRecord.items.push(commitItem('stopped', { message: '执行前被停止', finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, retryable: false }));
           return { status: 'stopped', retryable: false };
         }
 
@@ -882,7 +898,7 @@ class TaskRunner {
         if (expiredPublishMessage) {
           this.setTaskState(task.id, { status: 'failed', step: '失败', message: expiredPublishMessage, attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit });
           this.log(task.id, expiredPublishMessage, 'error');
-          runRecord.items.push(this.buildRunItem(job, task, row, 'failed', { message: expiredPublishMessage, finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, retryable: false }));
+          runRecord.items.push(commitItem('failed', { message: expiredPublishMessage, finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, retryable: false }));
           return { status: 'failed', retryable: false };
         }
 
@@ -901,13 +917,13 @@ class TaskRunner {
               downloadResults.set(task.id, { error: redlErr });
               const errMsg = redlErr.message || '视频下载失败';
               this.setTaskState(task.id, { status: 'failed', step: '失败', message: errMsg, attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit });
-              runRecord.items.push(this.buildRunItem(job, task, row, 'failed', { message: errMsg, finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, retryable: !task.__stopped }));
+              runRecord.items.push(commitItem('failed', { message: errMsg, finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, retryable: !task.__stopped }));
               return { status: 'failed', retryable: !task.__stopped };
             }
           } else {
             const errMsg = dlResult?.error?.message || '视频下载失败';
             this.setTaskState(task.id, { status: 'failed', step: '失败', message: errMsg, attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit });
-            runRecord.items.push(this.buildRunItem(job, task, row, 'failed', { message: errMsg, finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, retryable: !task.__stopped }));
+            runRecord.items.push(commitItem('failed', { message: errMsg, finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, retryable: !task.__stopped }));
             return { status: 'failed', retryable: !task.__stopped };
           }
         }
@@ -933,14 +949,14 @@ class TaskRunner {
             const completionMsg = platformNames ? `已发布到 ${platformNames}` : '任务完成';
             this.setTaskState(task.id, { status: 'completed', progress: 100, step: '完成', message: completionMsg, attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit, outputPath: outPath });
             this.savePersistedTask(this.progressRows.find(r => r.id === task.id));
-            runRecord.items.push(this.buildRunItem(job, task, row, 'completed', { outputPath: outPath, publishedPlatforms, publishMode: publishResult?.mode || '', finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex }));
+            runRecord.items.push(commitItem('completed', { outputPath: outPath, publishedPlatforms, publishMode: publishResult?.mode || '', finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex }));
             if (publishEnabled && publishedPlatforms.length) {
               publishedRecords.push({ userId: job.userId, userName: job.userName, taskName: row.taskName, outputPath: outPath, publishAt: nowIso(), publishedPlatforms, publishMode: publishResult?.mode || '', completedAt: nowIso(), runId: this.runId });
             }
             return { status: 'completed', retryable: false };
           } catch (pubErr) {
             this.setTaskState(task.id, { status: 'failed', step: '发布失败', message: pubErr.message, attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit, outputPath: outPath });
-            runRecord.items.push(this.buildRunItem(job, task, row, 'failed', { message: pubErr.message, finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, retryable: true }));
+            runRecord.items.push(commitItem('failed', { message: pubErr.message, finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, retryable: true }));
             return { status: 'failed', retryable: true };
           }
         }
@@ -958,14 +974,8 @@ class TaskRunner {
           // 配音和字幕都关闭：无需抽帧/AI 识别/字幕，直接使用下载的视频
           const needsEdit = voiceoverEnabled || subtitleEnabled;
 
-          // 构建 apiConfig（与剪辑页面一致）
-          const apiCfg = settings?.api || {};
-          const apiConfig = {
-            baseUrl: apiCfg.baseUrl,
-            apiKey: apiCfg.apiKey,
-            apiKeys: apiCfg.apiKeys || [apiCfg.apiKey].filter(Boolean),
-            modelId: apiCfg.modelId
-          };
+          // 构建 apiConfig（与剪辑页面一致，支持每 key 独立 baseUrl/模型，apiClient 内部轮值）
+          const apiConfig = settings?.api || {};
 
           // 获取风格提示词
           let stylePrompt = '';
@@ -1120,10 +1130,10 @@ class TaskRunner {
           const completionMsg = partial
             ? `部分发布成功：${partialFailed.length} 个视频失败（${partialFailed.map(r => r.videoName || '未知').join('、')}）`
             : (platformNames ? `已发布到 ${platformNames}` : '任务完成');
-          this.setTaskState(task.id, { status: partial ? 'warning' : 'completed', progress: 100, step: partial ? '部分完成' : '完成', message: completionMsg, attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit, outputPath: outPath });
+          this.setTaskState(task.id, { status: partial ? 'warning' : 'completed', progress: 100, step: partial ? '部分完成' : '完成', message: completionMsg, attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit, outputPath: outPath, duration: Math.round((Date.now() - t0) / 1000), _exec: execSnapshot });
           this.savePersistedTask(this.progressRows.find(r => r.id === task.id));
 
-          runRecord.items.push(this.buildRunItem(job, task, row, partial ? 'warning' : 'completed', {
+          runRecord.items.push(commitItem(partial ? 'warning' : 'completed', {
             outputPath: outPath, publishAt: task.publishAt ? task.publishAt.toISOString() : '',
             publishedPlatforms, publishMode: publishEnabled ? (publishResult?.mode || '') : 'disabled',
             finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex,
@@ -1142,9 +1152,9 @@ class TaskRunner {
           const outputReady = editCompleted && await this.fileExists(outPath);
           if (outputReady) {
             this.log(task.id, `发布失败但视频已生成: ${error.message}`, 'warn');
-            this.setTaskState(task.id, { status: 'warning', progress: 100, step: '部分完成', message: publishEnabled ? `发布失败: ${error.message}` : '成品视频已输出', attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit, outputPath: outPath });
+            this.setTaskState(task.id, { status: 'warning', progress: 100, step: '部分完成', message: publishEnabled ? `发布失败: ${error.message}` : '成品视频已输出', attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit, outputPath: outPath, duration: Math.round((Date.now() - t0) / 1000), _exec: execSnapshot });
             this.savePersistedTask(this.progressRows.find(r => r.id === task.id));
-            runRecord.items.push(this.buildRunItem(job, task, row, 'warning', { outputPath: outPath, publishAt: task.publishAt ? task.publishAt.toISOString() : '', publishedPlatforms: [], publishMode: publishEnabled ? 'failed' : 'disabled', finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, message: publishEnabled ? '发布失败，但视频已生成' : '成品视频已输出', retryable: publishEnabled }));
+            runRecord.items.push(commitItem('warning', { outputPath: outPath, publishAt: task.publishAt ? task.publishAt.toISOString() : '', publishedPlatforms: [], publishMode: publishEnabled ? 'failed' : 'disabled', finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, message: publishEnabled ? '发布失败，但视频已生成' : '成品视频已输出', retryable: publishEnabled }));
             return { status: publishEnabled ? 'failed' : 'completed', retryable: publishEnabled };
           }
 
@@ -1157,7 +1167,7 @@ class TaskRunner {
           this.log(task.id, finalMessage, 'error');
 
           if (status === 'stopped') runRecord.status = 'stopped';
-          runRecord.items.push(this.buildRunItem(job, task, row, status, { message: finalMessage, finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, retryable }));
+          runRecord.items.push(commitItem(status, { message: finalMessage, finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, retryable }));
 
           return { status, retryable };
         } finally {
@@ -1304,6 +1314,19 @@ class TaskRunner {
 
     try {
       const settings = await this.store.getSettingsForUser(job.userId);
+      const t0 = Date.now();
+      const voiceoverEnabled = settings?.style?.voiceoverEnabled !== false;
+      const execSnapshot = {
+        styleName: task._styleName || '',
+        voiceName: settings?.voiceClone?.profileName || settings?.voiceClone?.voiceId || '',
+        voiceover: voiceoverEnabled,
+        subtitle: voiceoverEnabled && settings?.style?.subtitleEnabled !== false,
+      };
+      const commitItem = (status, extra = {}) => this.buildRunItem(job, task, this.progressRows[0], status, {
+        ...extra,
+        _exec: execSnapshot,
+        duration: Math.round((Date.now() - t0) / 1000)
+      });
       this.currentTaskId = task.id;
       this.setTaskState(task.id, {
         status: 'running',
@@ -1343,7 +1366,7 @@ class TaskRunner {
         outputPath: videoPath
       });
 
-      runRecord.items.push(this.buildRunItem(job, task, this.progressRows[0], 'completed', {
+      runRecord.items.push(commitItem('completed', {
         outputPath: videoPath,
         publishAt: task.publishAt ? task.publishAt.toISOString() : '',
         publishedPlatforms,
@@ -1376,7 +1399,7 @@ class TaskRunner {
       });
       this.log(task.id, error.message, 'error');
       runRecord.status = status === 'failed' ? 'failed' : 'stopped';
-      runRecord.items.push(this.buildRunItem(job, task, this.progressRows[0], status, {
+      runRecord.items.push(commitItem(status, {
         message: error.message,
         outputPath: videoPath,
         finishedAt: nowIso()

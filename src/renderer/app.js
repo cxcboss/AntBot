@@ -24,7 +24,7 @@ const el = {
   dataDlg:$('#data-dialog'), dataVer:$('#data-version'),
   dataPath:$('#data-path'), dataLog:$('#data-log-path'),
   dataOpen:$('#open-data-dir-btn'), dataOpenLog:$('#open-log-dir-btn'),
-  dataOpenMain:$('#open-data-dir-main-btn'), dataMigrate:$('#migrate-data-btn'),
+  dataOpenMain:$('#open-data-dir-main-btn'),
   dataClose:$('#close-data-btn'),
   statTotal:$('#stat-total'), statPeriod:$('#stat-period'),
   statPeriodLabel:$('#stat-period-label'),
@@ -72,9 +72,9 @@ function confirmDialog(message,{danger=true,okText='确定'}={}){
 }
 
 /* ── Toast ── */
-function toast(msg,type='info',ms=3000){const c=$('#toast-container');if(!c)return;const t=document.createElement('div');t.className=`toast ${type}`;const im={success:ICONS.check,error:ICONS.alertCircle,warning:ICONS.alertTriangle,info:ICONS.alertCircle};t.innerHTML=`<span class="icon">${im[type]||''}</span><span>${esc(msg)}</span>`;c.appendChild(t);setTimeout(()=>{t.classList.add('out');setTimeout(()=>t.remove(),200);},ms);}
+function toast(msg,type='info',ms=5000){const c=$('#toast-container');if(!c)return;const t=document.createElement('div');t.className=`toast ${type}`;const im={success:ICONS.check,error:ICONS.alertCircle,warning:ICONS.alertTriangle,info:ICONS.alertCircle};t.innerHTML=`<span class="icon">${im[type]||''}</span><span class="toast-msg">${esc(msg)}</span><button class="toast-close" type="button" title="关闭" aria-label="关闭"><span class="icon">${ICONS.x}</span></button>`;c.appendChild(t);const remove=()=>{t.classList.add('out');setTimeout(()=>t.remove(),200)};t.addEventListener('click',e=>{if(e.target.closest('.toast-close'))remove()});t.querySelector('.toast-close').addEventListener('click',remove);setTimeout(remove,ms);}
 
-function showLoading(containerId){const el=document.getElementById(containerId);if(el)el.innerHTML='<div class="loading-box"><span class="loading loading-spinner loading-sm"></span><span>加载中...</span></div>';}
+function showLoading(containerId){const el=document.getElementById(containerId);if(el)el.innerHTML='<div class="loading-box"><span class="spinner"></span><span>加载中...</span></div>';}
 
 /* ── Feature modules ── */
 const downloadPage = createDownloadPage({ state: S, toast, esc, injectIcons });
@@ -119,7 +119,7 @@ function switchFeature(feat){
   if(feat==='download') initDownloadPage();
   if(feat==='remote') initRemotePage();
   if(feat==='update') initUpdatePage();
-  if(feat==='settings') { fillForm(); checkDeps(); loadModels(); checkVoicebox(); loadApiUsage(); }
+  if(feat==='settings') { fillForm(); checkDeps(); loadModels(); checkVoicebox(); loadApiUsage(); injectIcons(); }
   // 清理下载页定时器
   if(feat!=='download') downloadPage.stopAnimations();
   if(isMobile())closeSidebar();
@@ -130,7 +130,6 @@ function initTheme(){
   const mq=window.matchMedia('(prefers-color-scheme:dark)');
   const apply=(dark)=>{
     document.documentElement.classList.toggle('dark',dark);
-    document.documentElement.setAttribute('data-theme',dark?'antbot-dark':'antbot-light');
   };
   apply(mq.matches);
   mq.addEventListener('change',e=>apply(e.matches));
@@ -152,15 +151,44 @@ function initDialogClose(){document.querySelectorAll('dialog.dlg').forEach(dlg=>
 function formatBubbleText(raw){
   if(!raw)return'';const lines=raw.split(/\r?\n/).filter(l=>l.trim());
   const showNum=lines.length>=3;
-  return lines.map((line,i)=>{const num=showNum?`${i+1}、`:'';const f=line.replace(/https?:\/\/[^\s,，]+/g,url=>{try{const u=new URL(url);const p=u.pathname.length>15?u.pathname.slice(0,15)+'...':'';return u.hostname+p}catch{return url.slice(0,30)+'...'}});return num+esc(f)}).join('\n');
+  return lines.map((line,i)=>{const num=showNum?`${i+1}、`:'';const f=line.replace(/https?:\/\/[^\s,，。；;）)]+/g,url=>`…${url.slice(-8)}`);return num+esc(f)}).join('\n');
 }
-function makeBubbleHtml(raw){
-  const formatted=formatBubbleText(raw);
+const platformLabel={videoChannel:'视频号',douyin:'抖音'};
+const shortUrl=(url)=>`…${url.replace(/[^\s,，。；;）)]+$/,'').slice(-8)}`;
+function fmtDuration(sec){
+  sec=Math.max(0,Math.round(Number(sec)||0));
+  if(sec<60)return`${sec}秒`;
+  const m=Math.floor(sec/60),s=sec%60;
+  if(m<60)return s?`${m}分${s}秒`:`${m}分钟`;
+  return`${Math.floor(m/60)}小时${m%60}分`;
+}
+/* 消息卡片：平铺正文 + 操作行（原文/复制）+ 规则面板 */
+function makeMessageHtml(raw,rules){
   const rawLines=raw.split(/\r?\n/).filter(l=>l.trim());
   const showNum=rawLines.length>=3;
-  const numbered=rawLines.map((l,i)=>(showNum?`${i+1}、`:``)+l).join('\n');
+  const numbered=rawLines.map((l,i)=>(showNum?`${i+1}、`:'')+l).join('\n');
   const escapedRaw=esc(raw).replace(/\\/g,'\\\\').replace(/\n/g,'\\n').replace(/\r/g,'\\r').replace(/`/g,'\\`').replace(/\$/g,'\\$');
-  return`<div class="msg-content">${formatted}</div><button class="msg-raw-toggle" type="button" onclick="const raw=this.nextElementSibling;const copy=this.nextElementSibling.nextElementSibling;const shown=raw.classList.toggle('show');this.textContent=shown?'隐藏原文':'显示原文';copy.style.display=shown?'block':'none'">显示原文</button><div class="msg-raw">${esc(numbered)}</div><div class="msg-raw-actions" style="display:none"><button class="msg-copy-btn" type="button" onclick="navigator.clipboard.writeText('${escapedRaw.replace(/'/g,"\\'")}');this.textContent='已复制';setTimeout(()=>this.textContent='复制',1500)">复制</button></div>`;
+  const hasUrl=/https?:\/\//i.test(raw);
+  const rulesHtml=rules&&rules.length?makeRulesHtml(rules):'';
+  return`<div class="msg-content">${formatBubbleText(raw)}</div><div class="msg-actions"><button class="msg-act-btn" type="button" data-msg-raw data-raw="${escapedRaw}">${hasUrl?'原文':'显示原文'}</button><button class="msg-act-btn" type="button" data-msg-copy data-copy="${escapedRaw}">复制</button></div><div class="msg-raw">${esc(numbered)}</div>${rulesHtml}`;
+}
+/* 规则面板：解析出的完整规则（平台/原创/活动/定时/话题/标题） */
+function makeRulesHtml(rules){
+  const items=rules.map((t,i)=>{
+    const fields=[];
+    if(t.platforms&&t.platforms.length)fields.push(`<span class="rule-field"><b>${esc(t.platforms.map(p=>platformLabel[p]||p).join('、'))}</b></span>`);
+    if(t.isOriginal)fields.push('<span class="rule-field"><b>原创</b></span>');
+    if(t.campaignName)fields.push(`<span class="rule-field">活动 <b>${esc(t.campaignName)}</b></span>`);
+    if(t.publishAt){const d=new Date(t.publishAt);if(!isNaN(d)){const pad=n=>String(n).padStart(2,'0');fields.push(`<span class="rule-field">定时 <b>${d.getMonth()+1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}</b></span>`)}}
+    if(t.publishTopics&&t.publishTopics.length)fields.push(`<span class="rule-field">话题 <b>${esc(t.publishTopics.join(' '))}</b></span>`);
+    if(t.taskName&&t.taskName!=='普通')fields.push(`<span class="rule-field">标题 <b>${esc(t.taskName)}</b></span>`);
+    const title=t.videoUrl?shortUrl(t.videoUrl):(t.rawLine||`任务${i+1}`);
+    return`<div class="rule-item"><div class="rule-item-title">${i+1}. ${esc(title)}</div><div class="rule-item-fields">${fields.join('')}</div></div>`;
+  });
+  const origCount=rules.filter(t=>t.isOriginal).length;
+  const platSet=new Set();rules.forEach(t=>(t.platforms||[]).forEach(p=>platSet.add(platformLabel[p]||p)));
+  const summary=`已按规则解析 ${rules.length} 条任务 · 原创 ${origCount} · ${[...platSet].join('、')}`;
+  return`<div class="msg-rules open"><button type="button" class="msg-rules-head" data-rule-toggle><span class="msg-rules-summary">${esc(summary)}</span><span class="icon msg-rules-arrow" data-icon="chevronRight"></span></button><div class="msg-rules-body">${items.join('')}</div></div>`;
 }
 
 /* ── Statistics ── */
@@ -246,10 +274,10 @@ function liveGroups(){
   const gs=new Map();
   [...(S.progress?.tasks||[]),...(S.progress?.queueTasks||[])].forEach(t=>{
     const g=String(t.batchRunId||t.id);
-    if(!gs.has(g))gs.set(g,{id:g,at:t.enqueuedAt||t.updatedAt||new Date().toISOString(),txt:'',tasks:[]});
+    if(!gs.has(g))gs.set(g,{id:g,at:t.enqueuedAt||t.updatedAt||new Date().toISOString(),txt:'',rules:null,tasks:[]});
     gs.get(g).tasks.push(t);
   });
-  S.pending.forEach(b=>{if(!gs.has(b.runId))gs.set(b.runId,{id:b.runId,at:b.createdAt,txt:b.txt,tasks:[]});gs.get(b.runId).txt=b.txt});
+  S.pending.forEach(b=>{if(!gs.has(b.runId))gs.set(b.runId,{id:b.runId,at:b.createdAt,txt:b.txt,rules:b.rules||null,tasks:[]});gs.get(b.runId).txt=b.txt;if(b.rules)gs.get(b.runId).rules=b.rules});
   return Array.from(gs.values()).map(g=>({...g,tasks:g.tasks.sort((a,b)=>(a.index||a.queueIndex||0)-(b.index||b.queueIndex||0)),txt:g.txt||g.tasks.map(t=>t.rawLine).filter(Boolean).join('\n')||g.tasks.map(t=>t.taskName).join('\n')})).sort((a,b)=>new Date(a.at)-new Date(b.at));
 }
 // 历史记录中同一任务多次尝试（重试）只保留最后一次（attempt 最大）
@@ -265,7 +293,14 @@ function dedupeHistoryItems(items){
 }
 function taskCard(t,live=false){
   const st=t.status||'pending';const pg=Math.max(0,Math.min(100,Number(t.progress||0)));
-  const idx=t.index||t.queueIndex||0;const title=idx?`任务${idx}`:(t.isOriginal?'原创':(t.taskName||'任务'));
+  const snap=t.taskSnapshot||{};
+  const platforms=t.platforms||snap.platforms||[];
+  const isOriginal=t.isOriginal!==undefined?t.isOriginal:snap.isOriginal;
+  const campaignName=t.campaignName||snap.campaignName;
+  const publishAt=t.publishAt||snap.publishAt;
+  const exec=t._exec||{};
+  const idx=t.index||t.queueIndex||0;
+  const title=idx?`任务${idx}`:(t.taskName&&t.taskName!=='普通'?t.taskName:(isOriginal?'原创':'任务'));
   const retrying=t.retryCount>0&&st==='running';
   const statusLabel=retrying?`重试中 (${t.retryCount})`:st==='cancelling'?'取消中':statusText(st);
   const canSkip=live&&['queued','pending'].includes(st);
@@ -275,11 +310,23 @@ function taskCard(t,live=false){
   const isCancelling=st==='cancelling';
   const msg=t.message?`<div class="task-msg">${esc(t.message)}</div>`:'';
 
-  const tags=[];
-  if(t.isOriginal)tags.push('<span class="task-tag task-tag-accent">原创</span>');
-  if(t.campaignName)tags.push(`<span class="task-tag task-tag-accent">活动:${esc(t.campaignName)}</span>`);
-  if(t.publishAt){const d=new Date(t.publishAt);if(!isNaN(d)){const pad=n=>String(n).padStart(2,'0');const isExpired=d.getTime()<Date.now();if(isExpired&&st!=='running'&&st!=='queued'){tags.push(`<span class="task-tag" style="color:var(--destructive)">发布时间已过期 ${d.getMonth()+1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}</span>`)}else{tags.push(`<span class="task-tag">定时 ${d.getMonth()+1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}</span>`)}}}
-  const tagsHtml=tags.length?`<div class="task-tags">${tags.join('')}</div>`:'';
+  /* 元信息行：平台 · 原创 · 活动 · 定时 */
+  const meta=[];
+  if(platforms.length)meta.push(`<span class="task-meta-item"><span class="icon" data-icon="send"></span>${esc(platforms.map(p=>platformLabel[p]||p).join('、'))}</span>`);
+  if(isOriginal)meta.push('<span class="task-meta-item"><span class="icon" data-icon="sparkles"></span>原创</span>');
+  if(campaignName)meta.push(`<span class="task-meta-item">活动 <b>${esc(campaignName)}</b></span>`);
+  if(publishAt){const d=new Date(publishAt);if(!isNaN(d)){const pad=n=>String(n).padStart(2,'0');const isExpired=d.getTime()<Date.now();if(isExpired&&st!=='running'&&st!=='queued'){meta.push(`<span class="task-meta-item danger">定时已过期 ${d.getMonth()+1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}</span>`)}else{meta.push(`<span class="task-meta-item">定时 ${d.getMonth()+1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}</span>`)}}}
+  const metaHtml=meta.length?`<div class="task-meta">${meta.join('')}</div>`:'';
+
+  /* 执行配置展开区：耗时 + 旁白/字幕/音色/风格 */
+  const dur=t.duration||(t.startedAt&&t.completedAt?Math.round((new Date(t.completedAt)-new Date(t.startedAt))/1000):0);
+  const detailItems=[];
+  if(dur>0)detailItems.push(`<span class="task-detail-item">耗时 <b>${fmtDuration(dur)}</b></span>`);
+  if(exec.styleName)detailItems.push(`<span class="task-detail-item">风格 <b>${esc(exec.styleName)}</b></span>`);
+  if(exec.voiceName)detailItems.push(`<span class="task-detail-item">音色 <b>${esc(exec.voiceName)}</b></span>`);
+  if(exec.voiceover!==undefined)detailItems.push(`<span class="task-detail-item">旁白 <b>${exec.voiceover?'开':'关'}</b></span>`);
+  if(exec.subtitle!==undefined)detailItems.push(`<span class="task-detail-item">字幕 <b>${exec.subtitle?'开':'关'}</b></span>`);
+  const detailHtml=detailItems.length?`<div class="task-detail"><button type="button" class="task-detail-toggle" data-task-detail>执行详情<span class="icon" data-icon="chevronRight"></span></button><div class="task-detail-body"><div class="task-detail-grid">${detailItems.join('')}</div></div></div>`:'';
 
   const showProgress=st==='running'||st==='preparing'||st==='pending'||st==='queued';
   const progressHtml=showProgress?`<div class="task-bar"><div class="task-bar-in" style="width:${pg}%"></div></div>`:'';
@@ -289,26 +336,48 @@ function taskCard(t,live=false){
   if(canCancel)acts.push(`<button class="task-btn cancel" data-stop="${esc(t.id)}">取消</button>`);
   if(canRetry)acts.push(`<button class="task-btn" data-retry-task="${esc(t.id)}">重试</button>`);
   if(isCompleted&&t.outputPath)acts.push(`<button class="task-btn" data-open-output="${esc(t.outputPath)}">打开目录</button>`);
-  if(st==='warning'&&t.outputPath)acts.push(`<button class="task-btn" data-republish="${esc(t.id)}">重新发布</button>`);
+  if(isCompleted&&t.outputPath)acts.push(`<button class="task-btn" data-republish="${esc(t.id)}">重新发布</button>`);
 
-  const inner=`<div class="task-inner"><div class="task-head"><div class="task-title">${esc(title)}</div><div class="task-badge">${esc(statusLabel)}</div></div>${tagsHtml}${progressHtml}${msg}${acts.length?`<div class="task-acts">${acts.join('')}</div>`:''}</div>`;
+  const inner=`<div class="task-inner"><div class="task-head"><div class="task-title">${esc(title)}</div><div class="task-badge">${esc(statusLabel)}</div></div>${metaHtml}${detailHtml}${progressHtml}${msg}${acts.length?`<div class="task-acts">${acts.join('')}</div>`:''}</div>`;
   const overlay=isCancelling?'<div class="task-cancelling">取消中...</div>':'';
   return`<div class="task ${esc(st)}">${inner}${overlay}</div>`;
 }
 function renderChat(opts={}){
-  if(!el.stream)return;const stick=opts.stick,vis=(S.history||[]).slice(0,S.chatCount).reverse(),lg=liveGroups();
-  const parts=[];let day='';
-  for(const r of vis){const d=fmtDay(r.startedAt);if(d&&d!==day){day=d;parts.push(`<div class="chat-day">${esc(d)}</div>`)}const txt=r.inputText||(r.items||[]).map(i=>i.rawLine||i.taskName).filter(Boolean).join('\n');parts.push(`<div class="msg-time">${esc(fmtDate(r.startedAt))}</div>`);if(txt)parts.push(`<div class="msg msg-user" data-run-id="${esc(String(r.id||''))}">${makeBubbleHtml(txt)}</div>`);parts.push(`<div class="msg-sys" data-run-id="${esc(String(r.id||''))}"><div class="task-stack">${dedupeHistoryItems(r.items).map(i=>taskCard(i)).join('')}</div></div>`)}
+  if(!el.stream)return;const stick=opts.stick,lg=liveGroups();
+  const groups=[];let day='';
+  /* 时间线组：消息（平铺）+ 规则（折叠）+ 任务栈；全部收集后按时间升序（旧上、新下） */
+  const push=(at,runId,persisted,msgHtml,rulesHtml,tasksHtml)=>{
+    groups.push({at:at?new Date(at).getTime():0,runId:String(runId||''),persisted,msgHtml,rulesHtml,tasksHtml});
+  };
+  for(const r of (S.history||[]).slice(-S.chatCount)){
+    const txt=r.inputText||(r.items||[]).map(i=>i.rawLine||i.taskName).filter(Boolean).join('\n');
+    push(r.startedAt||r.endedAt,r.id,false,txt?`<div class="msg-user">${makeMessageHtml(txt,null)}</div>`:'','',`<div class="task-stack">${dedupeHistoryItems(r.items).map(i=>taskCard(i)).join('')}</div>`);
+  }
   // 持久化的主控任务（重新发布状态，重启后保留）
   const historyIds=new Set((S.history||[]).flatMap(r=>(r.items||[]).map(i=>i.taskId)));
   const persisted=(S.persistedTasks||[]).filter(t=>!historyIds.has(t.taskId)&&(t.status==='warning'||t.status==='completed'));
   if(persisted.length){
     const byRun={};
     for(const t of persisted){const key=t.batchRunId||'persisted';if(!byRun[key])byRun[key]={tasks:[],at:t.submittedAt||t.updatedAt,inputText:t.inputText||''};byRun[key].tasks.push(t);}
-    for(const [,g] of Object.entries(byRun)){const runId=esc(String(g.tasks[0]?.batchRunId||''));const pv=g.tasks[0]?.batchRunId?`data-run-id="${runId}" data-persisted="1"`:'';const d=fmtDay(g.at);if(d&&d!==day){day=d;parts.push(`<div class="chat-day">${esc(d)}</div>`)}parts.push(`<div class="msg-time">${esc(fmtDate(g.at))}</div>`);if(g.inputText)parts.push(`<div class="msg msg-user" ${pv}>${makeBubbleHtml(g.inputText)}</div>`);parts.push(`<div class="msg-sys" ${pv}><div class="task-stack">${g.tasks.map(t=>taskCard(t)).join('')}</div></div>`)}
+    for(const [,g] of Object.entries(byRun)){
+      push(g.at,g.tasks[0]?.batchRunId||'',true,g.inputText?`<div class="msg-user">${makeMessageHtml(g.inputText,null)}</div>`:'','',`<div class="task-stack">${g.tasks.map(t=>taskCard(t)).join('')}</div>`);
+    }
   }
-  for(const g of lg){const runId=esc(String(g.id||''));const d=fmtDay(g.at);if(d&&d!==day){day=d;parts.push(`<div class="chat-day">${esc(d)}</div>`)}parts.push(`<div class="msg-time">${esc(fmtDate(g.at))}</div>`);if(g.txt)parts.push(`<div class="msg msg-user" data-run-id="${runId}">${makeBubbleHtml(g.txt)}</div>`);parts.push(`<div class="msg-sys" data-run-id="${runId}"><div class="task-stack">${g.tasks.map(t=>taskCard(t,true)).join('')}</div></div>`)}
+  for(const g of lg){
+    push(g.at,g.id,false,g.txt?`<div class="msg-user">${makeMessageHtml(g.txt,g.rules)}</div>`:'','',`<div class="task-stack">${g.tasks.map(t=>taskCard(t,true)).join('')}</div>`);
+  }
+  // 按时间升序：最早在上、最新（进行中的任务）在最下
+  groups.sort((a,b)=>a.at-b.at);
+  const parts=[];
+  for(const g of groups){
+    const at=g.at?new Date(g.at):null;
+    const d=at?fmtDay(at):'';
+    if(d&&d!==day){day=d;parts.push(`<div class="chat-day">${esc(d)}</div>`)}
+    const pv=g.persisted?' data-persisted="1"':'';
+    parts.push(`<div class="run-group" data-run-id="${esc(g.runId)}"${pv}><div class="msg-time">${esc(at?fmtDate(at):'')}</div>${g.msgHtml}${g.rulesHtml||''}${g.tasksHtml}</div>`);
+  }
   el.stream.innerHTML=parts.length?parts.join(''):'<div class="chat-empty">还没有任务。</div>';
+  injectIcons();
   if(stick)requestAnimationFrame(()=>{el.scroll.scrollTop=el.scroll.scrollHeight});
 }
 
@@ -431,26 +500,60 @@ function fillForm(){
   const subStroke=document.getElementById('sub-stroke');if(subStroke)subStroke.value=s.style?.subtitleStrokeColor||'#000000';
   const subPos=document.getElementById('sub-position');if(subPos)subPos.value=s.style?.subtitlePositionPercent??12;
   const fontPath=document.getElementById('font-current-path');if(fontPath)fontPath.value=s.fonts?.activeFont||'系统默认';
-  set('s-apiBaseUrl',s.api?.baseUrl||'https://apihub.agnes-ai.com/v1');
-  // API keys — 多 key 支持
-  const keys = s.api?.apiKeys || (s.api?.apiKey ? [s.api.apiKey] : []);
-  const keysList = document.getElementById('api-keys-list');
-  if (keysList) {
-    keysList.innerHTML = keys.length ? keys.map((k, i) => `<div class="s-input-row"><input name="apiKey" type="password" value="${esc(k)}" placeholder="Key ${i + 1}" /><button type="button" class="btn btn-sm btn-ghost s-key-vis" title="显示/隐藏">👁</button><button type="button" class="btn btn-sm btn-ghost s-key-del" title="删除">✕</button></div>`).join('') : `<div class="s-input-row"><input name="apiKey" type="password" placeholder="Key 1" /><button type="button" class="btn btn-sm btn-ghost s-key-vis" title="显示/隐藏">👁</button><button type="button" class="btn btn-sm btn-ghost s-key-del" title="删除">✕</button></div>`;
+  // API keys — 每 key 独立 baseURL/模型/用量
+  const keys=normalizeKeysForForm(s.api);
+  const keysList=document.getElementById('api-keys-list');
+  if(keysList){
+    keysList.innerHTML=keys.map((k,i)=>apiKeyItemHtml(k,i)).join('');
   }
   const fr=document.getElementById('s-frameRate');if(fr)fr.value=String(s.edit?.frameRate??1);
+  // 开机自动启动开关
+  const al=document.getElementById('s-auto-launch');
+  if(al)al.classList.toggle('on',S.settings?.system?.launchAtLogin!==false);
   const td=s.taskDefaults||{};
   set('s-task-platform',(td.platforms||[]).join(','));
   const to=document.getElementById('s-task-original');if(to)to.value=td.isOriginal?'true':'false';
   set('s-task-topics',(td.topics||[]).join(' '));
   const iv=td.intervalMinutes||[40,70];
   set('s-task-interval-min',iv[0]);set('s-task-interval-max',iv[1]);
-  const ms=document.getElementById('s-apiModelId');
-  if(ms){const m=s.api?.availableModels||[],c=s.api?.modelId||'';ms.innerHTML=m.length?m.map(x=>`<option value="${esc(x.id)}"${x.id===c?' selected':''}>${esc(x.name)}</option>`).join(''):'<option value="">请先获取模型</option>';}
+}
+/* 归一化 API 配置为表单结构 [{key,baseUrl,modelId,availableModels}]（兼容旧数据） */
+function normalizeKeysForForm(api){
+  if(api?.keys?.length)return api.keys.map(k=>({key:k.key||'',baseUrl:k.baseUrl||api.baseUrl||'',modelId:k.modelId||api.modelId||'',availableModels:k.availableModels||api.availableModels||[]}));
+  const legacy=(api?.apiKeys||[]).filter(Boolean);
+  if(legacy.length)return legacy.map(k=>({key:k,baseUrl:api.baseUrl||'',modelId:api.modelId||'',availableModels:api.availableModels||[]}));
+  if(api?.apiKey)return[{key:api.apiKey,baseUrl:api.baseUrl||'',modelId:api.modelId||'',availableModels:api.availableModels||[]}];
+  return[{key:'',baseUrl:api?.baseUrl||'https://apihub.agnes-ai.com/v1',modelId:'',availableModels:[]}];
+}
+/* 单个 key 区块 HTML：key + baseURL + 获取模型 + 模型下拉 + 用量占位 */
+function apiKeyItemHtml(k,i){
+  const key=k?.key||'',baseUrl=k?.baseUrl||'',modelId=k?.modelId||'';
+  const models=k?.availableModels||[];
+  const opts=models.length?models.map(m=>`<option value="${esc(m.id)}"${m.id===modelId?' selected':''}>${esc(m.name)}</option>`).join(''):'<option value="">请先获取模型</option>';
+  return `<div class="api-key-item">
+    <div class="s-input-row">
+      <input name="apiKey" type="password" class="input" placeholder="API Key ${i+1}" value="${esc(key)}" />
+      <button type="button" class="btn btn-sm btn-ghost s-key-vis" title="显示/隐藏"><span class="icon" data-icon="eye"></span></button>
+      <button type="button" class="btn btn-sm btn-ghost s-key-del" title="删除"><span class="icon" data-icon="x"></span></button>
+    </div>
+    <div class="s-input-row api-key-sub">
+      <input name="apiBaseUrl" type="text" class="input" placeholder="Base URL，如 https://apihub.agnes-ai.com/v1" value="${esc(baseUrl)}" />
+      <button type="button" class="btn btn-sm btn-ghost s-key-models" title="获取该地址的模型列表">获取模型</button>
+    </div>
+    <select name="apiModelId" class="select w-full api-key-model" data-models="${esc(JSON.stringify(models))}">${opts}</select>
+    <div class="api-key-usage"></div>
+  </div>`;
 }
 function readForm(){
   const get=(id)=>{const e=document.getElementById(id);return e?.value?.trim()||'';};
-  const apiKeys=[...document.querySelectorAll('#api-keys-list input[name="apiKey"]')].map(e=>e.value.trim()).filter(Boolean);
+  const apiItems=[...document.querySelectorAll('#api-keys-list .api-key-item')].map(el=>{
+    const key=el.querySelector('input[name="apiKey"]')?.value.trim()||'';
+    const baseUrl=el.querySelector('input[name="apiBaseUrl"]')?.value.trim()||'https://apihub.agnes-ai.com/v1';
+    const modelId=el.querySelector('select[name="apiModelId"]')?.value||'';
+    let availableModels=[];
+    try{availableModels=JSON.parse(el.querySelector('select')?.dataset.models||'[]')}catch{}
+    return {key,baseUrl,modelId,availableModels};
+  }).filter(x=>x.key);
   const ivMin=Math.max(1,parseInt(get('s-task-interval-min'))||40);
   const ivMax=Math.max(ivMin,parseInt(get('s-task-interval-max'))||70);
   return{
@@ -459,49 +562,60 @@ function readForm(){
     style:S.settings?.style||{},
     voiceClone:S.settings?.voiceClone||{},
     edit:{frameRate:parseFloat(get('s-frameRate'))||1},
+    system:{
+      launchAtLogin:document.getElementById('s-auto-launch')?.classList.contains('on')??true,
+      preventSleepOnTasks:S.settings?.system?.preventSleepOnTasks!==false
+    },
     taskDefaults:{
       platforms:get('s-task-platform')?get('s-task-platform').split(','):[],
       isOriginal:get('s-task-original')==='true',
       topics:get('s-task-topics').split(/[\s,，、]+/).filter(Boolean).map(x=>x.startsWith('#')?x:'#'+x),
       intervalMinutes:[ivMin,ivMax]
     },
-    api:{baseUrl:get('s-apiBaseUrl')||'https://apihub.agnes-ai.com/v1',apiKeys,apiKey:apiKeys[0]||'',modelId:get('s-apiModelId'),availableModels:S.settings?.api?.availableModels||[]}
+    api:{
+      keys:apiItems,
+      baseUrl:apiItems[0]?.baseUrl||'https://apihub.agnes-ai.com/v1',
+      apiKey:apiItems[0]?.key||'',
+      apiKeys:apiItems.map(i=>i.key),
+      modelId:apiItems[0]?.modelId||'',
+      availableModels:apiItems[0]?.availableModels||[]
+    }
   };
 }
 
 async function loadApiUsage() {
-  const box = document.getElementById('api-usage-box');
-  if (!box) return;
+  const list = document.getElementById('api-keys-list');
+  if (!list) return;
   try {
     const usage = await window.antbot.apiUsage();
-    if (!usage || !usage.length) { box.innerHTML = '<div class="api-usage-empty">输入 API Key 后显示额度</div>'; return; }
-    // 帧率设置：value 表示多少秒一帧，帧率 = 1/value 帧/秒
-    const frameInterval = S.settings?.edit?.frameRate || 1; // 秒/帧
-    const fps = 1 / frameInterval; // 帧/秒
-    const requestsPerSecond = fps;
-    box.innerHTML = usage.map(u => {
+    const map = new Map((usage || []).map(u => [u.keyMasked, u]));
+    const items = list.querySelectorAll('.api-key-item');
+    let filled = 0;
+    items.forEach(item => {
+      const key = item.querySelector('input[name="apiKey"]')?.value.trim() || '';
+      const box = item.querySelector('.api-key-usage');
+      if (!key || !box) return;
+      const masked = key.length >= 8 ? key.slice(0, 4) + '***' + key.slice(-4) : '***';
+      const u = map.get(masked);
+      if (!u) { box.innerHTML = ''; return; }
+      filled++;
       const pct = u.limit > 0 ? Math.round((u.used / u.limit) * 100) : 0;
-      const totalSeconds = u.remaining > 0 ? Math.floor(u.remaining / requestsPerSecond) : 0;
-      const hours = Math.floor(totalSeconds / 3600);
-      const minutes = Math.floor((totalSeconds % 3600) / 60);
-      const seconds = totalSeconds % 60;
-      let durationText;
-      if (totalSeconds <= 0) {
-        durationText = '已用尽';
-      } else if (hours > 0) {
-        durationText = `${hours}小时${minutes}分`;
-      } else if (minutes > 0) {
-        durationText = `${minutes}分${seconds}秒`;
-      } else {
-        durationText = `${seconds}秒`;
+      const exhausted = u.remaining <= 0 ? ' · <span class="api-usage-exhausted">额度已用尽，将自动切换下一个 Key</span>' : '';
+      box.innerHTML = `<div class="api-usage-bar"><div class="api-usage-bar-fill" style="width:${pct}%"></div></div>
+        <div class="api-usage-meta">今日已用 ${u.used}/${u.limit} · 失败 ${u.failed} · 限频 ${u.rateLimited}${exhausted}</div>`;
+    });
+    if (!filled) {
+      const empty = list.querySelector('.api-usage-empty');
+      if (!empty) {
+        const hint = document.createElement('div');
+        hint.className = 'api-usage-empty';
+        hint.textContent = '填写 API Key 并保存后显示当日用量';
+        list.appendChild(hint);
       }
-      return `<div class="api-usage-item">
-        <div class="api-usage-head"><span class="api-usage-key">${esc(u.keyMasked)}</span><span class="api-usage-remain">可剪辑 ${durationText}</span></div>
-        <div class="api-usage-bar"><div class="api-usage-bar-fill" style="width:${pct}%"></div></div>
-        <div class="api-usage-meta">已用 ${u.used}/${u.limit} · 失败 ${u.failed} · 限频 ${u.rateLimited}</div>
-      </div>`;
-    }).join('');
-  } catch { box.innerHTML = ''; }
+    } else {
+      list.querySelectorAll('.api-usage-empty').forEach(e => e.remove());
+    }
+  } catch {}
 }
 
 /* ── Render: VC/Data/Status ── */
@@ -539,11 +653,11 @@ function renderStatus(){
 }
 function renderBtns(){if(el.badge&&S.app)el.badge.textContent=`v${S.app.version}`;toggleSendBtn()}
 function toggleSendBtn(){if(!el.runBtn||!el.input)return;el.runBtn.classList.toggle('show',el.input.value.trim().length>0)}
-function renderAll(opts={}){renderStatus();renderChips();renderVC();renderData();fillForm();renderBtns();renderChat(opts);renderStats()}
+function renderAll(opts={}){renderStatus();renderChips();renderVC();renderData();fillForm();renderBtns();renderChat(opts);renderStats();injectIcons()}
 
 /* ── State ── */
 function reconcile(){const ids=new Set((S.history||[]).map(r=>r.id));S.pending=S.pending.filter(b=>!ids.has(b.runId))}
-function appendPending(p){if(!p.runId||!p.inputText)return;S.pending.push({runId:p.runId,txt:p.inputText,createdAt:new Date().toISOString()});reconcile()}
+function appendPending(p){if(!p.runId||!p.inputText)return;S.pending.push({runId:p.runId,txt:p.inputText,rules:p.rules||null,createdAt:new Date().toISOString()});reconcile()}
 function applySnap(s){
   if(s.app)S.app=s.app;
   if(s.settings&&!settingsDirty)S.settings=s.settings;
@@ -700,7 +814,7 @@ async function addEditVideos(filePaths) {
       path: fp, name,
       style: S.editDefaults.style, voice: S.editDefaults.voice, subtitle: S.editDefaults.subtitle,
       voiceProfileId: voice?.id || '', voiceProfileName: voice?.name || '',
-      apiConfig: { baseUrl: apiCfg.baseUrl, apiKey: apiCfg.apiKey, apiKeys: apiCfg.apiKeys || [apiCfg.apiKey].filter(Boolean), modelId: apiCfg.modelId },
+      apiConfig: apiCfg,
     };
   });
   try {
@@ -1312,8 +1426,8 @@ async function checkDeps() {
     { key: 'python', name: 'Python', desc: '运行环境' },
     { key: 'whisper', name: 'Whisper', desc: '语音识别' },
   ];
-  list.innerHTML = `<table class="table table-sm"><thead><tr><th>工具</th><th>用途</th><th>状态</th><th></th></tr></thead><tbody>` +
-    deps.map(d => `<tr data-dep-key="${d.key}"><td class="font-semibold">${d.name}</td><td class="text-base-content/60">${d.desc}</td><td><span class="flex items-center gap-1"><span class="loading loading-spinner loading-xs"></span>检查中...</span></td><td></td></tr>`).join('') +
+  list.innerHTML = `<table class="deps-table"><thead><tr><th>工具</th><th>用途</th><th>状态</th><th></th></tr></thead><tbody>` +
+    deps.map(d => `<tr data-dep-key="${d.key}"><td class="font-semibold">${d.name}</td><td class="text-muted">${d.desc}</td><td><span class="flex items-center gap-1"><span class="spinner spinner-xs"></span>检查中...</span></td><td></td></tr>`).join('') +
     '</tbody></table>';
   for (const d of deps) {
     try {
@@ -1323,7 +1437,7 @@ async function checkDeps() {
         const cells = row.querySelectorAll('td');
         cells[2].innerHTML = r.ok
           ? `<span class="flex items-center gap-1"><span class="icon" data-icon="check" style="color:var(--success)"></span>${r.version || '已安装'}</span>`
-          : '<span class="text-base-content/50">未安装</span>';
+          : '<span class="text-muted">未安装</span>';
         cells[3].innerHTML = r.ok
           ? ''
           : '<button class="btn btn-xs btn-primary" data-dep-install="' + d.key + '" type="button">安装</button>';
@@ -1336,7 +1450,7 @@ async function checkDeps() {
       const row = btn.closest('tr');
       const origHtml = btn.innerHTML;
       btn.disabled = true;
-      btn.innerHTML = '<span class="loading loading-spinner loading-xs"></span> 安装中...';
+      btn.innerHTML = '<span class="spinner spinner-xs"></span> 安装中...';
       try {
         const r = await window.antbot.installDep(tool);
         if (r.ok) {
@@ -1371,21 +1485,21 @@ function renderModels() {
   if (!list) return;
   const entries = Object.entries(S.models);
   if (!entries.length) { list.innerHTML = '<div class="helper-text">暂无可用模型</div>'; return; }
-  list.innerHTML = `<table class="table table-sm"><thead><tr><th>模型</th><th>大小</th><th>状态</th><th></th></tr></thead><tbody>` +
+  list.innerHTML = `<table class="deps-table"><thead><tr><th>模型</th><th>大小</th><th>状态</th><th></th></tr></thead><tbody>` +
     entries.map(([key, m]) => {
     const isHf = !!m.hfDownload;
     const useMirror = S.settings?.models?.useHfMirror;
     return `<tr data-model-key="${esc(key)}">
       <td><div class="font-semibold text-sm">${esc(m.name)}</div><div class="model-progress" id="model-progress-${esc(key)}"></div></td>
-      <td class="text-base-content/60">${esc(m.size)}</td>
-      <td>${m.downloaded ? '<span class="flex items-center gap-1"><span class="icon" data-icon="check" style="color:var(--success)"></span>已下载</span>' : '<span class="text-base-content/40">未下载</span>'}</td>
+      <td class="text-muted">${esc(m.size)}</td>
+      <td>${m.downloaded ? '<span class="flex items-center gap-1"><span class="icon" data-icon="check" style="color:var(--success)"></span>已下载</span>' : '<span class="text-muted">未下载</span>'}</td>
       <td><div class="flex items-center gap-1">
         ${m.downloaded
           ? `<button class="btn btn-xs btn-ghost" data-model-delete="${esc(key)}" type="button">删除</button>`
           : `<button class="btn btn-xs btn-primary" data-model-download="${esc(key)}" type="button">下载</button>
              <button class="btn btn-xs btn-ghost" data-model-browser="${esc(key)}" type="button">浏览器</button>
              <button class="btn btn-xs btn-ghost" data-model-import="${esc(key)}" data-hf="${isHf ? '1' : ''}" type="button">导入</button>
-             ${isHf ? `<label class="flex items-center gap-1 text-xs cursor-pointer"><input type="checkbox" class="checkbox checkbox-xs" data-model-mirror ${useMirror ? 'checked' : ''} /> 国内镜像</label>` : ''}
+             ${isHf ? `<label class="flex items-center gap-1 text-xs cursor-pointer"><input type="checkbox" class="checkbox" data-model-mirror ${useMirror ? 'checked' : ''} /> 国内镜像</label>` : ''}
              `
         }
       </div></td>
@@ -1399,7 +1513,7 @@ async function checkVoicebox() {
   const container = document.getElementById('voicebox-items');
   const pathEl = document.getElementById('voicebox-path');
   if (!container) return;
-  container.innerHTML = '<div class="voicebox-item flex items-center gap-2"><span class="loading loading-spinner loading-sm"></span><span class="voicebox-name">检测中...</span></div>';
+  container.innerHTML = '<div class="voicebox-item flex items-center gap-2"><span class="spinner"></span><span class="voicebox-name">检测中...</span></div>';
   try {
     const result = await window.antbot.voiceboxCheck();
     if (pathEl) pathEl.textContent = result.venvPath || '-';
@@ -1419,30 +1533,17 @@ async function checkVoicebox() {
 }
 
 /* ── Actions ── */
-async function startTasks(forceItems){const raw=el.input?.value?.trim();const pv=S.preview;if(!raw&&!(pv.items&&pv.items.length)){toast('请输入任务','error');return}if(!S.editDefaults?.style&&!S.selectedStyle){toast('建议先在底部菜单选择风格，否则剪辑将无风格指导','info')}try{let payload=raw;const useItems=forceItems||((pv.items&&pv.items.length&&!pv.empty)&&(pv.mode==='optimized'||pv.edited));if(useItems){payload=pv.items.map(t=>({id:t.id,rawLine:t.rawLine,taskName:t.taskName,isOriginal:!!t.isOriginal,videoUrl:t.videoUrl,timeRange:t.timeRange||'',platforms:t.platforms||[],publishCopy:t.publishCopy||'',publishTopics:t.publishTopics||[],campaignName:t.campaignName||'',publishAt:t.publishAt?new Date(t.publishAt):null}))}const r=await window.antbot.startTasks(payload);appendPending({runId:r.runId,inputText:raw||''});el.input.value='';autoInput();queuePreview();if(r.warnings?.length)toast(r.warnings[0],'info');toast(r.queued?`已排队 (${r.queuePosition})`:`已启动 ${r.taskCount} 条`,'success');renderChat({stick:true})}catch(e){toast(`失败: ${e.message}`,'error')}}
+async function startTasks(forceItems){const raw=el.input?.value?.trim();const pv=S.preview;if(!raw&&!(pv.items&&pv.items.length)){toast('请输入任务','error');return}if(!S.editDefaults?.style&&!S.selectedStyle){toast('建议先在底部菜单选择风格，否则剪辑将无风格指导','info')}try{let payload=raw;const useItems=forceItems||((pv.items&&pv.items.length&&!pv.empty)&&(pv.mode==='optimized'||pv.edited));if(useItems){payload=pv.items.map(t=>({id:t.id,rawLine:t.rawLine,taskName:t.taskName,isOriginal:!!t.isOriginal,videoUrl:t.videoUrl,timeRange:t.timeRange||'',platforms:t.platforms||[],publishCopy:t.publishCopy||'',publishTopics:t.publishTopics||[],campaignName:t.campaignName||'',publishAt:t.publishAt?new Date(t.publishAt):null}))}const r=await window.antbot.startTasks(payload);appendPending({runId:r.runId,inputText:raw||'',rules:useItems&&pv.items&&pv.items.length?pv.items:null});el.input.value='';autoInput();queuePreview();if(r.warnings?.length)toast(r.warnings[0],'info');toast(r.queued?`已排队 (${r.queuePosition})`:`已启动 ${r.taskCount} 条`,'success');renderChat({stick:true})}catch(e){toast(`失败: ${e.message}`,'error')}}
 async function stopTasks(){if(!window.confirm('确认停止所有任务？'))return;try{await window.antbot.stopTasks();toast('已停止','success');await refreshAppState().catch(()=>{})}catch(e){toast(`失败: ${e.message}`,'error')}}
 async function saveSettings(){
   try{
     const form=readForm();
     S.settings=await window.antbot.updateSettings(form);
+    loadApiUsage().catch(()=>{});
   }catch(e){console.error('[saveSettings]',e)}
 }
 async function runVC(){const f=el.vcForm;if(!f||!S.settings)return;const sp=f.samplePath?.value?.trim(),rt=f.referenceText?.value?.trim();if(!sp){toast('请选择样本','error');return}if(!rt){toast('请填写文本','error');return}S.vc={running:true,status:'running',step:'准备中',pct:5,logs:[]};renderVC();try{S.settings=await window.antbot.updateSettings({voiceClone:{...S.settings.voiceClone,samplePath:sp,referenceText:rt,profileName:f.profileName?.value?.trim(),language:f.language?.value||'zh'}});const vc=await window.antbot.runVoiceClone({samplePath:sp,referenceText:rt,profileName:f.profileName?.value?.trim(),language:f.language?.value||'zh'});S.settings.voiceClone={...S.settings.voiceClone,...vc};S.vc={running:false,status:'completed',step:'完成',pct:100,logs:[`完成: ${vc.voiceId}`]};toast(`克隆完成: ${vc.voiceId}`,'success');renderAll();await runStartup()}catch(e){S.vc={running:false,status:'failed',step:'失败',pct:0,logs:[e.message]};toast(`失败: ${e.message}`,'error')}renderVC()}
 async function loadData(){try{S.dataInfo=await window.antbot.getDataInfo();renderData()}catch{}}
-async function migrate(){
-  try{
-    const r=await window.antbot.migrateData();
-    const items=r.results||r.migrations||[];
-    if(items.length){
-      const details=items.map(i=>`${i.item}: ${i.status}`).join(', ');
-      toast(`迁移完成 — ${details}`,'success',5000);
-    }else{
-      toast('无需迁移','info');
-    }
-    await loadData();
-    await refreshAppState();
-  }catch(e){toast(`迁移失败: ${e.message}`,'error')}
-}
 function findTask(tid){for(const r of S.history||[])for(const i of r.items||[])if(String(i.taskId)===String(tid))return i;return null}
 
 /* ── Voice list (cloned voices) ── */
@@ -1773,33 +1874,50 @@ function bind(){
   // Auto-save on settings input change (settings page)
   document.getElementById('view-settings')?.addEventListener('change',()=>{void saveSettings();});
   document.getElementById('view-settings')?.addEventListener('input',(e)=>{if(e.target.matches('input[type=password],input[type=text],input[type=number]')){clearTimeout(S._settingsSaveTimer);S._settingsSaveTimer=setTimeout(()=>void saveSettings(),800);}});
-  // Fetch models button
-  document.getElementById('fetch-models-btn')?.addEventListener('click',async()=>{
-    const apiKey=[...document.querySelectorAll('#api-keys-list input[name="apiKey"]')].map(e=>e.value.trim()).filter(Boolean)[0]||'';
-    const baseUrl=document.getElementById('s-apiBaseUrl')?.value?.trim()||'https://apihub.agnes-ai.com/v1';
-    if(!apiKey){toast('请先输入 API Key','error');return;}
-    toast('正在获取模型...','info');
-    const result=await window.antbot.fetchModels({baseUrl,apiKey});
-    if(result.ok&&result.models.length){
-      S.settings.api={...S.settings.api,availableModels:result.models};
-      await saveSettings();
-      fillForm();
-      toast(`发现 ${result.models.length} 个模型，请选择一个`,'info');
-    }else{toast(result.message||'获取模型失败','error');}
+  // 开机自动启动开关（保存后主进程自动同步 app.setLoginItemSettings）
+  document.getElementById('s-auto-launch')?.addEventListener('click',()=>{
+    const el=document.getElementById('s-auto-launch');
+    if(!el)return;
+    el.classList.toggle('on');
+    void saveSettings();
   });
-  // Add/remove API key buttons
+  // Add/remove/fetch API key buttons（每 key 独立配置）
   document.getElementById('add-api-key-btn')?.addEventListener('click',()=>{
     const list=document.getElementById('api-keys-list');if(!list)return;
-    const count=list.querySelectorAll('.s-input-row').length+1;
-    const row=document.createElement('div');row.className='s-input-row';
-    row.innerHTML=`<input name="apiKey" type="password" placeholder="Key ${count}" /><button type="button" class="btn btn-sm btn-ghost s-key-vis" title="显示/隐藏">👁</button><button type="button" class="btn btn-sm btn-ghost s-key-del" title="删除">✕</button>`;
-    list.appendChild(row);
-    row.querySelector('input').focus();
+    const count=list.querySelectorAll('.api-key-item').length+1;
+    const last=normalizeKeysForForm(S.settings?.api).pop()||{};
+    const item=document.createElement('div');
+    item.innerHTML=apiKeyItemHtml({key:'',baseUrl:last.baseUrl||S.settings?.api?.baseUrl||'',modelId:'',availableModels:last.availableModels||[]},count);
+    list.appendChild(item.firstElementChild);
+    injectIcons();
+    item.querySelector('input[name="apiKey"]')?.focus();
+    void saveSettings();
   });
-  document.getElementById('api-keys-list')?.addEventListener('click',(e)=>{
-    const del=e.target.closest('.s-key-del');if(del){const row=del.closest('.s-input-row');if(row)row.remove();void saveSettings();return;}
-    const vis=e.target.closest('.s-key-vis');if(vis){const inp=vis.closest('.s-input-row')?.querySelector('input');if(inp)inp.type=inp.type==='password'?'text':'password';}
+  document.getElementById('api-keys-list')?.addEventListener('click',async(e)=>{
+    const del=e.target.closest('.s-key-del');
+    if(del){del.closest('.api-key-item')?.remove();await saveSettings();loadApiUsage();return;}
+    const vis=e.target.closest('.s-key-vis');
+    if(vis){const inp=vis.closest('.s-input-row')?.querySelector('input[name="apiKey"]');if(inp)inp.type=inp.type==='password'?'text':'password';return;}
+    const fetchBtn=e.target.closest('.s-key-models');
+    if(fetchBtn){
+      const item=fetchBtn.closest('.api-key-item');
+      const apiKey=item?.querySelector('input[name="apiKey"]')?.value?.trim()||'';
+      const baseUrl=item?.querySelector('input[name="apiBaseUrl"]')?.value?.trim()||'https://apihub.agnes-ai.com/v1';
+      if(!apiKey){toast('请先填写 API Key','error');return;}
+      fetchBtn.disabled=true;fetchBtn.textContent='获取中...';
+      try{
+        const result=await window.antbot.fetchModels({baseUrl,apiKey});
+        if(result.ok&&result.models.length){
+          const sel=item.querySelector('select');
+          if(sel){sel.dataset.models=JSON.stringify(result.models);sel.innerHTML=result.models.map(m=>`<option value="${esc(m.id)}">${esc(m.name)}</option>`).join('');}
+          await saveSettings();
+          toast(`发现 ${result.models.length} 个模型，请选择一个`,'info');
+        }else{toast(result.message||'获取模型失败','error');}
+      }catch(err){toast(err.message,'error')}
+      fetchBtn.disabled=false;fetchBtn.textContent='获取模型';
+    }
   });
+  // 模型选择变化 → 保存（change 冒泡到 view-settings）
   // Voice clone
   el.vcRun?.addEventListener('click',()=>void runVC());el.vcClose?.addEventListener('click',()=>closeDlg(el.vcDlg));
   el.vcPick?.addEventListener('click',async()=>{try{const f=await window.antbot.pickAudioFile();if(f&&el.vcForm)el.vcForm.samplePath.value=f}catch(e){toast(e.message,'error')}});
@@ -1807,8 +1925,7 @@ function bind(){
   el.dataOpen?.addEventListener('click',async()=>{try{const r=await window.antbot.openDataDir();toast(`已打开: ${r.path}`,'info')}catch(e){toast(e.message,'error')}});
   el.dataOpenLog?.addEventListener('click',async()=>{try{await window.antbot.openExternal(S.dataInfo?.logDir||'')}catch(e){toast(e.message,'error')}});
   el.dataOpenMain?.addEventListener('click',async()=>{try{const r=await window.antbot.openDataDir();toast(`已打开: ${r.path}`,'info')}catch(e){toast(e.message,'error')}});
-  el.dataMigrate?.addEventListener('click',()=>void migrate());el.dataClose?.addEventListener('click',()=>closeDlg(el.dataDlg));
-  document.getElementById('migrate-old-btn')?.addEventListener('click',()=>void migrate());
+  el.dataClose?.addEventListener('click',()=>closeDlg(el.dataDlg));
   publishPage.bind();
   downloadPage.bind();
   // Task input
@@ -1825,6 +1942,22 @@ function bind(){
   });
   // Chat actions
   el.stream?.addEventListener('click',e=>{
+    const rawBtn=e.target.closest('[data-msg-raw]');
+    if(rawBtn){
+      const group=rawBtn.closest('.msg-user');
+      const rawBox=group?.querySelector('.msg-raw');
+      if(rawBox){const shown=rawBox.classList.toggle('show');rawBtn.textContent=shown?'隐藏原文':'原文'}
+      return;
+    }
+    const copyBtn=e.target.closest('[data-msg-copy]');
+    if(copyBtn){
+      navigator.clipboard.writeText(copyBtn.dataset.copy||'').then(()=>{copyBtn.textContent='已复制';setTimeout(()=>copyBtn.textContent='复制',1500)});
+      return;
+    }
+    const ruleToggle=e.target.closest('[data-rule-toggle]');
+    if(ruleToggle){ruleToggle.closest('.msg-rules')?.classList.toggle('open');return}
+    const detailToggle=e.target.closest('[data-task-detail]');
+    if(detailToggle){detailToggle.closest('.task-detail')?.classList.toggle('open');return}
     const stopBtn=e.target.closest('[data-stop]');
     const skipBtn=e.target.closest('[data-skip]');
     const retryBtn=e.target.closest('[data-retry]');
@@ -1892,9 +2025,9 @@ function bind(){
       });
     }
   });
-  // Context menu: remove record (history / live / persisted) on user messages or task cards
+  // Context menu: remove record (history / live / persisted) on run groups
   el.stream?.addEventListener('contextmenu',e=>{
-    const holder=e.target.closest('.msg-user')||e.target.closest('.msg-sys');
+    const holder=e.target.closest('.run-group');
     if(!holder){closeAllPopups();return}
     const runId=holder.dataset.runId;
     const isPersisted=holder.dataset.persisted==='1';
@@ -1998,7 +2131,7 @@ function bind(){
       const key = dlBtn.dataset.modelDownload;
       // Replace download button with cancel button
       const td = dlBtn.closest('td');
-      dlBtn.outerHTML = `<button class="btn btn-xs btn-error" data-model-cancel="${esc(key)}" type="button">取消</button>`;
+      dlBtn.outerHTML = `<button class="btn btn-xs btn-danger" data-model-cancel="${esc(key)}" type="button">取消</button>`;
       // Hide other action buttons in same cell
       td?.querySelectorAll('[data-model-browser],[data-model-import],[data-model-mirror]')?.forEach(el => el.style.display = 'none');
       td?.querySelector('label')?.querySelector('input[data-model-mirror]')?.closest('label')?.style.setProperty('display', 'none');
@@ -2231,42 +2364,118 @@ function bind(){
   bindSubtitleVoiceEvents();
 }
 
-/* ── Init ── */
-async function init(){
-  // Remove splash immediately if anime not loaded, otherwise animate
+/* ── 启动动画：物理弹跳 + 圆形遮罩展开 ── */
+const SPLASH_COLORS=['#808ABC','#1CE544','#1BD9E0','#0366F2','#7D41D7','#E632A7','#F55829','#F0C91B'];
+const _splash={raf:0,timer:null,loadDone:false,expanding:false,removed:false};
+
+/* 物理弹跳：重力 + 恢复系数衰减（REST 0.95 弹跳力大，首次反弹约到窗口中间偏上一颗球）；
+   加载完成且触底反弹两次后，在反弹最高点启动展开——物理继续跑，mask 圆心跟随弹跳 */
+function initSplash(){
   const splash=document.getElementById('splash');
   const ball=document.getElementById('splash-ball');
-  if(splash&&ball&&typeof anime!=='undefined'){
-    const cy=window.innerHeight/2;
-    try{anime({targets:ball,top:[-60,cy-20],duration:600,easing:'easeInQuad',complete:()=>{
-      anime({targets:ball,top:[cy-20,cy-40],duration:200,easing:'easeOutQuad',complete:()=>{
-        anime({targets:ball,top:[cy-40,cy],duration:200,easing:'easeInQuad',complete:()=>{
-          const sz=Math.max(window.innerWidth,window.innerHeight)*3;
-          anime({targets:ball,width:[40,sz],height:[40,sz],marginLeft:[-20,-sz/2],top:[cy,-sz/2+cy],duration:500,easing:'easeInCubic',complete:()=>{
-            splash.classList.add('hide');setTimeout(()=>splash.remove(),500);
-          }});
-        }});
-      }});
-    }});}catch(e){splash.remove()}
-  } else if(splash) {
-    splash.remove();
+  if(!splash||!ball){_splash.removed=true;return;}
+  ball.style.background=SPLASH_COLORS[Math.floor(Math.random()*SPLASH_COLORS.length)];
+  const G=4000,REST=0.707,R=20;
+  const reset=()=>({y:-(window.innerHeight/2+60),vy:0,bounces:0,justBounced:false});
+  _splash.phys=reset();
+  let last=performance.now(),prevVy=0;
+  const cx=()=>window.innerWidth/2;
+  const groundY=()=>window.innerHeight/2-R;
+  ball.style.transform=`translateY(${_splash.phys.y}px)`;
+
+  const frame=(now)=>{
+    if(_splash.removed)return;
+    const dt=Math.min((now-last)/1000,0.032);last=now;
+    const st=_splash.phys;
+    st.vy+=G*dt;st.y+=st.vy*dt;
+    const gy=groundY();
+    st.justBounced=false;
+    if(st.y>=gy){st.y=gy;st.vy=-st.vy*REST;st.bounces++;st.justBounced=true;}
+    if(!_splash.expanding)ball.style.transform=`translateY(${st.y}px)`;
+    // 展开时机：已反弹两次，且在反弹最高点（上升转下降，vy 负转正，非触底帧）
+    const apex=!st.justBounced&&prevVy<0&&st.vy>=0;
+    if(_splash.loadDone&&st.bounces>=2&&apex&&!_splash.expanding){
+      startSplashExpand(window.innerWidth/2,window.innerHeight/2+st.y,ball); // 启动展开，物理停止
+      return;
+    }
+    prevVy=st.vy;
+    _splash.raf=requestAnimationFrame(frame);
+  };
+  _splash.raf=requestAnimationFrame(frame);
+
+  // 10s 超时：未加载完成则当前球淡出，新球重新掉落
+  _splash.timer=setInterval(()=>{
+    if(_splash.loadDone||_splash.expanding||_splash.removed){clearInterval(_splash.timer);return;}
+    _splash.phys=reset();last=performance.now();prevVy=0;
+    ball.style.transition='opacity 300ms';ball.style.opacity='0';
+    setTimeout(()=>{
+      ball.style.transition='';ball.style.opacity='1';
+      ball.style.transform=`translateY(${_splash.phys.y}px)`;
+      last=performance.now();
+    },320);
+  },10000);
+}
+function finishSplash(){_splash.loadDone=true;}
+
+/* 圆形遮罩展开：mask 圆孔（孔内=界面，孔外=背景色）与球同步放大（圆心固定，不再弹跳），
+   球放大到自身 1.5x 时渐变消失，圆孔继续放大覆盖全窗。
+   曲线 easeOutQuint（结尾非常缓和），总时长 900ms */
+function startSplashExpand(cx,cy,ball){
+  if(_splash.expanding||_splash.removed)return;
+  _splash.expanding=true;
+  clearInterval(_splash.timer);
+  const splash=document.getElementById('splash');
+  const bg=document.getElementById('splash-bg');
+  // 覆盖整个窗口：按球心到四角的最远距离 + 余量（底部放大也能完全覆盖）
+  const maxR=Math.sqrt(Math.max(cx,window.innerWidth-cx)**2+Math.max(cy,window.innerHeight-cy)**2)+50;
+  const dur=1300,t0=performance.now();
+  const ease=p=>1-Math.pow(1-p,5); // easeOutQuint：结尾非常缓和
+  const frame=(now)=>{
+    const p=Math.min((now-t0)/dur,1);
+    const r=20+(maxR-20)*ease(p);
+    // 圆心固定为展开时刻的球心（物理已停止）
+    if(bg)bg.style.mask=`radial-gradient(circle ${r}px at ${cx}px ${cy}px, transparent ${r-0.5}px, black ${r}px)`;
+    if(ball){
+      const d=Math.round(r*2);
+      ball.style.width=d+'px';
+      ball.style.height=d+'px';
+      ball.style.left=(cx-r)+'px';
+      ball.style.top=(cy-r)+'px';
+      ball.style.transform='translate(-50%,-50%)'; // 覆盖 CSS 初始位移，中心对齐像素定位
+      ball.style.background=getComputedStyle(ball).backgroundColor;
+      // 球渐变消失：放大到自身 1.5x（半径 r 20→30）时完全消失，界面接管
+      ball.style.opacity=r<=20?1:(r>=30?0:String(Math.max(0,1-(r-20)/10)));
+    }
+    if(p<1){_splash.raf=requestAnimationFrame(frame);return;}
+    // 展开完成：移除 splash（mask 随元素释放），动画全部停止
+    _splash.removed=true;
+    if(splash)splash.remove();
+  };
+  _splash.raf=requestAnimationFrame(frame);
+}
+
+/* ── Init ── */
+async function init(){
+  initSplash();
+  try{
+    // 数据加载与启动动画并行；渲染发生在 splash 遮罩之下，对用户不可见
+    initTheme();injectIcons();bind();initResize();initDialogClose();syncSidebar();
+    await loadUISettings();
+    // 先加载风格和音色（本地文件读取很快），再渲染，避免空状态闪烁
+    await Promise.all([loadStyles(), loadVoices()]);
+    const initState=await window.antbot.getInitialState();
+    applySnap(initState);renderAll({stick:true});queuePreview();
+    await runStartup();
+    await loadData();
+    await loadModels();
+    loadEditTasks();
+
+    // 加载持久化的主控任务（重新发布状态）
+    try { S.persistedTasks = await window.antbot.getPersistedTasks() || []; } catch { S.persistedTasks = []; }
+    renderChat();
+  }finally{
+    // 无论成功失败都放行 splash 展开，防止卡死在加载动画
+    finishSplash();
   }
-
-  // Initialize app regardless of splash
-  initTheme();injectIcons();bind();initResize();initDialogClose();syncSidebar();
-  await loadUISettings();
-  // 先加载风格和音色（本地文件读取很快），再渲染，避免空状态闪烁
-  await Promise.all([loadStyles(), loadVoices()]);
-  const initState=await window.antbot.getInitialState();
-  applySnap(initState);renderAll({stick:true});queuePreview();
-  await runStartup();
-  try{await window.antbot.migrateData()}catch{}
-  await loadData();
-  await loadModels();
-  loadEditTasks();
-
-  // 加载持久化的主控任务（重新发布状态）
-  try { S.persistedTasks = await window.antbot.getPersistedTasks() || []; } catch { S.persistedTasks = []; }
-  renderChat();
 }
 init();

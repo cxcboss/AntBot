@@ -1,25 +1,85 @@
-const { recordUsage } = require('./usageTracker');
+const { recordUsage, getUsageSummary, maskKey } = require('./usageTracker');
 const { proxyFetch } = require('./proxyFetch');
 
-async function callApiWithKeyRotation(baseUrl, apiKeys, modelId, messages, maxTokens = 4000, abortSignal, log = () => {}) {
-  const keys = Array.isArray(apiKeys) ? apiKeys.filter(Boolean) : [apiKeys].filter(Boolean);
+/**
+ * 归一化 API 配置为统一结构 [{ key, baseUrl, modelId }]
+ * 支持新结构 settings.api.keys = [{id, key, baseUrl, modelId, availableModels}]
+ * 兼容旧结构 { baseUrl, apiKey, apiKeys, modelId }
+ */
+function normalizeApiKeys(api) {
+  if (!api || typeof api !== 'object') return [];
+  if (Array.isArray(api.keys) && api.keys.length) {
+    return api.keys
+      .filter(k => k && k.key)
+      .map(k => ({
+        key: k.key,
+        baseUrl: k.baseUrl || api.baseUrl || '',
+        modelId: k.modelId || api.modelId || ''
+      }));
+  }
+  const legacyKeys = (api.apiKeys || []).filter(Boolean);
+  if (legacyKeys.length) {
+    return legacyKeys.map(k => ({ key: k, baseUrl: api.baseUrl || '', modelId: api.modelId || '' }));
+  }
+  if (api.apiKey) {
+    return [{ key: api.apiKey, baseUrl: api.baseUrl || '', modelId: api.modelId || '' }];
+  }
+  return [];
+}
+
+function hasApiConfig(api) {
+  return normalizeApiKeys(api).length > 0;
+}
+
+/**
+ * 带轮值的 AI 调用。
+ * 新签名：callApiWithKeyRotation(api, messages, maxTokens, abortSignal, log)
+ *   api = settings.api 或 { keys: [{key, baseUrl, modelId}] } 或旧 { baseUrl, apiKey, apiKeys, modelId }
+ * 旧签名（兼容）：callApiWithKeyRotation(baseUrl, apiKeys, modelId, messages, maxTokens, abortSignal, log)
+ * 轮值规则：优先使用当日额度未用完的 key（按 api-usage.json）；网络错误重试 2 次；429 限频切换下一个 key。
+ */
+async function callApiWithKeyRotation(apiConfig, messages, maxTokens = 4000, abortSignal, log = () => {}) {
+  // 兼容旧签名
+  if (typeof apiConfig === 'string') {
+    const baseUrl = apiConfig;
+    const apiKeys = arguments[1];
+    const modelId = arguments[2];
+    const msgs = arguments[3];
+    const mt = arguments[4] ?? 4000;
+    const sig = arguments[5];
+    const lg = arguments[6] || (() => {});
+    apiConfig = { baseUrl, apiKeys, apiKey: Array.isArray(apiKeys) ? apiKeys[0] : apiKeys, modelId };
+    messages = msgs; maxTokens = mt; abortSignal = sig; log = lg;
+  }
+
+  const keys = normalizeApiKeys(apiConfig);
   if (!keys.length) throw new Error('未配置 API Key');
+
+  // 按当日使用量轮值：优先选剩余额度 > 0 的 key（一个限额用完自动切下一个）
+  let usageMap = null;
+  try {
+    const usage = await getUsageSummary(keys.map(k => k.key));
+    usageMap = new Map(usage.map(u => [u.keyMasked, u]));
+  } catch {}
+  const usable = usageMap ? keys.filter(k => (usageMap.get(maskKey(k.key))?.remaining ?? 1) > 0) : keys;
+  const pool = usable.length ? usable : keys;
+
   let lastError = null;
-  for (let i = 0; i < keys.length; i++) {
-    // 每个 key 最多重试 2 次（网络错误时）
+  for (let i = 0; i < pool.length; i++) {
+    const k = pool[i];
     for (let retry = 0; retry < 2; retry++) {
       try {
-        const result = await callApi(baseUrl, keys[i], modelId, messages, maxTokens, abortSignal);
-        await recordUsage(keys[i], true).catch(() => {});
+        const result = await callApi(k.baseUrl, k.key, k.modelId, messages, maxTokens, abortSignal);
+        await recordUsage(k.key, true).catch(() => {});
         return result;
       } catch (err) {
         lastError = err;
         if (err.message === '已取消') throw err;
         const isRateLimit = err.message.includes('429');
         const isNetwork = err.message.includes('网络') || err.message.includes('ECONNRESET') || err.message.includes('ECONNREFUSED') || err.message.includes('UND_ERR') || err.message.includes('超时');
-        await recordUsage(keys[i], false, isRateLimit).catch(() => {});
+        await recordUsage(k.key, false, isRateLimit).catch(() => {});
         if (isRateLimit) {
-          if (i < keys.length - 1) { log(`Key ${i + 1} 限频，切换到 Key ${i + 2}`); break; }
+          if (i < pool.length - 1) { log(`Key ${i + 1} 限频，切换到下一个 Key`); break; }
           throw err;
         }
         if (isNetwork && retry < 1) {
@@ -82,4 +142,4 @@ async function callApi(baseUrl, apiKey, modelId, messages, maxTokens = 4000, abo
   }
 }
 
-module.exports = { callApi, callApiWithKeyRotation };
+module.exports = { callApi, callApiWithKeyRotation, normalizeApiKeys, hasApiConfig };

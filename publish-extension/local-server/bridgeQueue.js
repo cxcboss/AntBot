@@ -1,4 +1,4 @@
-const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled']);
+const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled', 'login-required']);
 
 function nowIso() {
   return new Date().toISOString();
@@ -36,8 +36,17 @@ function createBridgeQueue({ maxHistory = 100, maxEvents = 200 } = {}) {
 
   const enqueue = (input) => {
     const command = normalizeCommand(input);
-    if (commands.has(command.id)) {
-      throw new Error(`桥接命令 ID 已存在：${command.id}`);
+    const existing = commands.get(command.id);
+    if (existing) {
+      // M2: 已终态的命令 ID 允许复用（客户端 stop 后立即重新发布等场景），
+      // 从队列/挂起中移除旧记录；未终态才拒绝
+      if (TERMINAL_STATUSES.has(existing.status)) {
+        const qIndex = queued.findIndex(r => r.id === existing.id);
+        if (qIndex >= 0) queued.splice(qIndex, 1);
+        pending.delete(existing.id);
+      } else {
+        throw new Error(`桥接命令 ID 已存在：${command.id}`);
+      }
     }
     const record = { ...command, status: 'queued' };
     queued.push(record);

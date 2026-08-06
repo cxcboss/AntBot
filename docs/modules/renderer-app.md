@@ -76,3 +76,21 @@ const publishPage = createPublishPage({ state: S, esc });
 - `esc()` 函数用于 HTML 转义
 - `injectIcons()` 在 DOM 更新后调用以注入 SVG 图标
 - `renderStatus()` 根据 `S.currentFeat` 显示不同页面的状态文字
+
+## 主控输入预览（preview-bar）
+
+- 输入框上方 `#preview-bar`（composer-preview）实时展示解析结果：任务数、来源标记（AI 优化/规则识别）、生效默认值（平台/原创/话题数/间隔）、前 5 条任务摘要（平台/原创/时间/活动/标题）、warnings
+- `S.preview` 结构：`{ count, items, warnings, source, defaults, error, empty, mode, edited }`（items 为**全部**解析任务），由 `refreshPreview()`（160ms 防抖）→ `window.antbot.parseTasks(raw, opts)` 填充，`renderPreview()` 渲染
+- **双模式**：`mode:'auto'` 直接发送走纯规则解析（`parseTasks(raw)` 无 smart，无 AI）；`mode:'optimized'` 点击 ✨ 优化按钮（`optimizeInput()` → `parseTasks(raw,{smart:true})` 带 AI）后进入，预览条底部出现「确定发送」按钮
+- 输入为空时隐藏预览条
+- **预览可编辑**：每行任务左侧 ✎ 按钮打开编辑面板（`openPvEditor`，chip-popup 风格）：平台（视频号/抖音/两者）、原创切换、时间（立即 / HH:mm / 明天 HH:mm，`parsePvTimeText` 解析）、标题、话题、活动，可删除单条；编辑后置 `S.preview.edited=true`
+- `startTasks()` 提交逻辑：`mode==='optimized' || edited` → 提交预览任务数组（含用户修改）；否则提交**原始文本**（直接发送语义，纯规则路径，无 AI）；输入框内容变化后自动回到 auto 模式重新解析
+- **右键清理历史**：聊天区 `#chat-stream` 上对 `.run-group` 右键弹出上下文菜单「删除此条记录（消息+任务）」（`window.antbot.clearHistory()` → `history:clear` IPC → `store.clearHistory()`），确认后清空 `S.history`/`S.pending` 并重渲染；运行中任务不受影响
+
+## 主控时间线（chat-stream）
+
+- **时间线组结构**：每条 run（消息+其任务）渲染为一个 `.run-group`，组间用分割线分隔；组内依次为 `.msg-time`（时间戳）、`.msg-user`（消息正文，**平铺无卡片**）、`.msg-rules`（可选规则折叠面板）、`.task-stack`（任务卡片）
+- **消息操作行**：`.msg-actions` 内「原文/复制」按钮，hover 时淡入；点击「原文」展开未缩略文本（`.msg-raw`），点击「复制」写入剪贴板并反馈「已复制」；事件委托绑定在 `#chat-stream`（`data-msg-raw` / `data-msg-copy`）
+- **规则面板**：发送时若走了预览规则（AI 优化或编辑过），`appendPending` 携带 `rules`（= `S.preview.items`），消息下方渲染 `.msg-rules` 折叠面板（`makeRulesHtml`）：头部摘要「已按规则解析 N 条任务 · 原创 X · 平台 Y」，展开显示每条任务的结构化规则（平台/原创/活动/定时/话题/标题）。**仅当前会话内有效**（`S.pending` 内存数据；重启后历史消息不保留规则面板）
+- **任务卡片字段**：`taskCard(t)` 读取平台 `t.platforms || t.taskSnapshot.platforms`、原创 `t.isOriginal`、活动 `t.campaignName`、定时 `t.publishAt`、耗时 `t.duration`、执行配置 `t._exec`（`{styleName, voiceName, voiceover, subtitle}`，主进程 runTask 时快照写入）。元信息行展示平台/原创/活动/定时；「执行详情」展开区展示耗时/风格/音色/旁白/字幕
+- **任务操作按钮**：完成/部分完成 →「打开目录」「重新发布」；运行中 →「取消」；排队 →「跳过」；失败 →「重试」

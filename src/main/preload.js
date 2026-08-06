@@ -95,7 +95,6 @@ contextBridge.exposeInMainWorld('antbot', {
   voiceboxOpenDir: () => ipcRenderer.invoke('voicebox:open-dir'),
   voiceboxReset: () => ipcRenderer.invoke('voicebox:reset'),
   getDataInfo: () => ipcRenderer.invoke('app:get-data-info'),
-  migrateData: () => ipcRenderer.invoke('app:migrate-data'),
   appLog: (level, message) => ipcRenderer.invoke('app:log', { level, message }),
   fetchModels: (params) => ipcRenderer.invoke('api:fetch-models', params),
   apiTranscribe: (params) => ipcRenderer.invoke('api:transcribe', params),

@@ -196,8 +196,9 @@ async function getServicesStatus() {
 async function getApiUsage() {
   try {
     const { getUsageSummary } = require('./usageTracker');
+    const { normalizeApiKeys } = require('./apiClient');
     const settings = _store ? await _store.getSettings() : null;
-    const keys = settings?.api?.apiKeys || (settings?.api?.apiKey ? [settings.api.apiKey] : []);
+    const keys = normalizeApiKeys(settings?.api).map(k => k.key);
     if (!keys.length) return [];
     return getUsageSummary(keys);
   } catch { return []; }
@@ -218,6 +219,14 @@ async function getStatus() {
       message: t.message,
       isOriginal: t.isOriginal,
       rawLine: t.rawLine,
+      platforms: Array.isArray(t.platforms) ? t.platforms.slice() : [],
+      campaignName: t.campaignName || '',
+      publishAt: t.publishAt || '',
+      batchRunId: t.batchRunId || '',
+      enqueuedAt: t.enqueuedAt || '',
+      outputPath: t.outputPath || '',
+      duration: t.duration || 0,
+      _exec: t._exec || null,
     })),
     services,
     disk,
@@ -364,9 +373,9 @@ function startRemoteServer({ store, taskRunner, mainWindowRef, appLog }) {
           if (_store) {
             const settings = await _store.getSettings();
             taskDefaults = settings?.taskDefaults || null;
-            const apiCfg = settings?.api || {};
-            if (smart && (apiCfg.apiKey || (apiCfg.apiKeys || []).length)) {
-              apiConfig = { baseUrl: apiCfg.baseUrl, apiKey: apiCfg.apiKey, apiKeys: apiCfg.apiKeys || [apiCfg.apiKey].filter(Boolean), modelId: apiCfg.modelId };
+            const { hasApiConfig } = require('./apiClient');
+            if (smart && hasApiConfig(settings?.api)) {
+              apiConfig = settings.api;
             }
           }
           const parsed = await parseTaskInputSmart(text, { apiConfig, taskDefaults, log: (m) => log('info', `[parse${smart ? '-ai' : ''}] ${m}`) });

@@ -8,17 +8,14 @@
   <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
-  <div class="splash" id="splash"><div class="splash-ball" id="splash-ball"></div></div>
+  <div class="splash" id="splash"><div class="splash-bg" id="splash-bg"></div><div class="splash-ball" id="splash-ball"></div></div>
   <div class="titlebar" id="titlebar-drag"></div>
 
   <div class="app">
     <div class="sidebar-overlay" id="sidebar-overlay"></div>
 
     <nav class="sidebar" id="sidebar">
-      <div class="sidebar-header">
-        <span class="sidebar-logo">搬运蚁</span>
-        <span class="sidebar-ver"><span id="app-badge"></span></span>
-      </div>
+      <div class="sidebar-header" id="sidebar-drag"></div>
 
       <!-- 侧边栏标签切换 -->
       <div class="sidebar-tabs">
@@ -28,14 +25,14 @@
 
       <!-- 功能面板 -->
       <div class="sb-panel" id="sbpanel-features">
-        <button class="sb-btn sb-feat active" data-feat="main" type="button"><span class="icon" data-icon="play"></span><span>主控</span></button>
-        <button class="sb-btn sb-feat" data-feat="edit" type="button"><span class="icon" data-icon="scissors"></span><span>剪辑</span></button>
-        <button class="sb-btn sb-feat" data-feat="publish" type="button"><span class="icon" data-icon="send"></span><span>发布</span></button>
-        <button class="sb-btn sb-feat" data-feat="download" type="button"><span class="icon" data-icon="download"></span><span>下载</span></button>
-        <button class="sb-btn sb-feat" data-feat="remote" type="button"><span class="icon" data-icon="globe"></span><span>远程</span></button>
-        <button class="sb-btn sb-feat" data-feat="style-ref" type="button"><span class="icon" data-icon="sparkle"></span><span>风格参考</span></button>
-        <button class="sb-btn sb-feat" data-feat="subtitle-voice" type="button"><span class="icon" data-icon="mic"></span><span>字幕与音色</span></button>
-        <button class="sb-btn sb-feat" data-feat="update" type="button"><span class="icon" data-icon="arrowUpCircle"></span><span>更新</span></button>
+        <button class="sb-btn sb-feat active" data-feat="main" type="button" title="主控"><span class="icon" data-icon="play"></span><span class="sb-label">主控</span></button>
+        <button class="sb-btn sb-feat" data-feat="edit" type="button" title="剪辑"><span class="icon" data-icon="scissors"></span><span class="sb-label">剪辑</span></button>
+        <button class="sb-btn sb-feat" data-feat="publish" type="button" title="发布"><span class="icon" data-icon="send"></span><span class="sb-label">发布</span></button>
+        <button class="sb-btn sb-feat" data-feat="download" type="button" title="下载"><span class="icon" data-icon="download"></span><span class="sb-label">下载</span></button>
+        <button class="sb-btn sb-feat" data-feat="remote" type="button" title="远程"><span class="icon" data-icon="globe"></span><span class="sb-label">远程</span></button>
+        <button class="sb-btn sb-feat" data-feat="style-ref" type="button" title="风格参考"><span class="icon" data-icon="sparkle"></span><span class="sb-label">风格参考</span></button>
+        <button class="sb-btn sb-feat" data-feat="subtitle-voice" type="button" title="字幕与音色"><span class="icon" data-icon="mic"></span><span class="sb-label">字幕与音色</span></button>
+        <button class="sb-btn sb-feat" data-feat="update" type="button" title="更新"><span class="icon" data-icon="arrowUpCircle"></span><span class="sb-label">更新</span></button>
       </div>
 
       <!-- 状态面板 -->
@@ -63,7 +60,7 @@
 
       <!-- 底部设置 -->
       <div class="sidebar-foot">
-        <button class="sb-btn sb-feat" data-feat="settings" type="button"><span class="icon" data-icon="settings"></span><span>设置</span></button>
+        <button class="sb-btn sb-feat" data-feat="settings" type="button" title="设置"><span class="icon" data-icon="settings"></span><span class="sb-label">设置</span></button>
       </div>
     </nav>
 
@@ -89,7 +86,7 @@
             <div class="composer-box">
               <div class="composer-preview" id="preview-bar" style="display:none"></div>
               <div class="composer-row">
-                <textarea id="task-input" class="composer-input" rows="1" placeholder="粘贴视频链接，可写：时间、平台、原创、话题、活动、标题；首行可写全局默认（如：全部抖音原创 活动：双11）"></textarea>
+                <textarea id="task-input" class="composer-input" rows="1" placeholder="粘贴视频链接，可写：平台 原创 活动 定时 话题 标题"></textarea>
                 <button class="composer-opt" id="opt-btn" type="button" title="AI 优化任务解析"><span class="icon" data-icon="sparkles"></span></button>
                 <button class="composer-send" id="run-btn" type="button"><span class="icon" data-icon="send"></span></button>
               </div>
@@ -312,15 +309,15 @@
               <div class="sv-form">
                 <label>字体
                   <div class="input-row">
-                    <input id="font-current-path" type="text" value="系统默认" readonly />
+                    <input id="font-current-path" type="text" value="系统默认" readonly class="input" />
                     <button class="btn btn-sm btn-ghost" id="pick-font-btn" type="button">使用自定义</button>
                   </div>
                 </label>
                 <div class="sv-form-row">
-                  <label>字幕颜色<input id="sub-color" type="color" value="#FFA100" /></label>
-                  <label>描边颜色<input id="sub-stroke" type="color" value="#000000" /></label>
+                  <label>字幕颜色<input id="sub-color" type="color" value="#FFA100" class="input sv-color-input" /></label>
+                  <label>描边颜色<input id="sub-stroke" type="color" value="#000000" class="input sv-color-input" /></label>
                 </div>
-                <label>字幕位置 (0-100)<input id="sub-position" type="number" min="0" max="100" value="12" /></label>
+                <label>字幕位置 (0-100)<input id="sub-position" type="number" min="0" max="100" value="12" class="input sv-position-input" /></label>
               </div>
             </div>
 
@@ -453,31 +450,41 @@
           <div class="settings-page">
 
             <!-- 路径配置 -->
-            <div class="card bg-base-100 border-base-300 card-border mb-4">
+            <div class="card mb-4">
               <div class="card-body">
-                <h2 class="card-title text-base">路径配置</h2>
-                <fieldset class="fieldset">
+                <h2 class="card-title">路径配置</h2>
+                <fieldset>
                   <label class="label">数据目录</label>
-                  <div class="join w-full">
-                    <input id="s-dataDir" type="text" class="input input-bordered join-item flex-1" placeholder="~/AntBot" />
-                    <button type="button" id="open-data-dir-setting-btn" class="btn btn-ghost join-item"><span class="icon" data-icon="folderOpen"></span></button>
+                  <div class="input-row w-full">
+                    <input id="s-dataDir" type="text" class="input flex-1" placeholder="~/AntBot" />
+                    <button type="button" id="open-data-dir-setting-btn" class="btn btn-ghost"><span class="icon" data-icon="folderOpen"></span></button>
                   </div>
                   <label class="label mt-2">输出根目录</label>
-                  <div class="join w-full">
-                    <input id="s-outputBaseDir" type="text" class="input input-bordered join-item flex-1" />
-                    <button type="button" id="open-output-dir-btn" class="btn btn-ghost join-item"><span class="icon" data-icon="folderOpen"></span></button>
+                  <div class="input-row w-full">
+                    <input id="s-outputBaseDir" type="text" class="input flex-1" />
+                    <button type="button" id="open-output-dir-btn" class="btn btn-ghost"><span class="icon" data-icon="folderOpen"></span></button>
                   </div>
-                  <button type="button" id="migrate-old-btn" class="btn btn-ghost btn-sm mt-2"><span class="icon" data-icon="package"></span>迁移旧版数据</button>
                 </fieldset>
               </div>
             </div>
 
-            <!-- 剪辑设置 -->
-            <div class="card bg-base-100 border-base-300 card-border mb-4">
+            <!-- 通用设置 -->
+            <div class="card mb-4">
               <div class="card-body">
-                <h2 class="card-title text-base">剪辑设置</h2>
+                <h2 class="card-title">通用设置</h2>
+                <div class="s-row">
+                  <span class="s-label">开机自动启动</span>
+                  <label class="ps-toggle-label"><span class="ps-toggle" id="s-auto-launch"></span><span>登录电脑时自动启动 App（支持 Mac / Windows）</span></label>
+                </div>
+              </div>
+            </div>
+
+            <!-- 剪辑设置 -->
+            <div class="card mb-4">
+              <div class="card-body">
+                <h2 class="card-title">剪辑设置</h2>
                 <label class="label">抽帧精细度</label>
-                <select id="s-frameRate" class="select select-bordered w-full max-w-xs">
+                <select id="s-frameRate" class="select w-full max-w-xs">
                   <option value="3">粗糙（3秒/帧）</option>
                   <option value="2">普通（2秒/帧）</option>
                   <option value="1" selected>均衡（1秒/帧）</option>
@@ -488,65 +495,55 @@
             </div>
 
             <!-- 主控默认值 -->
-            <div class="card bg-base-100 border-base-300 card-border mb-4">
+            <div class="card mb-4">
               <div class="card-body">
-                <h2 class="card-title text-base">主控默认值</h2>
-                <p class="text-xs text-base-content/50 mb-2">主控输入未写明平台/原创/话题/间隔时，应用以下默认值</p>
-                <fieldset class="fieldset">
+                <h2 class="card-title">主控默认值</h2>
+                <p class="text-xs text-muted mb-2">主控输入未写明平台/原创/话题/间隔时，应用以下默认值</p>
+                <fieldset>
                   <label class="label">默认平台</label>
-                  <select id="s-task-platform" class="select select-bordered w-full max-w-xs">
+                  <select id="s-task-platform" class="select w-full max-w-xs">
                     <option value="videoChannel">视频号</option>
                     <option value="douyin">抖音</option>
                     <option value="videoChannel,douyin">视频号 + 抖音</option>
                   </select>
                   <label class="label mt-2">默认原创</label>
-                  <select id="s-task-original" class="select select-bordered w-full max-w-xs">
+                  <select id="s-task-original" class="select w-full max-w-xs">
                     <option value="false">不原创</option>
                     <option value="true">原创</option>
                   </select>
                   <label class="label mt-2">默认话题（空格分隔，#开头）</label>
-                  <input id="s-task-topics" type="text" class="input input-bordered w-full" placeholder="#动画 #游戏" />
+                  <input id="s-task-topics" type="text" class="input w-full" placeholder="#动画 #游戏" />
                   <div class="flex items-center gap-2 mt-2">
                     <label class="label mb-0">默认间隔（分钟）</label>
-                    <input id="s-task-interval-min" type="number" class="input input-bordered w-20" min="1" placeholder="40" />
-                    <span class="text-sm text-base-content/50">-</span>
-                    <input id="s-task-interval-max" type="number" class="input input-bordered w-20" min="1" placeholder="70" />
+                    <input id="s-task-interval-min" type="number" class="input w-20" min="1" placeholder="40" />
+                    <span class="text-sm text-muted"50">-</span>
+                    <input id="s-task-interval-max" type="number" class="input w-20" min="1" placeholder="70" />
                   </div>
                 </fieldset>
               </div>
             </div>
 
             <!-- AI 模型 -->
-            <div class="card bg-base-100 border-base-300 card-border mb-4">
+            <div class="card mb-4">
               <div class="card-body">
-                <h2 class="card-title text-base">AI 模型</h2>
-                <fieldset class="fieldset">
-                  <label class="label">API Keys</label>
-                  <div id="api-keys-list"><div class="join w-full mb-1"><input name="apiKey" type="password" class="input input-bordered join-item flex-1" placeholder="Key 1" /><button type="button" class="btn btn-ghost join-item s-key-del" title="删除">✕</button></div></div>
-                  <button type="button" id="add-api-key-btn" class="btn btn-ghost btn-sm">+ 添加 Key</button>
-                  <div id="api-usage-box" class="mt-2"></div>
-                  <div class="flex items-center gap-2 mt-2">
-                    <label class="label mb-0">Base URL</label>
-                    <button type="button" id="fetch-models-btn" class="btn btn-ghost btn-xs">获取模型</button>
-                  </div>
-                  <input id="s-apiBaseUrl" type="text" class="input input-bordered w-full" placeholder="https://apihub.agnes-ai.com/v1" />
-                  <label class="label mt-2">选择模型 <span class="text-xs text-base-content/50">需要选取支持识别图片的模型</span></label>
-                  <select id="s-apiModelId" class="select select-bordered w-full max-w-xs"><option value="">请先获取模型</option></select>
-                </fieldset>
+                <h2 class="card-title">AI 模型</h2>
+                <p class="text-xs text-muted mb-2">每个 API Key 独立配置地址与模型；按日限额轮值使用，一个额度用完自动切换下一个</p>
+                <div id="api-keys-list"></div>
+                <button type="button" id="add-api-key-btn" class="btn btn-ghost btn-sm mt-2"><span class="icon" data-icon="plus"></span>添加 Key</button>
               </div>
             </div>
 
             <!-- 依赖与环境 -->
-            <div class="card bg-base-100 border-base-300 card-border mb-4">
+            <div class="card mb-4">
               <div class="card-body">
-                <h2 class="card-title text-base">依赖与环境</h2>
+                <h2 class="card-title">依赖与环境</h2>
                 <h3 class="font-semibold text-sm mb-2">基础工具</h3>
                 <div class="deps-check-list" id="deps-check-list"></div>
                 <div class="divider"></div>
                 <h3 class="font-semibold text-sm mb-2">AI 模型</h3>
                 <div class="flex items-center gap-2 mb-3">
-                  <span class="text-sm text-base-content/70">模型存储</span>
-                  <span id="models-dir-path" class="text-xs text-base-content/50">-</span>
+                  <span class="text-sm text-muted"70">模型存储</span>
+                  <span id="models-dir-path" class="text-xs text-muted"50">-</span>
                   <button type="button" id="models-open-dir-btn" class="btn btn-ghost btn-xs"><span class="icon" data-icon="folderOpen"></span></button>
                 </div>
                 <div class="models-list" id="models-list"></div>
@@ -554,21 +551,21 @@
             </div>
 
             <!-- 语音克隆环境 -->
-            <div class="card bg-base-100 border-base-300 card-border mb-4">
+            <div class="card mb-4">
               <div class="card-body">
-                <h2 class="card-title text-base">语音克隆环境</h2>
+                <h2 class="card-title">语音克隆环境</h2>
                 <div class="voicebox-status" id="voicebox-status">
                   <div class="voicebox-items" id="voicebox-items"></div>
                   <div id="voicebox-deps-list" class="voicebox-deps-list"></div>
                   <div class="flex items-center gap-2 mt-2">
-                    <span class="text-sm text-base-content/70">存储路径</span>
-                    <span id="voicebox-path" class="text-xs text-base-content/50">-</span>
+                    <span class="text-sm text-muted"70">存储路径</span>
+                    <span id="voicebox-path" class="text-xs text-muted"50">-</span>
                     <button type="button" id="voicebox-open-btn" class="btn btn-ghost btn-xs"><span class="icon" data-icon="folderOpen"></span></button>
                   </div>
                   <div class="flex items-center gap-2 mt-2" id="voicebox-gpu-mode-row" style="display:none">
-                    <span class="text-sm text-base-content/70">运行设备</span>
-                    <select id="voicebox-gpu-mode" class="select select-bordered select-sm"><option value="auto">自动检测</option><option value="gpu">GPU (CUDA)</option><option value="cpu">CPU</option></select>
-                    <span class="text-xs text-base-content/40">GPU 需安装 CUDA PyTorch（约2GB）</span>
+                    <span class="text-sm text-muted"70">运行设备</span>
+                    <select id="voicebox-gpu-mode" class="select select-sm"><option value="auto">自动检测</option><option value="gpu">GPU (CUDA)</option><option value="cpu">CPU</option></select>
+                    <span class="text-xs text-muted"40">GPU 需安装 CUDA PyTorch（约2GB）</span>
                   </div>
                 </div>
                 <div class="flex gap-2 mt-4">
@@ -620,7 +617,6 @@
         <div class="info-row"><span>日志</span><div class="info-val"><span id="data-log-path" class="info-path">-</span><button id="open-log-dir-btn" class="btn btn-sm btn-ghost"><span class="icon" data-icon="folderOpen"></span></button></div></div>
       </div>
       <div class="dlg-actions">
-        <button id="migrate-data-btn" class="btn btn-ghost"><span class="icon" data-icon="package"></span>迁移旧版数据</button>
         <button id="open-data-dir-main-btn" class="btn btn-primary"><span class="icon" data-icon="folderOpen"></span>打开数据目录</button>
       </div>
     </div>

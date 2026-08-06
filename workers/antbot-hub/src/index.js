@@ -85,26 +85,26 @@ const HTML = `<!DOCTYPE html>
 <style>
   *{margin:0;padding:0;box-sizing:border-box}
   :root{
-    --bg:#09090b;--card:#111113;--fg:#fafafa;--muted:#a1a1aa;
-    --border:#27272a;--primary:#5eead4;--primary-hover:#99f6e4;
-    --accent:#134e4a;--success:#22c55e;--destructive:#ef4444;
+    --bg:#0a0a0b;--card:#141416;--fg:#fafafa;--muted:#a1a1aa;
+    --border:#26262a;--primary:#fafafa;--primary-hover:#d4d4d8;--primary-fg:#0a0a0b;
+    --accent:#26262a;--success:#22c55e;--destructive:#ef4444;
     --radius:8px;--radius-lg:12px;--radius-xl:16px;
     --font:-apple-system,BlinkMacSystemFont,"SF Pro Display","PingFang SC","Inter",sans-serif;
   }
   body{font-family:var(--font);background:var(--bg);color:var(--fg);min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:40px 16px}
   .container{width:100%;max-width:480px}
   .header{text-align:center;margin-bottom:32px}
-  .header h1{font-size:20px;font-weight:700;margin-bottom:4px}
+  .header h1{font-size:20px;font-weight:600;margin-bottom:4px}
   .header p{font-size:13px;color:var(--muted)}
   .device-list{display:flex;flex-direction:column;gap:8px}
   .device-card{
     display:flex;align-items:center;gap:12px;padding:14px 16px;
     background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);
-    cursor:pointer;transition:all 120ms ease;text-decoration:none;color:var(--fg);
+    cursor:pointer;transition:border-color 120ms ease;text-decoration:none;color:var(--fg);
   }
-  .device-card:hover{border-color:var(--primary);box-shadow:0 0 0 1px var(--primary)}
+  .device-card:hover{border-color:var(--muted)}
   .device-card.offline{opacity:.5;cursor:default}
-  .device-card.offline:hover{border-color:var(--border);box-shadow:none}
+  .device-card.offline:hover{border-color:var(--border)}
   .device-icon{width:40px;height:40px;border-radius:var(--radius);background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
   .device-info{flex:1;min-width:0}
   .device-name{font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -117,19 +117,19 @@ const HTML = `<!DOCTYPE html>
   .empty-icon{font-size:32px;margin-bottom:8px;opacity:.5}
   .footer{margin-top:32px;text-align:center;font-size:11px;color:var(--muted)}
   .loading{text-align:center;padding:32px;color:var(--muted);font-size:13px}
-  .spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--primary);border-radius:50%;animation:spin .6s linear infinite;margin-right:6px;vertical-align:middle}
+  .spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--muted);border-radius:50%;animation:spin .6s linear infinite;margin-right:6px;vertical-align:middle}
   @keyframes spin{to{transform:rotate(360deg)}}
   .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;z-index:100}
   .modal{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-xl);padding:24px;width:90%;max-width:360px;box-shadow:0 20px 25px -5px rgba(0,0,0,.3)}
   .modal h3{font-size:15px;font-weight:600;margin-bottom:4px}
   .modal p{font-size:12px;color:var(--muted);margin-bottom:16px}
   .modal input{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--fg);font-size:13px;outline:none;transition:border-color 120ms}
-  .modal input:focus{border-color:var(--primary)}
+  .modal input:focus{border-color:var(--muted)}
   .modal-error{font-size:11px;color:var(--destructive);margin-top:6px;min-height:16px}
   .modal-actions{display:flex;gap:8px;margin-top:16px;justify-content:flex-end}
-  .modal-actions button{padding:8px 16px;border-radius:var(--radius);font-size:13px;font-weight:500;cursor:pointer;border:1px solid var(--border);background:var(--card);color:var(--fg);transition:all 120ms}
-  .modal-actions button:hover{border-color:var(--primary)}
-  .modal-actions .btn-primary{background:var(--primary);color:#000;border-color:var(--primary)}
+  .modal-actions button{padding:8px 16px;border-radius:var(--radius);font-size:13px;font-weight:500;cursor:pointer;border:1px solid var(--border);background:var(--card);color:var(--fg);transition:border-color 120ms}
+  .modal-actions button:hover{border-color:var(--muted)}
+  .modal-actions .btn-primary{background:var(--primary);color:var(--primary-fg);border-color:var(--primary)}
   .modal-actions .btn-primary:hover{background:var(--primary-hover)}
   .modal-actions .btn-primary:disabled{opacity:.5;cursor:not-allowed}
 </style>

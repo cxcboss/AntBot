@@ -1,36 +1,37 @@
 /**
- * AntBot Design Token System — Teal accent
+ * AntBot Design Token System — Neutral (Linear-style)
+ * 中性色方案：层级靠灰阶与间距表达，强调色仅用于主按钮/焦点/进行中
  * Auto light/dark based on system preference
  */
 
 :root {
   color-scheme: light;
 
-  /* ── 基础色 ── */
-  --background:            #FAFAFA;
-  --foreground:            #0A0A0A;
+  /* ── 基础色（中性灰阶） ── */
+  --background:            #FFFFFF;
+  --foreground:            #111111;
 
   --card:                  #FFFFFF;
-  --card-foreground:       #0A0A0A;
+  --card-foreground:       #111111;
 
   --popover:               #FFFFFF;
-  --popover-foreground:    #0A0A0A;
+  --popover-foreground:    #111111;
 
-  /* ── 品牌色 (Teal) ── */
-  --primary:               #0D9488;
-  --primary-hover:         #0F766E;
+  /* ── 品牌色（中性，无彩色） ── */
+  --primary:               #111111;
+  --primary-hover:         #2B2B2B;
   --primary-foreground:    #FFFFFF;
 
-  --secondary:             #F5F3F0;
-  --secondary-foreground:  #1A1D23;
+  --secondary:             #F5F5F4;
+  --secondary-foreground:  #111111;
 
-  --muted:                 #F0EDE8;
-  --muted-foreground:      #78716C;
+  --muted:                 #F0F0EF;
+  --muted-foreground:      #71717A;
 
-  --accent:                #F0FDFA;
-  --accent-foreground:     #0D9488;
+  --accent:                #F4F4F5;
+  --accent-foreground:     #111111;
 
-  /* ── 语义色 ── */
+  /* ── 语义色（仅用于对应状态场景） ── */
   --destructive:           #DC2626;
   --destructive-foreground:#FFFFFF;
   --success:               #16A34A;
@@ -47,9 +48,9 @@
   --info-bg:               #EFF6FF;
 
   /* ── 边框与输入 ── */
-  --border:                #E7E5E2;
-  --input:                 #E7E5E2;
-  --ring:                  #0D9488;
+  --border:                #E4E4E7;
+  --input:                 #E4E4E7;
+  --ring:                  #111111;
 
   /* ── 圆角 ── */
   --radius-xs:             4px;
@@ -61,7 +62,7 @@
   --radius-full:           9999px;
 
   /* ── 阴影 ── */
-  --shadow-xs:             0 1px 2px rgba(0,0,0,0.04);
+  --shadow-xs:             0 1px 2px rgba(0,0,0,0.05);
   --shadow-sm:             0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
   --shadow:                0 4px 6px -1px rgba(0,0,0,0.07), 0 2px 4px -2px rgba(0,0,0,0.05);
   --shadow-md:             0 10px 15px -3px rgba(0,0,0,0.08), 0 4px 6px -4px rgba(0,0,0,0.04);
@@ -98,49 +99,49 @@
 .dark {
   color-scheme: dark;
 
-  --background:            #111113;
+  --background:            #0A0A0B;
   --foreground:            #FAFAFA;
 
-  --card:                  #1A1A1E;
+  --card:                  #141416;
   --card-foreground:       #FAFAFA;
 
-  --popover:               #1A1A1E;
+  --popover:               #1A1A1C;
   --popover-foreground:    #FAFAFA;
 
-  --primary:               #5EEAD4;
-  --primary-hover:         #99F6E4;
-  --primary-foreground:    #042F2E;
+  --primary:               #FAFAFA;
+  --primary-hover:         #D4D4D8;
+  --primary-foreground:    #0A0A0B;
 
-  --secondary:             #27272A;
+  --secondary:             #1C1C1E;
   --secondary-foreground:  #FAFAFA;
 
-  --muted:                 #27272A;
+  --muted:                 #232326;
   --muted-foreground:      #A1A1AA;
 
-  --accent:                #134E4A;
-  --accent-foreground:     #5EEAD4;
+  --accent:                #26262A;
+  --accent-foreground:     #FAFAFA;
 
   --destructive:           #EF4444;
   --destructive-foreground:#FFFFFF;
   --success:               #22C55E;
   --success-foreground:    #FFFFFF;
   --warning:               #F59E0B;
-  --warning-foreground:    #0A0A0A;
+  --warning-foreground:    #0A0A0B;
   --info:                  #3B82F6;
   --info-foreground:       #FFFFFF;
 
-  --destructive-bg:        #450A0A;
+  --destructive-bg:        #2A0A0A;
   --success-bg:            #052E16;
-  --warning-bg:            #451A03;
+  --warning-bg:            #2A1A05;
   --info-bg:               #172554;
 
-  --border:                #2E2E32;
-  --input:                 #2E2E32;
-  --ring:                  #5EEAD4;
+  --border:                #26262A;
+  --input:                 #26262A;
+  --ring:                  #FAFAFA;
 
-  --shadow-xs:             0 1px 2px rgba(0,0,0,0.2);
-  --shadow-sm:             0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
-  --shadow:                0 4px 6px -1px rgba(0,0,0,0.35), 0 2px 4px -2px rgba(0,0,0,0.25);
-  --shadow-md:             0 10px 15px -3px rgba(0,0,0,0.4), 0 4px 6px -4px rgba(0,0,0,0.3);
-  --shadow-lg:             0 20px 25px -5px rgba(0,0,0,0.5), 0 8px 10px -6px rgba(0,0,0,0.35);
+  --shadow-xs:             0 1px 2px rgba(0,0,0,0.3);
+  --shadow-sm:             0 1px 3px rgba(0,0,0,0.35), 0 1px 2px rgba(0,0,0,0.25);
+  --shadow:                0 4px 6px -1px rgba(0,0,0,0.4), 0 2px 4px -2px rgba(0,0,0,0.3);
+  --shadow-md:             0 10px 15px -3px rgba(0,0,0,0.45), 0 4px 6px -4px rgba(0,0,0,0.35);
+  --shadow-lg:             0 20px 25px -5px rgba(0,0,0,0.55), 0 8px 10px -6px rgba(0,0,0,0.4);
 }

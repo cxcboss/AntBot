@@ -69,3 +69,7 @@
 - ~~os.tmpdir()/antbot-smart-edit-*~~ → 新任务使用 `~/AntBot/clip-cache/<task-id>`，旧目录仅作为启动清理目标
 - ~~图片 512px quality 5~~ → 请求体太大导致 UND_ERR_SOCKET
 - ~~批次大小 15/8/5 帧~~ → 受上游接口限制，统一改为最多 4 帧
+
+## API 调用（已抽取）
+
+`callApiWithKeyRotation()` / `callApi()` 已抽取到 `apiClient.js`（多 key 轮询 + 429 切换 + 网络重试 + 用量统计 `recordUsage` + 代理支持）。smartEditor 引用 `./apiClient`，行为不变。`aiTaskParser.js` 复用同一通道。

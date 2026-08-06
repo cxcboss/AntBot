@@ -101,8 +101,8 @@ function startApiServer({ store, taskRunner, editScheduler, mainWindowRef, appLo
           tasks: tasks.map(t => ({ id: t.id, name: t.name, status: t.status, progress: t.progress, step: t.step, error: t.error, outputPath: t.outputPath })),
           recentLogs: logFiles,
           settings: {
-            apiBaseUrl: settings.api?.baseUrl || '',
-            hasApiKeys: !!(settings.api?.apiKeys?.length || settings.api?.apiKey),
+            apiBaseUrl: settings.api?.keys?.[0]?.baseUrl || settings.api?.baseUrl || '',
+            hasApiKeys: !!(settings.api?.keys?.length || settings.api?.apiKeys?.length || settings.api?.apiKey),
             frameRate: settings.edit?.frameRate || 1,
             outputDir: settings.paths?.outputBaseDir || '',
           }
@@ -153,7 +153,7 @@ function startApiServer({ store, taskRunner, editScheduler, mainWindowRef, appLo
           voiceProfileId: body.voiceProfileId || settings.voiceClone?.voiceId || '',
           voiceProfileName: body.voiceProfileName || settings.voiceClone?.profileName || '',
           voiceSpeed: body.voiceSpeed || settings.style?.voiceSpeed || 1.1,
-          apiConfig: body.apiConfig || { baseUrl: settings.api?.baseUrl, apiKey: settings.api?.apiKey, apiKeys: settings.api?.apiKeys, modelId: settings.api?.modelId },
+          apiConfig: body.apiConfig || settings.api || {},
           outputDir: body.outputDir || settings.paths?.outputBaseDir || '',
           language: body.language || 'zh',
           frameRate: body.frameRate || settings.edit?.frameRate || 1,
