@@ -1036,8 +1036,8 @@ class TaskRunner {
             subtitleStyle,
             voiceoverEnabled,
             subtitleEnabled,
-            videoWidth: prepareResult.videoWidth || 0,
-            videoHeight: prepareResult.videoHeight || 0,
+            videoWidth: prepareResult?.videoWidth || 0,
+            videoHeight: prepareResult?.videoHeight || 0,
             log: (msg) => this.log(task.id, msg),
             progress: (p) => this.setTaskState(task.id, {
               progress: 50 + Math.round((p.percent || 0) * 0.25),

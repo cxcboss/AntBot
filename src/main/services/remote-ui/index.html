@@ -203,6 +203,23 @@ input[type=number]::-webkit-inner-spin-button{opacity:1}
 .send-btn:hover{background:var(--primary-hover)}
 .send-btn:active{transform:scale(.96)}
 .send-btn:disabled{opacity:.3;cursor:not-allowed;box-shadow:none}
+.opt-btn{width:36px;height:36px;border-radius:50%;background:var(--card);border:1px solid var(--border);color:var(--primary);cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all var(--transition-fast)}
+.opt-btn:hover{border-color:var(--primary);background:var(--accent)}
+.opt-btn.busy{opacity:.5;pointer-events:none}
+.opt-btn.busy svg{animation:opt-spin .8s linear infinite}
+@keyframes opt-spin{to{transform:rotate(360deg)}}
+.pv-bar{max-width:860px;margin:0 auto var(--space-2);background:var(--muted);border-radius:var(--radius-lg);padding:var(--space-2) var(--space-3);font-size:12px;color:var(--muted-foreground);display:flex;flex-direction:column;gap:4px;max-height:180px;overflow-y:auto}
+.pv-head{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.pv-badge{font-size:10px;font-weight:600;padding:1px 6px;border-radius:var(--radius-xs);background:var(--border);color:var(--muted-foreground)}
+.pv-badge.ai{background:var(--accent);color:var(--accent-foreground)}
+.pv-count{font-weight:600;color:var(--foreground);font-size:12px}
+.pv-def{font-size:10px}
+.pv-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:11px;color:var(--foreground)}
+.pv-tag{font-size:10px;padding:0 6px;border-radius:var(--radius-xs);background:var(--card);border:1px solid var(--border)}
+.pv-tag.accent{border-color:color-mix(in srgb,var(--primary) 40%,transparent);color:var(--primary)}
+.pv-title{color:var(--muted-foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.pv-warn{color:var(--warning);font-size:10px}
+.pv-acts{display:flex;justify-content:flex-end;padding-top:6px;border-top:1px solid var(--border);margin-top:2px}
 .chips{display:flex;gap:var(--space-2);margin-top:var(--space-2);flex-wrap:wrap;max-width:860px;margin-left:auto;margin-right:auto}
 .chip{font-size:11px;padding:3px 10px;border-radius:var(--radius-full);background:var(--accent);color:var(--accent-foreground);border:none;cursor:pointer;transition:all var(--transition-fast);font-weight:500}
 .chip:hover{background:color-mix(in srgb,var(--accent) 80%,var(--primary))}
@@ -557,8 +574,10 @@ function renderAppShell(){
     </div>
   </div>
   <div class="input-bar" id="input-bar">
+    <div class="pv-bar" id="pv-bar" style="display:none"></div>
     <div class="input-row">
       <textarea class="input-field" id="task-input" placeholder="粘贴视频链接..." rows="1"></textarea>
+      <button class="opt-btn" id="opt-btn" type="button" title="AI 优化任务解析"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z"/><path d="M20 2v4"/><path d="M22 4h-4"/><circle cx="4" cy="20" r="2"/></svg></button>
       <button class="send-btn" id="send-btn" type="button" disabled><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg></button>
     </div>
     <div class="chips" id="chips"></div>
@@ -602,10 +621,12 @@ function bindEvents(){
       input.style.height='auto';
       input.style.height=Math.min(input.scrollHeight,120)+'px';
       if(sendBtn)sendBtn.disabled=!input.value.trim();
+      queueParsePreview();
     });
     input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendTask();}});
   }
   if(sendBtn)sendBtn.addEventListener('click',sendTask);
+  document.getElementById('opt-btn')?.addEventListener('click',optimizeTask);
   document.getElementById('chat-stream')?.addEventListener('click',e=>{
     const btn=e.target.closest('[data-action]');
     if(!btn)return;
@@ -950,12 +971,100 @@ async function loadTasks(){
   renderTasks();
 }
 
-async function sendTask(){
+function fmtPvTime(v){
+  if(!v)return '';
+  const d=new Date(v);
+  if(isNaN(d))return String(v);
+  const pad=n=>String(n).padStart(2,'0');
+  const hm=pad(d.getHours())+':'+pad(d.getMinutes());
+  return d.toDateString()===new Date().toDateString()?hm:(pad(d.getMonth()+1)+'-'+pad(d.getDate())+' '+hm);
+}
+
+async function sendTask(forceItems){
   const input=document.getElementById('task-input');if(!input)return;
-  const text=input.value.trim();if(!text)return;
+  const text=input.value.trim();
+  const pv=preview;
+  if(!text&&!(pv.items&&pv.items.length)){showToast('请输入任务');return;}
+  const useItems=forceItems||(pv.items&&pv.items.length&&pv.mode==='optimized');
   input.disabled=true;const btn=document.getElementById('send-btn');if(btn)btn.disabled=true;
-  try{const d=await api('POST','/remote/tasks',{text});if(d?.ok){showToast('已添加 '+(d.tasks?.length||0)+' 个任务');input.value='';input.style.height='auto'}else showToast(d?.error||'发送失败')}catch{showToast('网络错误')}
+  try{
+    const body=useItems?{tasks:pv.items.map(t=>({id:t.id,rawLine:t.rawLine,taskName:t.taskName,isOriginal:!!t.isOriginal,videoUrl:t.videoUrl,timeRange:t.timeRange||'',platforms:t.platforms||[],publishCopy:t.publishCopy||'',publishTopics:t.publishTopics||[],campaignName:t.campaignName||'',publishAt:t.publishAt||null})),text}:{text};
+    const d=await api('POST','/remote/tasks',body);
+    if(d?.ok){
+      showToast('已添加 '+(d.tasks?.length||0)+' 个任务');
+      input.value='';input.style.height='auto';resetPreview();
+    }else showToast(d?.error||'发送失败');
+  }catch{showToast('网络错误')}
   input.disabled=false;if(btn)btn.disabled=false;input.focus();
+}
+
+/* ── 主控输入预览（规则识别 / AI 优化） ── */
+let preview={count:0,items:[],warnings:[],source:'',defaults:null,error:'',empty:true,mode:'auto'};
+let pvTimer=null,pvSeq=0;
+
+function resetPreview(){preview={count:0,items:[],warnings:[],source:'',defaults:null,error:'',empty:true,mode:'auto'};renderPvBar();}
+
+function queueParsePreview(){
+  if(pvTimer)clearTimeout(pvTimer);
+  pvTimer=setTimeout(()=>{parsePreview(false).catch(()=>{});},180);
+}
+
+async function parsePreview(smart){
+  const input=document.getElementById('task-input');
+  const text=input?.value?.trim()||'';
+  const seq=++pvSeq;
+  if(!text){resetPreview();return;}
+  try{
+    const d=await api('POST','/remote/parse',{text,smart});
+    if(seq!==pvSeq)return;
+    if(d?.ok){
+      preview={count:d.tasks?.length||0,items:d.tasks||[],warnings:d.warnings||[],source:d.source||'',defaults:d.defaults||null,error:'',empty:false,mode:smart?'optimized':'auto'};
+    }else{
+      preview={count:0,items:[],warnings:[],source:'',defaults:null,error:d?.error||'解析失败',empty:false,mode:smart?'optimized':'auto'};
+    }
+    renderPvBar();
+  }catch(e){
+    if(seq!==pvSeq)return;
+    preview={count:0,items:[],warnings:[],source:'',defaults:null,error:e?.message||'解析失败',empty:false,mode:smart?'optimized':'auto'};
+    renderPvBar();
+  }
+}
+
+async function optimizeTask(){
+  const input=document.getElementById('task-input');
+  if(!input?.value?.trim()){showToast('请先输入任务');return;}
+  const btn=document.getElementById('opt-btn');
+  if(btn)btn.classList.add('busy');
+  try{
+    await parsePreview(true);
+    showToast(preview.error?('优化失败: '+preview.error):'已用 AI 优化，可确认发送');
+  }catch(e){showToast('优化失败: '+e.message)}
+  finally{if(btn)btn.classList.remove('busy')}
+}
+
+function renderPvBar(){
+  const bar=document.getElementById('pv-bar');if(!bar)return;
+  const p=preview;
+  if(p.empty||(!p.count&&!p.error)){bar.style.display='none';bar.innerHTML='';return;}
+  bar.style.display='flex';
+  const srcBadge=p.mode==='optimized'?'<span class="pv-badge ai">AI 优化</span>':(p.source==='ai'?'<span class="pv-badge ai">AI 识别</span>':(p.source==='regex'?'<span class="pv-badge">规则识别</span>':''));
+  const d=p.defaults;
+  const defTxt=d?('<span class="pv-def">默认：'+(d.platforms||['videoChannel']).map(x=>x==='douyin'?'抖音':'视频号').join('+')+' · '+(d.isOriginal?'原创':'不原创')+' · '+(d.topics||[]).length+'个话题'+(d.intervalMinutes?(' · 间隔'+d.intervalMinutes[0]+'-'+d.intervalMinutes[1]+'分'):'')+'</span>'):'';
+  const items=(p.items||[]).slice(0,5).map((t,i)=>{
+    const pf=(t.platforms||[]).map(x=>x==='douyin'?'抖音':'视频号').join('+');
+    const tags=['<span class="pv-tag">'+esc(pf)+'</span>','<span class="pv-tag'+(t.isOriginal?' accent':'')+'">'+(t.isOriginal?'原创':'不原创')+'</span>'];
+    if(t.publishAt)tags.push('<span class="pv-tag">'+esc(fmtPvTime(t.publishAt))+'</span>');else tags.push('<span class="pv-tag">立即发布</span>');
+    if(t.campaignName)tags.push('<span class="pv-tag accent">活动:'+esc(t.campaignName)+'</span>');
+    const title=(t.taskName&&t.taskName!=='普通')?'<span class="pv-title">'+esc(t.taskName)+'</span>':'';
+    return '<div class="pv-row">'+tags.join('')+title+'</div>';
+  }).join('');
+  const more=p.count>p.items.length?('<div class="pv-row">…共 '+p.count+' 条</div>'):'';
+  const warns=(p.warnings||[]).map(w=>'<div class="pv-warn">'+esc(w)+'</div>').join('');
+  const err=p.error?'<div class="pv-warn">'+esc(p.error)+'</div>':'';
+  const confirm=(p.items&&p.items.length)?('<div class="pv-acts"><button class="btn btn-sm btn-primary" type="button" id="pv-confirm-btn">'+((p.mode==='optimized')?'确定发送':'发送')+'</button></div>'):'';
+  bar.innerHTML='<div class="pv-head">'+srcBadge+'<span class="pv-count">'+p.count+' 条任务</span>'+defTxt+'</div>'+items+more+warns+err+confirm;
+  const c=document.getElementById('pv-confirm-btn');
+  if(c)c.addEventListener('click',()=>sendTask(true));
 }
 
 function renderTasks(){

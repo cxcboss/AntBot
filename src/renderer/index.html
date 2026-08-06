@@ -87,8 +87,10 @@
           <div class="resize-handle" id="resize-handle"><div class="resize-grip"></div></div>
           <div class="composer" id="composer">
             <div class="composer-box">
+              <div class="composer-preview" id="preview-bar" style="display:none"></div>
               <div class="composer-row">
-                <textarea id="task-input" class="composer-input" rows="1" placeholder="推广任务名，是否原创，链接"></textarea>
+                <textarea id="task-input" class="composer-input" rows="1" placeholder="粘贴视频链接，可写：时间、平台、原创、话题、活动、标题；首行可写全局默认（如：全部抖音原创 活动：双11）"></textarea>
+                <button class="composer-opt" id="opt-btn" type="button" title="AI 优化任务解析"><span class="icon" data-icon="sparkles"></span></button>
                 <button class="composer-send" id="run-btn" type="button"><span class="icon" data-icon="send"></span></button>
               </div>
             </div>
@@ -482,6 +484,35 @@
                   <option value="0.5">精细（1秒/2帧）</option>
                   <option value="0.125">还原（1秒/8帧）</option>
                 </select>
+              </div>
+            </div>
+
+            <!-- 主控默认值 -->
+            <div class="card bg-base-100 border-base-300 card-border mb-4">
+              <div class="card-body">
+                <h2 class="card-title text-base">主控默认值</h2>
+                <p class="text-xs text-base-content/50 mb-2">主控输入未写明平台/原创/话题/间隔时，应用以下默认值</p>
+                <fieldset class="fieldset">
+                  <label class="label">默认平台</label>
+                  <select id="s-task-platform" class="select select-bordered w-full max-w-xs">
+                    <option value="videoChannel">视频号</option>
+                    <option value="douyin">抖音</option>
+                    <option value="videoChannel,douyin">视频号 + 抖音</option>
+                  </select>
+                  <label class="label mt-2">默认原创</label>
+                  <select id="s-task-original" class="select select-bordered w-full max-w-xs">
+                    <option value="false">不原创</option>
+                    <option value="true">原创</option>
+                  </select>
+                  <label class="label mt-2">默认话题（空格分隔，#开头）</label>
+                  <input id="s-task-topics" type="text" class="input input-bordered w-full" placeholder="#动画 #游戏" />
+                  <div class="flex items-center gap-2 mt-2">
+                    <label class="label mb-0">默认间隔（分钟）</label>
+                    <input id="s-task-interval-min" type="number" class="input input-bordered w-20" min="1" placeholder="40" />
+                    <span class="text-sm text-base-content/50">-</span>
+                    <input id="s-task-interval-max" type="number" class="input input-bordered w-20" min="1" placeholder="70" />
+                  </div>
+                </fieldset>
               </div>
             </div>
 
