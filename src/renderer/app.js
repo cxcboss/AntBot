@@ -162,15 +162,11 @@ function fmtDuration(sec){
   if(m<60)return s?`${m}分${s}秒`:`${m}分钟`;
   return`${Math.floor(m/60)}小时${m%60}分`;
 }
-/* 消息卡片：平铺正文 + 操作行（原文/复制）+ 规则面板 */
+/* 消息卡片：直接显示原文 + 复制按钮 + 规则面板 */
 function makeMessageHtml(raw,rules){
-  const rawLines=raw.split(/\r?\n/).filter(l=>l.trim());
-  const showNum=rawLines.length>=3;
-  const numbered=rawLines.map((l,i)=>(showNum?`${i+1}、`:'')+l).join('\n');
   const escapedRaw=esc(raw).replace(/\\/g,'\\\\').replace(/\n/g,'\\n').replace(/\r/g,'\\r').replace(/`/g,'\\`').replace(/\$/g,'\\$');
-  const hasUrl=/https?:\/\//i.test(raw);
   const rulesHtml=rules&&rules.length?makeRulesHtml(rules):'';
-  return`<div class="msg-content">${formatBubbleText(raw)}</div><div class="msg-actions"><button class="msg-act-btn" type="button" data-msg-raw data-raw="${escapedRaw}">${hasUrl?'原文':'显示原文'}</button><button class="msg-act-btn" type="button" data-msg-copy data-copy="${escapedRaw}">复制</button></div><div class="msg-raw">${esc(numbered)}</div>${rulesHtml}`;
+  return`<div class="msg-content">${esc(raw)}</div><div class="msg-actions"><button class="msg-act-btn" type="button" data-msg-copy data-copy="${escapedRaw}"><span class="icon" data-icon="copy"></span>复制</button></div>${rulesHtml}`;
 }
 /* 规则面板：解析出的完整规则（平台/原创/活动/定时/话题/标题） */
 function makeRulesHtml(rules){
@@ -310,12 +306,12 @@ function taskCard(t,live=false){
   const isCancelling=st==='cancelling';
   const msg=t.message?`<div class="task-msg">${esc(t.message)}</div>`:'';
 
-  /* 元信息行：平台 · 原创 · 活动 · 定时 */
+  /* 元信息行：平台 · 原创 · 活动 · 定时（纯文字，无图标） */
   const meta=[];
-  if(platforms.length)meta.push(`<span class="task-meta-item"><span class="icon" data-icon="send"></span>${esc(platforms.map(p=>platformLabel[p]||p).join('、'))}</span>`);
-  if(isOriginal)meta.push('<span class="task-meta-item"><span class="icon" data-icon="sparkles"></span>原创</span>');
-  if(campaignName)meta.push(`<span class="task-meta-item">活动 <b>${esc(campaignName)}</b></span>`);
-  if(publishAt){const d=new Date(publishAt);if(!isNaN(d)){const pad=n=>String(n).padStart(2,'0');const isExpired=d.getTime()<Date.now();if(isExpired&&st!=='running'&&st!=='queued'){meta.push(`<span class="task-meta-item danger">定时已过期 ${d.getMonth()+1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}</span>`)}else{meta.push(`<span class="task-meta-item">定时 ${d.getMonth()+1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}</span>`)}}}
+  if(platforms.length)meta.push(`<span class="task-meta-item task-meta-platform">${esc(platforms.map(p=>platformLabel[p]||p).join('、'))}</span>`);
+  if(isOriginal)meta.push('<span class="task-meta-item task-meta-original">原创</span>');
+  if(campaignName)meta.push(`<span class="task-meta-item task-meta-campaign"><b>${esc(campaignName)}</b></span>`);
+  if(publishAt){const d=new Date(publishAt);if(!isNaN(d)){const pad=n=>String(n).padStart(2,'0');const isExpired=d.getTime()<Date.now();if(isExpired&&st!=='running'&&st!=='queued'){meta.push(`<span class="task-meta-item danger">定时已过期 ${d.getMonth()+1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}</span>`)}else{meta.push(`<span class="task-meta-item task-meta-time">定时 ${d.getMonth()+1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}</span>`)}}}
   const metaHtml=meta.length?`<div class="task-meta">${meta.join('')}</div>`:'';
 
   /* 执行配置展开区：耗时 + 旁白/字幕/音色/风格 */
@@ -652,7 +648,7 @@ function renderStatus(){
   else{el.status.textContent='没有任务';el.status.className='tb-status'}
 }
 function renderBtns(){if(el.badge&&S.app)el.badge.textContent=`v${S.app.version}`;toggleSendBtn()}
-function toggleSendBtn(){if(!el.runBtn||!el.input)return;el.runBtn.classList.toggle('show',el.input.value.trim().length>0)}
+function toggleSendBtn(){if(!el.runBtn||!el.input)return;const has=el.input.value.trim().length>0;el.runBtn.classList.toggle('show',has);el.optBtn?.classList.toggle('show',has)}
 function renderAll(opts={}){renderStatus();renderChips();renderVC();renderData();fillForm();renderBtns();renderChat(opts);renderStats();injectIcons()}
 
 /* ── State ── */
@@ -1533,7 +1529,7 @@ async function checkVoicebox() {
 }
 
 /* ── Actions ── */
-async function startTasks(forceItems){const raw=el.input?.value?.trim();const pv=S.preview;if(!raw&&!(pv.items&&pv.items.length)){toast('请输入任务','error');return}if(!S.editDefaults?.style&&!S.selectedStyle){toast('建议先在底部菜单选择风格，否则剪辑将无风格指导','info')}try{let payload=raw;const useItems=forceItems||((pv.items&&pv.items.length&&!pv.empty)&&(pv.mode==='optimized'||pv.edited));if(useItems){payload=pv.items.map(t=>({id:t.id,rawLine:t.rawLine,taskName:t.taskName,isOriginal:!!t.isOriginal,videoUrl:t.videoUrl,timeRange:t.timeRange||'',platforms:t.platforms||[],publishCopy:t.publishCopy||'',publishTopics:t.publishTopics||[],campaignName:t.campaignName||'',publishAt:t.publishAt?new Date(t.publishAt):null}))}const r=await window.antbot.startTasks(payload);appendPending({runId:r.runId,inputText:raw||'',rules:useItems&&pv.items&&pv.items.length?pv.items:null});el.input.value='';autoInput();queuePreview();if(r.warnings?.length)toast(r.warnings[0],'info');toast(r.queued?`已排队 (${r.queuePosition})`:`已启动 ${r.taskCount} 条`,'success');renderChat({stick:true})}catch(e){toast(`失败: ${e.message}`,'error')}}
+async function startTasks(forceItems){window.antbot.cancelTaskParse?.();const raw=el.input?.value?.trim();const pv=S.preview;if(!raw&&!(pv.items&&pv.items.length)){toast('请输入任务','error');return}if(!S.editDefaults?.style&&!S.selectedStyle){toast('建议先在底部菜单选择风格，否则剪辑将无风格指导','info')}try{let payload=raw;const useItems=forceItems||((pv.items&&pv.items.length&&!pv.empty)&&(pv.mode==='optimized'||pv.edited));if(useItems){payload=pv.items.map(t=>({id:t.id,rawLine:t.rawLine,taskName:t.taskName,isOriginal:!!t.isOriginal,videoUrl:t.videoUrl,timeRange:t.timeRange||'',platforms:t.platforms||[],publishCopy:t.publishCopy||'',publishTopics:t.publishTopics||[],campaignName:t.campaignName||'',publishAt:t.publishAt?new Date(t.publishAt):null}))}const r=await window.antbot.startTasks(payload);appendPending({runId:r.runId,inputText:raw||'',rules:useItems&&pv.items&&pv.items.length?pv.items:null});el.input.value='';autoInput();queuePreview();if(r.warnings?.length)toast(r.warnings[0],'info');toast(r.queued?`已排队 (${r.queuePosition})`:`已启动 ${r.taskCount} 条`,'success');renderChat({stick:true})}catch(e){toast(`失败: ${e.message}`,'error')}}
 async function stopTasks(){if(!window.confirm('确认停止所有任务？'))return;try{await window.antbot.stopTasks();toast('已停止','success');await refreshAppState().catch(()=>{})}catch(e){toast(`失败: ${e.message}`,'error')}}
 async function saveSettings(){
   try{
@@ -1929,7 +1925,7 @@ function bind(){
   publishPage.bind();
   downloadPage.bind();
   // Task input
-  el.input?.addEventListener('input',()=>{autoInput();queuePreview();renderBtns();toggleSendBtn()});
+  el.input?.addEventListener('input',()=>{window.antbot.cancelTaskParse?.();autoInput();queuePreview();renderBtns();toggleSendBtn()});
   el.input?.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){e.preventDefault();void startTasks()}});
   el.runBtn?.addEventListener('click',()=>void startTasks());
   el.optBtn?.addEventListener('click',()=>void optimizeInput());

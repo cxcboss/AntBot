@@ -268,7 +268,12 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
     return result.canceled || !result.filePaths?.length ? '' : result.filePaths[0];
   });
 
+  let parseAbort = null;
   ipcMain.handle('task:parse', async (_event, inputText, opts = {}) => {
+    // 新解析开始前取消上一次进行中的 AI 请求（优化结果未出用户已发送的场景）
+    if (parseAbort) { parseAbort.abort(); parseAbort = null; }
+    parseAbort = new AbortController();
+    const signal = parseAbort.signal;
     const smart = Boolean(opts?.smart);
     let apiConfig = null;
     const settings = await store.getSettings();
@@ -277,7 +282,14 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
       apiConfig = hasApiConfig(settings?.api) ? settings.api : null;
     }
     const taskDefaults = settings?.taskDefaults || null;
-    return await parseTaskInputSmart(String(inputText || ''), { apiConfig, taskDefaults, log: (msg) => appLog('info', `[ai-parse] ${msg}`) });
+    const result = await parseTaskInputSmart(String(inputText || ''), { apiConfig, taskDefaults, signal, log: (msg) => appLog('info', `[ai-parse] ${msg}`) });
+    if (signal.aborted) parseAbort = null;
+    return result;
+  });
+
+  ipcMain.handle('task:parse-cancel', async () => {
+    if (parseAbort) { parseAbort.abort(); parseAbort = null; }
+    return { ok: true };
   });
 
   ipcMain.handle('task:start', async (_event, inputText) => {

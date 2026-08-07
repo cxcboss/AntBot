@@ -65,6 +65,7 @@ contextBridge.exposeInMainWorld('antbot', {
   onToast: (cb) => on('app:toast', cb),
   onUpdateProgress: (cb) => on('update:progress', cb),
   parseTasks: (input, opts) => ipcRenderer.invoke('task:parse', input, opts),
+  cancelTaskParse: () => ipcRenderer.invoke('task:parse-cancel'),
   startTasks: (input) => ipcRenderer.invoke('task:start', input),
   clearHistory: () => ipcRenderer.invoke('history:clear'),
   removeHistory: (recordId) => ipcRenderer.invoke('history:remove', recordId),

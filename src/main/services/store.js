@@ -476,6 +476,16 @@ class StoreService {
       }
     }
 
+    // v7：历史记录翻新——清空旧版主控历史，改用新的写入规则
+    if (version < 7) {
+      for (const user of this.state.users || []) {
+        if (Array.isArray(user.history) && user.history.length) {
+          user.history = [];
+          changed = true;
+        }
+      }
+    }
+
     return changed;
   }
 
@@ -644,6 +654,14 @@ class StoreService {
   async appendHistoryForUser(userId, runRecord) {
     await this.load();
     const user = this.getActiveUserRecord();
+    if (!runRecord || !Array.isArray(runRecord.items) || !runRecord.items.length) {
+      return clone(user.history);
+    }
+    // 同 runId 不重复写入（任务重试/多次完成可能重复 append）
+    const runId = String(runRecord.id || '');
+    if (runId) {
+      user.history = user.history.filter(r => String(r.id || '') !== runId);
+    }
     user.history.unshift(clone(runRecord));
     user.history = user.history.slice(0, 200);
     this.touchUser(user);

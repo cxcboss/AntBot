@@ -216,7 +216,7 @@ function parseAIJson(content) {
   return JSON.parse(match[0]);
 }
 
-async function callAIParser(inputText, apiConfig, log = () => {}) {
+async function callAIParser(inputText, apiConfig, log = () => {}, abortSignal = null) {
   if (!hasApiConfig(apiConfig)) {
     throw new Error('未配置 AI 解析所需的 API 配置');
   }
@@ -227,7 +227,7 @@ async function callAIParser(inputText, apiConfig, log = () => {}) {
       { role: 'user', content: inputText }
     ],
     4000,
-    null,
+    abortSignal,
     log
   );
   return parseAIJson(content);
@@ -429,7 +429,7 @@ function parseByRules(inputText, taskDefaults = null) {
 /* ── 主入口 ── */
 
 async function parseTaskInputSmart(inputText, options = {}) {
-  const { apiConfig, log = () => {}, taskDefaults = null } = options;
+  const { apiConfig, log = () => {}, taskDefaults = null, signal = null } = options;
   const lines = splitLines(inputText);
   const warnings = [];
   if (!lines.length) return { tasks: [], warnings, source: 'none' };
@@ -439,7 +439,7 @@ async function parseTaskInputSmart(inputText, options = {}) {
   const useAI = shouldUseAI(inputText);
   if (useAI && apiConfig) {
     try {
-      parsed = await callAIParser(inputText, apiConfig, log);
+      parsed = await callAIParser(inputText, apiConfig, log, signal);
       source = 'ai';
     } catch (err) {
       warnings.push(`AI 解析失败，已按默认规则识别：${err.message}`);
