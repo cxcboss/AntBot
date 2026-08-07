@@ -400,6 +400,16 @@ class TaskRunner {
       if (requestUserId && row.userId !== requestUserId) {
         throw new Error('不能恢复其他用户的任务。');
       }
+      // 视频已生成（发布阶段失败/停止）：直接重试发布，跳过下载/识别/合成
+      if (row.outputPath) {
+        const fsSync = require('node:fs');
+        try {
+          const stat = fsSync.statSync(row.outputPath);
+          if (stat.isFile() && stat.size > 0) {
+            return await this.resumePublishOnly(row, requestUser);
+          }
+        } catch {}
+      }
       // Clear __stopped on both the job payload task AND the queue reference
       const tasks = this.currentJob?.payload?.tasks || [];
       const debugTask = this.currentJob?.payload?.task;
@@ -481,6 +491,44 @@ class TaskRunner {
     }
 
     throw new Error('任务不存在或无法恢复。');
+  }
+
+  /**
+   * 视频已生成（发布阶段失败/停止）：跳过下载/识别/合成，直接重试发布
+   */
+  async resumePublishOnly(row, requestUser = {}) {
+    const targetId = String(row?.id || '');
+    if (!targetId) throw new Error('缺少任务。');
+
+    const task = {
+      id: targetId,
+      rawLine: row.rawLine || '',
+      taskName: row.taskName || '',
+      isOriginal: Boolean(row.isOriginal),
+      videoUrl: row.videoUrl || '',
+      timeRange: row.timeRange || '',
+      platforms: Array.isArray(row.platforms) ? row.platforms : [],
+      publishCopy: row.publishCopy || '',
+      publishTopics: Array.isArray(row.publishTopics) ? row.publishTopics : [],
+      campaignName: row.campaignName || '',
+      publishAt: row.publishAt ? new Date(row.publishAt) : null
+    };
+
+    this.setTaskState(targetId, { status: 'running', progress: 80, step: '重新发布', message: '正在重新发布...' });
+    try {
+      const settings = this.store ? await this.store.getSettings() : {};
+      const { publishVideo } = require('./services/publisher');
+      const result = await publishVideo({ task, settings, outputPath: row.outputPath, log: (msg) => this.log(targetId, msg) });
+      const publishedPlatforms = result?.platforms || [];
+      const platformNames = publishedPlatforms.map(p => p === 'videoChannel' ? '视频号' : '抖音').join('、');
+      this.setTaskState(targetId, { status: 'completed', progress: 100, step: '完成', message: platformNames ? `已发布到 ${platformNames}` : '任务完成', outputPath: row.outputPath });
+      this.savePersistedTask(this.progressRows.find(r => r.id === targetId));
+      return { resumed: true, taskId: targetId, publishOnly: true };
+    } catch (pubErr) {
+      this.setTaskState(targetId, { status: 'warning', progress: 100, step: '部分完成', message: `发布失败: ${pubErr.message}`, outputPath: row.outputPath });
+      this.savePersistedTask(this.progressRows.find(r => r.id === targetId));
+      throw new Error(`发布失败: ${pubErr.message}`);
+    }
   }
 
   enqueueTasks(tasks, userContext = {}, inputText = '') {
@@ -955,8 +1003,10 @@ class TaskRunner {
             }
             return { status: 'completed', retryable: false };
           } catch (pubErr) {
-            this.setTaskState(task.id, { status: 'failed', step: '发布失败', message: pubErr.message, attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit, outputPath: outPath });
-            runRecord.items.push(commitItem('failed', { message: pubErr.message, finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, retryable: true }));
+            // 视频已生成仅发布失败：保持 warning + 持久化 outputPath（界面显示"重新发布"，重启后仍可重发）
+            this.setTaskState(task.id, { status: 'warning', progress: 100, step: '部分完成', message: `发布失败: ${pubErr.message}`, attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit, outputPath: outPath });
+            this.savePersistedTask(this.progressRows.find(r => r.id === task.id));
+            runRecord.items.push(commitItem('warning', { outputPath: outPath, publishedPlatforms: [], publishMode: 'failed', finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, message: '发布失败，但视频已生成', retryable: true }));
             return { status: 'failed', retryable: true };
           }
         }
