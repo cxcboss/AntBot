@@ -4,7 +4,7 @@ const { app } = require('electron');
 const { buildDefaultSettings, getSettingsOverridesFromEnv } = require('./config');
 
 const STORE_FILE = 'antbot-store.json';
-const STORE_SCHEMA_VERSION = 6;
+const STORE_SCHEMA_VERSION = 7;
 const DEFAULT_USER_ID = 'user-1';
 const DEFAULT_USER_NAME = '蚂蚁1';
 const LEGACY_SUBTITLE_TEXT_COLORS = new Set(['', '#FFDD00']);
