@@ -565,6 +565,10 @@ async function publishNextVideo() {
   publishState.publishStartTime = Date.now();
   await clearAbortFlag();
   const video = publishState.videos[publishState.currentIndex];
+  // 每视频独立参数（发布页按视频×平台设置）；无则用全局 settings
+  const vs = video.settings || publishState.settings;
+  publishState.currentSettings = vs;
+  if (vs.scheduleTime) publishState.scheduledTime = vs.scheduleTime;
   console.log('[BG] 发布:', publishState.currentIndex, video.name);
   sendProgress(`发布中: ${video.name}`, 'publishing', publishState.currentIndex, publishState.videos.length);
 
@@ -587,18 +591,18 @@ async function publishNextVideo() {
   publishState.targetTabId = tab.id;
 
   const needDbg = publishState.platform === 'douyin' || (publishState.platform === 'weixin' &&
-    (publishState.settings.scheduledPublish || publishState.videos.length > 1));
+    (publishState.currentSettings?.scheduledPublish || publishState.videos.length > 1));
   if (needDbg) await attachDebugger(tab.id);
   startPublishTimeout();
 }
 
 // ========== 超时重试 ==========
 
-function getTimeoutMs() { return (parseInt(publishState.settings?.timeoutSeconds) || 120) * 1000; }
+function getTimeoutMs() { return (parseInt(publishState.currentSettings?.timeoutSeconds || publishState.settings?.timeoutSeconds) || 120) * 1000; }
 
 function startPublishTimeout() {
   clearPublishTimeout();
-  if (!publishState.settings.autoRetry) return;
+  if (!(publishState.currentSettings?.autoRetry ?? publishState.settings.autoRetry)) return;
   const timeoutMs = getTimeoutMs();
   console.log(`[BG] 启动超时定时器: ${timeoutMs}ms (${publishState.settings.timeoutSeconds}s), autoRetry=${publishState.settings.autoRetry}`);
   const currentIdx = publishState.currentIndex;
@@ -612,7 +616,7 @@ function startPublishTimeout() {
 
     const idx = publishState.currentIndex;
     const retries = publishState.retryCounts[idx] || 0;
-    const max = publishState.settings.maxRetries || 1;
+    const max = publishState.currentSettings?.maxRetries || publishState.settings.maxRetries || 1;
     const cmdSent = publishState.commandSent;
 
     console.log(`[BG] 超时触发 (retries=${retries}, max=${max}, commandSent=${cmdSent})`);
@@ -698,7 +702,7 @@ async function finishAllPublish() {
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   if (!publishState.isPublishing || publishState.targetTabId !== tabId) return;
   const needDbg = publishState.platform === 'douyin' || (publishState.platform === 'weixin' &&
-    (publishState.settings.scheduledPublish || publishState.videos.length > 1));
+    (publishState.currentSettings?.scheduledPublish || publishState.videos.length > 1));
   if (needDbg && !publishState.debuggerAttached && (changeInfo.status === 'loading' || changeInfo.status === 'complete')) {
     await attachDebugger(tabId);
   }
@@ -765,7 +769,7 @@ async function handleVideoPublishDone() {
   publishState.publishRecords.push({
     videoName: video.name, videoPath: publishState.videoPath || '',
     platform: publishState.platform, publishTime: new Date().toISOString(),
-    status: 'success', scheduled: publishState.settings.scheduledPublish || false, scheduledTime: publishState.scheduledTime
+    status: 'success', scheduled: publishState.currentSettings?.scheduledPublish || false, scheduledTime: publishState.scheduledTime
   });
   if (publishState.targetTabId) detachDebugger(publishState.targetTabId);
   publishState.currentIndex++; publishState.debuggerAttached = false; publishState.commandSent = false;
@@ -817,7 +821,7 @@ async function sendPublishCommand(tabId) {
   const video = publishState.videos[publishState.currentIndex];
   try {
     const response = await chrome.tabs.sendMessage(tabId, {
-      action: 'startPublish', videos: [video], settings: publishState.settings,
+      action: 'startPublish', videos: [video], settings: publishState.currentSettings || publishState.settings,
       videoPath: publishState.videoPath, videoIndex: publishState.currentIndex, totalVideos: publishState.totalVideos
     });
     // S3: 内容脚本明确报告失败 → 立即记录失败并推进下一个视频，不再挂等 App 端超时
@@ -840,7 +844,7 @@ function sendProgress(step, detail, current, total, done) {
     platformName, totalVideos: publishState.totalVideos,
     publishStartTime: publishState.publishStartTime || Date.now(),
     retryCount: publishState.retryCounts[publishState.currentIndex] || 0,
-    timeoutSeconds: parseInt(publishState.settings?.timeoutSeconds) || 120,
+    timeoutSeconds: parseInt(publishState.currentSettings?.timeoutSeconds || publishState.settings?.timeoutSeconds) || 120,
     status: detail === 'done' ? 'done' : (detail === 'error' ? 'error' : (detail === 'publishing' ? 'publishing' : (detail === 'skipped' ? 'skipped' : 'pending')))
   };
   chrome.runtime.sendMessage({ action: 'progressUpdate', ...event }).catch(() => {});
@@ -886,6 +890,17 @@ async function generateAIContent(videoName, settings) {
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 function calculateScheduledTime(videoIndex, firstVideoScheduled = false) {
+  const vs = publishState.currentSettings || {};
+  // 精确时间（发布页每视频独立定时）：直接用该视频的时间，不叠加间隔
+  if (vs.exactTime && vs.scheduleTime) {
+    const d = new Date(vs.scheduleTime);
+    if (!isNaN(d.getTime())) {
+      const p = v => String(v).padStart(2, '0');
+      const timeStr = `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+      publishState.scheduledTime = d.toISOString();
+      return timeStr;
+    }
+  }
   let baseTime;
   if (videoIndex === 0 && publishState.scheduledTime) baseTime = new Date(publishState.scheduledTime);
   else if (publishState.scheduledTime) { baseTime = new Date(publishState.scheduledTime); baseTime.setMinutes(baseTime.getMinutes() + 40 + Math.floor(Math.random() * 49)); }
