@@ -619,6 +619,45 @@ body:not([data-platform="darwin"]) .toasts{top:8px}
 .publish-history-open:hover{background:var(--muted)}
 .publish-settings-card{padding:12px 20px;border-top:1px solid var(--border);flex-shrink:0;display:flex;flex-direction:column;gap:10px}
 
+/* ── 发布页 v2：全局默认 + 每视频×每平台 ── */
+.pv2-defaults{padding:10px 20px;border-bottom:1px solid var(--border);background:var(--card);flex-shrink:0;display:flex;flex-direction:column;gap:8px}
+.pv2-defaults-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.pv2-section-label{font-size:12px;font-weight:600;color:var(--foreground)}
+.pv2-plat-tabs{display:flex;gap:2px;background:var(--muted);border-radius:var(--radius);padding:2px}
+.pv2-plat-tab{padding:3px 12px;border-radius:var(--radius-sm);font-size:12px;color:var(--muted-foreground);background:transparent;border:0;cursor:pointer;transition:all var(--transition-fast)}
+.pv2-plat-tab.active{background:var(--card);color:var(--foreground);box-shadow:var(--shadow-xs)}
+.pv2-default-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.pv2-chip{display:inline-flex;align-items:center;padding:2px 12px;border-radius:var(--radius-full);font-size:12px;background:var(--muted);color:var(--muted-foreground);cursor:pointer;transition:all var(--transition-fast);line-height:20px;border:1px solid transparent}
+.pv2-chip:hover{border-color:var(--muted-foreground)}
+.pv2-chip-original{background:var(--accent);color:var(--accent-foreground)}
+.pv2-chip-time{color:var(--foreground)}
+.pv2-chip-disabled{opacity:.5;cursor:not-allowed}
+.pv2-activity-input,.pv2-copy-input,.pv2-topics-input{height:26px;padding:0 10px;border-radius:var(--radius);border:1px solid var(--border);background:var(--card);color:var(--foreground);font-size:12px;outline:none;min-width:0}
+.pv2-activity-input{width:160px}
+.pv2-copy-input{flex:1;min-width:160px}
+.pv2-topics-input{width:200px}
+.pv2-activity-input:focus,.pv2-copy-input:focus,.pv2-topics-input:focus{border-color:var(--ring);box-shadow:0 0 0 3px color-mix(in srgb, var(--ring) 15%, transparent)}
+.pv2-activity-input:disabled{opacity:.5}
+.pv2-card{border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--card);padding:10px 14px;display:flex;flex-direction:column;gap:8px}
+.pv2-card.failed{border-color:color-mix(in srgb, var(--destructive) 40%, transparent)}
+.pv2-card-head{display:flex;align-items:center;gap:8px}
+.pv2-card-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:600}
+.pv2-card-size{font-size:11px;color:var(--muted-foreground);flex-shrink:0}
+.pv2-card-status{font-size:11px;color:var(--warning);flex-shrink:0}
+.pv2-card-plats{display:flex;gap:4px}
+.pv2-plat-chip{padding:2px 10px;border-radius:var(--radius-full);font-size:11px;border:1px solid var(--border);background:var(--card);color:var(--muted-foreground);cursor:pointer;transition:all var(--transition-fast)}
+.pv2-plat-chip.on{background:var(--primary);color:var(--primary-foreground);border-color:var(--primary)}
+.pv2-card-params{display:flex;flex-direction:column;gap:6px;padding-left:2px}
+.pv2-plat-ind{font-size:11px;color:var(--muted-foreground)}
+.pv2-param-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.pv2-time-picker{display:flex;align-items:center;gap:8px;padding:4px 8px;background:var(--muted);border-radius:var(--radius);max-width:320px}
+.pv2-time-picker.hidden{display:none}
+.pv2-date{height:26px;padding:0 8px;border-radius:var(--radius);border:1px solid var(--border);background:var(--card);color:var(--foreground);font-size:12px;outline:none}
+.pv2-time{height:26px;padding:0 8px;border-radius:var(--radius);border:1px solid var(--border);background:var(--card);color:var(--foreground);font-size:12px;outline:none}
+.pv2-history-item{display:flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-lg);margin-bottom:6px}
+.pv2-history-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
+.pv2-history-meta{font-size:11px;color:var(--muted-foreground);flex-shrink:0}
+
 .ps-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .ps-label{font-size:12px;color:var(--muted-foreground);flex-shrink:0}
 .ps-platform-btns{display:flex;gap:4px}

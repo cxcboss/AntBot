@@ -139,41 +139,32 @@
               </div>
               <div class="publish-bridge-status" id="publish-bridge-status"><span class="publish-status-dot"></span><span>未连接</span></div>
             </div>
+            <!-- 全局默认设置 -->
+            <section class="pv2-defaults" id="pv2-defaults">
+              <div class="pv2-defaults-head">
+                <span class="pv2-section-label">全局默认（应用到全部）</span>
+                <div class="pv2-plat-tabs" id="pv2-default-tabs">
+                  <button class="pv2-plat-tab active" data-plat="videoChannel" type="button">视频号</button>
+                  <button class="pv2-plat-tab" data-plat="douyin" type="button">抖音</button>
+                </div>
+              </div>
+              <div class="pv2-default-row">
+                <span class="pv2-chip" data-def="original" id="pv2-def-original">不原创</span>
+                <span class="pv2-chip pv2-chip-time" id="pv2-def-time" title="点击设置定时">立即发布</span>
+                <input class="pv2-activity-input" id="pv2-def-activity" type="text" placeholder="活动名（留空=不参加）" />
+                <button class="btn btn-sm btn-ghost" id="pv2-copy-plat" type="button" title="复制当前平台默认到另一平台">复制到抖音</button>
+                <button class="btn btn-sm btn-primary" id="pv2-apply-all" type="button">应用到全部</button>
+              </div>
+              <div class="pv2-default-row">
+                <input class="pv2-copy-input" id="pv2-def-copy" type="text" placeholder="发布文案（留空=默认）" />
+                <input class="pv2-topics-input" id="pv2-def-topics" type="text" placeholder="#话题1 #话题2" />
+              </div>
+            </section>
             <!-- 视频列表区 -->
             <div class="publish-list" id="publish-list">
               <div class="publish-video-list" id="publish-video-list"><div class="publish-empty">拖拽视频文件到此处，或点击下方"添加"按钮</div></div>
               <div class="publish-history-list hidden" id="publish-history-list"></div>
             </div>
-            <!-- 发布设置 -->
-            <section class="publish-settings-card">
-              <!-- 平台选择 -->
-              <div class="ps-row">
-                <span class="ps-label">平台</span>
-                <div class="ps-platform-btns">
-                  <button class="ps-platform-btn active" data-platform="videoChannel" type="button">视频号</button>
-                  <button class="ps-platform-btn" data-platform="douyin" type="button">抖音</button>
-                </div>
-                <div class="ps-toggles">
-                  <label class="ps-toggle-label"><span class="ps-toggle" id="publish-original-toggle"></span><span>原创</span></label>
-                  <label class="ps-toggle-label"><span class="ps-toggle" id="publish-scheduled-toggle"></span><span>定时</span></label>
-                </div>
-              </div>
-              <!-- 定时选择（默认隐藏） -->
-              <div class="ps-schedule hidden" id="publish-schedule-wrapper">
-                <input id="publish-schedule-time" type="time" value="10:30" disabled />
-                <select id="publish-schedule-month" disabled></select>
-                <select id="publish-schedule-day" disabled></select>
-              </div>
-              <!-- 文案 + 话题 -->
-              <div class="ps-field">
-                <label class="ps-field-label">发布文案</label>
-                <textarea id="publish-copy" rows="2" placeholder="可选；留空时使用默认规则"></textarea>
-              </div>
-              <div class="ps-field">
-                <label class="ps-field-label">话题标签</label>
-                <input id="publish-topics" type="text" placeholder="#动画 #游戏视频" />
-              </div>
-            </section>
             <!-- 底部控制栏 -->
             <div class="publish-bar">
               <div class="publish-bar-left">
@@ -184,7 +175,7 @@
                 <span id="publish-result" class="publish-result"></span>
               </div>
               <div class="publish-bar-right">
-                <button class="btn btn-primary" id="publish-main-btn" type="button" disabled>通过浏览器发布</button>
+                <button class="btn btn-primary" id="publish-main-btn" type="button" disabled>批量发布</button>
               </div>
             </div>
           </div>

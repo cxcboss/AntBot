@@ -4,6 +4,24 @@ const os = require('node:os');
 const path = require('node:path');
 
 function register({ ipcMain, store, mainWindowRef, appLog }) {
+  const PUBLISH_TASKS_FILE = path.join(os.homedir(), 'AntBot', 'publish-tasks.json');
+
+  ipcMain.handle('publish:tasks-load', async () => {
+    try {
+      return JSON.parse(await fs.readFile(PUBLISH_TASKS_FILE, 'utf-8'));
+    } catch { return []; }
+  });
+
+  ipcMain.handle('publish:tasks-save', async (_event, tasks) => {
+    try {
+      await fs.mkdir(path.dirname(PUBLISH_TASKS_FILE), { recursive: true });
+      await fs.writeFile(PUBLISH_TASKS_FILE, JSON.stringify(Array.isArray(tasks) ? tasks : [], null, 2), 'utf-8');
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
+
   ipcMain.handle('publish:bridge-status', async () => {
     const { createBrowserPublishBridge } = require('../services/browserPublishBridge');
     const settings = await store.getSettings();
@@ -91,10 +109,25 @@ function register({ ipcMain, store, mainWindowRef, appLog }) {
       throw new Error('请先选择视频');
     }
     const platform = String(payload.platform || settings.publish?.platform || 'videoChannel');
+    // 每视频定时过期降级：时间已过 → 取消定时立即发布（发布页 5 天窗口可能轮到时已过期）
+    const notices = [];
+    const normalizedVideos = videos.map(v => {
+      const vs = v.settings || {};
+      let scheduled = vs.scheduledPublish !== false;
+      if (scheduled && vs.scheduleTime) {
+        const t = new Date(vs.scheduleTime);
+        if (!isNaN(t.getTime()) && t.getTime() <= Date.now()) {
+          scheduled = false;
+          notices.push(`${v.name || ''}: 定时时间已过，改为立即发布`);
+        }
+      }
+      return { ...v, settings: { ...vs, scheduledPublish: scheduled, exactTime: true } };
+    });
+    if (notices.length) appLog('info', `[publish] 定时降级: ${notices.join('; ')}`);
     appLog('info', `[publish] 视频数量: ${videos.length}, 平台: ${platform}, baseUrl: ${config.baseUrl}`);
     try {
       const result = await createBrowserPublishBridge({ baseUrl: config.baseUrl, timeoutMs: config.timeoutMs }).publish({
-        videos,
+        videos: normalizedVideos,
         settings: payload.settings || {},
         videoPath: payload.videoPath || path.dirname(videos[0].path || ''),
         platform: platform === 'videoChannel' ? 'weixin' : platform,
@@ -105,6 +138,7 @@ function register({ ipcMain, store, mainWindowRef, appLog }) {
           if (win && !win.isDestroyed()) win.webContents.send('publish:progress', event);
         }
       });
+      if (notices.length) result.notices = (result.notices || []).concat(notices);
       appLog('info', '[publish] 发布完成');
       return result;
     } catch (error) {

@@ -1,431 +1,479 @@
+/* 发布页 v2：每视频 × 每平台独立参数（文案/话题/定时/原创/活动） */
 export function createPublishPage({ state: S, esc }) {
-function bindPublishPage(){
-  const pick = document.getElementById('publish-pick-videos-btn');
-  const platformBtns = document.querySelectorAll('.ps-platform-btn');
-  const originalToggle = document.getElementById('publish-original-toggle');
-  const scheduledToggle = document.getElementById('publish-scheduled-toggle');
-  const scheduleWrapper = document.getElementById('publish-schedule-wrapper');
-  const scheduleMonth = document.getElementById('publish-schedule-month');
-  const scheduleDay = document.getElementById('publish-schedule-day');
-  const scheduleTime = document.getElementById('publish-schedule-time');
-  const mainBtn = document.getElementById('publish-main-btn');
-  const publishView = document.getElementById('view-publish');
-  const videoList = document.getElementById('publish-video-list');
-  const historyList = document.getElementById('publish-history-list');
-  const tabPending = document.getElementById('publish-tab-pending');
-  const tabDone = document.getElementById('publish-tab-done');
-  const pendingCount = document.getElementById('publish-pending-count');
-  const doneCount = document.getElementById('publish-done-count');
-  const bridgeToggleBtn = document.getElementById('publish-bridge-toggle-btn');
-  let draggedItem = null;
-  let draggedIndex = -1;
-  let currentTab = 'pending';
-  let publishProgress = {};
-  let serviceRunning = false;
+  function bindPublishPage() {
+    const pick = document.getElementById('publish-pick-videos-btn');
+    const mainBtn = document.getElementById('publish-main-btn');
+    const publishView = document.getElementById('view-publish');
+    const videoList = document.getElementById('publish-video-list');
+    const historyList = document.getElementById('publish-history-list');
+    const tabPending = document.getElementById('publish-tab-pending');
+    const tabDone = document.getElementById('publish-tab-done');
+    const pendingCount = document.getElementById('publish-pending-count');
+    const doneCount = document.getElementById('publish-done-count');
+    const bridgeToggleBtn = document.getElementById('publish-bridge-toggle-btn');
+    const bridgeStatus = document.getElementById('publish-bridge-status');
+    let currentTab = 'pending';
+    let serviceRunning = false;
 
-  S.publish = { videos: [], requestId: '', running: false, history: [] };
-  const formatSize = bytes => { const n=Number(bytes||0); if(n===0) return ''; return n>1024*1024?`${(n/1024/1024).toFixed(1)}MB`:`${Math.round(n/1024)}KB`; };
-  const formatTime = (d) => { const date=new Date(d); return `${date.getMonth()+1}/${date.getDate()} ${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}`; };
-  const getFileName = (path) => path.split(/[\\/]/).pop();
+    S.publish = { videos: [], defaults: { videoChannel: defaultParams(), douyin: defaultParams() }, history: S.publish?.history || [], running: false };
 
-  // 加载已发布的记录
-  const loadPublishHistory = async () => {
-    try {
-      const records = await window.antbot.publishGetRecords();
-      S.publish.history = records || [];
-      render();
-    } catch (e) {
-      console.error('加载发布记录失败:', e);
+    const PLATFORM_LABEL = { videoChannel: '视频号', douyin: '抖音' };
+    const formatSize = bytes => { const n = Number(bytes || 0); if (!n) return ''; return n > 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)}MB` : `${Math.round(n / 1024)}KB`; };
+    const getFileName = p => String(p || '').split(/[\\/]/).pop();
+    const fmtTime = d => { const x = new Date(d); if (isNaN(x)) return ''; const p = n => String(n).padStart(2, '0'); return `${p(x.getHours())}:${p(x.getMinutes())}`; };
+
+    function defaultParams() {
+      return { isOriginal: false, publishAt: null, campaignName: '', publishCopy: '', publishTopics: [] };
     }
-  };
+    const otherPlat = p => p === 'videoChannel' ? 'douyin' : 'videoChannel';
+    const cloneParams = p => ({ ...p, publishTopics: Array.isArray(p.publishTopics) ? p.publishTopics.slice() : [] });
 
-  // 保存发布记录到本地
-  const savePublishRecord = async (record) => {
-    try {
-      await window.antbot.publishSaveRecord(record);
-    } catch (e) {
-      console.error('保存发布记录失败:', e);
+    /* 5 天窗口日期选项 */
+    function dateOptions(selected) {
+      const now = new Date();
+      const opts = [];
+      for (let i = 0; i < 5; i++) {
+        const d = new Date(now); d.setDate(d.getDate() + i);
+        const label = i === 0 ? '今天' : i === 1 ? '明天' : `${d.getMonth() + 1}/${d.getDate()}`;
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        opts.push(`<option value="${key}"${key === selected ? ' selected' : ''}>${label}</option>`);
+      }
+      return opts.join('');
     }
-  };
 
-  const getDaysInMonth = (year, month) => new Date(year, month, 0).getDate();
-
-  const isFutureDateTime = (month, day, time) => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const [hours, minutes] = (time || '10:30').split(':').map(Number);
-    const selected = new Date(year, month - 1, day, hours, minutes);
-    return selected > now;
-  };
-
-  const updateDaysSelect = () => {
-    const month = parseInt(scheduleMonth.value);
-    const now = new Date();
-    const daysInMonth = getDaysInMonth(now.getFullYear(), month);
-    const currentDay = parseInt(scheduleDay.value) || now.getDate();
-    scheduleDay.innerHTML = '';
-    for(let i = 1; i <= daysInMonth; i++) {
-      const option = document.createElement('option');
-      option.value = i;
-      option.textContent = `${i}日`;
-      if(i === Math.min(currentDay, daysInMonth)) option.selected = true;
-      scheduleDay.appendChild(option);
-    }
-  };
-
-  const setDefaultSchedule = () => {
-    const now = new Date();
-    scheduleMonth.value = now.getMonth() + 1;
-    const nextHour = now.getHours() + 1;
-    scheduleTime.value = `${String(nextHour >= 24 ? 0 : nextHour).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-    updateDaysSelect();
-    scheduleDay.value = now.getDate();
-  };
-
-  const validateSchedule = () => {
-    if (!scheduledToggle.classList.contains('on')) return true;
-    const month = parseInt(scheduleMonth.value);
-    const day = parseInt(scheduleDay.value);
-    return isFutureDateTime(month, day, scheduleTime.value);
-  };
-
-  const addVideos = async (filePaths) => {
-    const newVideos = filePaths.map(path => ({
-      path, name: getFileName(path), size: 0, status: 'pending'
-    }));
-    S.publish.videos = [...S.publish.videos, ...newVideos];
-    render();
-    for(let i = S.publish.videos.length - newVideos.length; i < S.publish.videos.length; i++) {
+    /* ── 持久化 ── */
+    const saveTasks = () => { window.antbot.publishTasksSave(S.publish.videos).catch(() => {}); };
+    const loadTasks = async () => {
       try {
-        const info = await window.antbot.getVideoInfo(S.publish.videos[i].path);
-        S.publish.videos[i].size = info.size || 0;
-      } catch {}
-    }
-    render();
-  };
+        const tasks = await window.antbot.publishTasksLoad();
+        if (Array.isArray(tasks) && tasks.length) {
+          S.publish.videos = tasks.map(t => ({
+            ...t,
+            params: {
+              videoChannel: { ...defaultParams(), ...(t.params?.videoChannel || {}) },
+              douyin: { ...defaultParams(), ...(t.params?.douyin || {}) }
+            },
+            platforms: Array.isArray(t.platforms) && t.platforms.length ? t.platforms : ['videoChannel'],
+            status: 'pending', message: ''
+          }));
+        }
+      } catch (e) { console.error('加载发布任务失败:', e); }
+    };
+    const loadPublishHistory = async () => {
+      try { S.publish.history = (await window.antbot.publishGetRecords()) || []; } catch {}
+    };
 
-  const render = () => {
-    pendingCount.textContent = S.publish.videos.filter(v => v.status === 'pending' || v.status === 'publishing').length;
-    doneCount.textContent = S.publish.history.length;
+    /* ── 视频添加 ── */
+    const addVideos = (paths) => {
+      const dflt = S.publish.defaults;
+      for (const p of paths) {
+        S.publish.videos.push({
+          id: `pv-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          path: p, name: getFileName(p), size: 0,
+          platforms: ['videoChannel'],
+          params: { videoChannel: cloneParams(dflt.videoChannel), douyin: cloneParams(dflt.douyin) },
+          status: 'pending', message: ''
+        });
+      }
+      saveTasks(); render();
+    };
 
-    if (currentTab === 'pending') {
-      videoList.classList.remove('hidden');
-      historyList.classList.add('hidden');
-      renderPendingList();
-    } else {
-      videoList.classList.add('hidden');
-      historyList.classList.remove('hidden');
-      renderHistoryList();
-    }
+    /* ── 渲染 ── */
+    function renderCard(v, i) {
+      const st = v.status || 'pending';
+      const badge = st === 'running' ? '发布中' : st === 'done' ? '成功' : st === 'failed' ? '失败' : '';
+      const platChips = ['videoChannel', 'douyin'].map(p =>
+        `<button class="pv2-plat-chip${v.platforms.includes(p) ? ' on' : ''}" data-card-plat="${i}:${p}" type="button">${PLATFORM_LABEL[p]}</button>`).join('');
 
-    if (S.publish.running) {
-      mainBtn.textContent = '停止发布';
-      mainBtn.className = 'btn btn-danger';
-      mainBtn.disabled = false;
-    } else if (S.publish.videos.some(v => v.status === 'pending')) {
-      mainBtn.textContent = '通过浏览器发布';
-      mainBtn.className = 'btn btn-primary';
-      mainBtn.disabled = !validateSchedule() || !serviceRunning;
-    } else {
-      mainBtn.textContent = '通过浏览器发布';
-      mainBtn.className = 'btn btn-primary';
-      mainBtn.disabled = true;
-    }
-  };
-
-  const renderPendingList = () => {
-    const allVideos = S.publish.videos;
-    const hasPublishing = allVideos.some(v => v.status === 'publishing');
-
-    if (!allVideos.length) {
-      videoList.innerHTML = '<div class="publish-empty">拖拽视频文件到此处，或点击"添加视频"</div>';
-      return;
-    }
-
-    videoList.innerHTML = allVideos.map((v,i) => {
-      const publishing = v.status === 'publishing';
-      const statusText = publishProgress[v.path] || (publishing ? '发布中...' : '');
-      return `<div class="publish-video-item ${publishing ? 'publishing' : ''}" draggable="${!publishing}" data-path="${esc(v.path)}">
-        ${publishing ? '' : '<span class="publish-video-drag-handle">⋮⋮</span>'}
-        <span class="publish-video-index">${publishing ? '<span class="icon" data-icon="loader"></span>' : i+1}</span>
-        <span class="publish-video-name" title="${esc(v.path)}">${esc(v.name)}</span>
-        ${statusText ? `<span class="publish-video-status">${esc(statusText)}</span>` : ''}
-        <span class="publish-video-meta">${formatSize(v.size)}</span>
-        ${publishing ? '' : `<button class="publish-video-remove" data-path="${esc(v.path)}" title="移除">×</button>`}
+      // 当前平台（优先第一个选中平台）
+      const curPlat = v.platforms[0] || 'videoChannel';
+      const paramsFor = (plat) => {
+        const q = v.params[plat];
+        const isD = plat === 'douyin';
+        const hasCampaign = !!q.campaignName;
+        const canSchedule = !(isD && hasCampaign);
+        const campDisabled = isD && !!q.publishAt;
+        const timeChip = q.publishAt
+          ? `定时 ${new Date(q.publishAt).getMonth() + 1}/${new Date(q.publishAt).getDate()} ${fmtTime(q.publishAt)}`
+          : '立即发布';
+        const origChip = `<span class="pv2-chip${q.isOriginal ? ' pv2-chip-original' : ''}" data-card-orig="${i}:${plat}" title="点击切换">${q.isOriginal ? '原创' : '不原创'}</span>`;
+        const timeSel = canSchedule
+          ? `<span class="pv2-chip pv2-chip-time" data-card-time="${i}:${plat}" title="点击设置定时">${timeChip}</span>`
+          : `<span class="pv2-chip pv2-chip-disabled" title="抖音参加活动后不可定时发布">立即发布</span>`;
+        const campInp = `<input class="pv2-activity-input" data-card-campaign="${i}:${plat}" placeholder="活动名（留空=不参加）" value="${esc(q.campaignName || '')}"${campDisabled ? ' disabled title="已设定时，抖音定时与活动互斥"' : ''} />`;
+        const copyInp = `<input class="pv2-copy-input" data-card-copy="${i}:${plat}" placeholder="发布文案（留空=默认）" value="${esc(q.publishCopy || '')}" />`;
+        const topicsInp = `<input class="pv2-topics-input" data-card-topics="${i}:${plat}" placeholder="#话题1 #话题2" value="${esc((q.publishTopics || []).join(' '))}" />`;
+        return { origChip, timeSel, campInp, copyInp, topicsInp, isD };
+      };
+      const pv = paramsFor(curPlat);
+      const timePicker = `<div class="pv2-time-picker hidden" data-time-picker="${i}:${curPlat}">
+        <select class="pv2-date" data-time-date>${dateOptions('')}</select>
+        <input class="pv2-time" type="time" data-time-val />
+        <button class="btn btn-xs btn-ghost" data-time-now type="button">立即</button>
       </div>`;
-    }).join('');
-    setupDragAndDrop();
-  };
 
-  const renderHistoryList = () => {
-    if (!S.publish.history.length) {
-      historyList.innerHTML = '<div class="publish-empty">暂无发布记录</div>';
-      return;
-    }
-
-    // 按日期分组
-    const today = new Date(); today.setHours(0,0,0,0);
-    const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
-    const groups = {};
-    for (const h of S.publish.history) {
-      const d = h.time ? new Date(h.time) : new Date();
-      const dayStart = new Date(d); dayStart.setHours(0,0,0,0);
-      let label;
-      if (dayStart.getTime() === today.getTime()) label = '今天';
-      else if (dayStart.getTime() === yesterday.getTime()) label = '昨天';
-      else label = `${d.getMonth()+1}月${d.getDate()}日`;
-      if (!groups[label]) groups[label] = [];
-      groups[label].push(h);
-    }
-
-    const groupKeys = Object.keys(groups);
-    historyList.innerHTML = groupKeys.map((label, gi) => {
-      const isToday = gi === 0;
-      const items = groups[label];
-      const rows = items.map(h => `
-        <div class="publish-history-item">
-          <span class="publish-history-icon ${h.success ? 'success' : 'failed'}"><span class="icon" data-icon="${h.success ? 'check' : 'alertCircle'}"></span></span>
-          <span class="publish-history-name" title="${esc(h.path)}">${esc(h.name)}</span>
-          <span class="publish-history-time">${formatTime(h.time)}</span>
-          <button class="publish-history-open" data-path="${esc(h.path)}" title="在文件管理器中显示">打开</button>
-        </div>`).join('');
-
-      if (groupKeys.length === 1 && isToday) return rows;
-      return `<div class="publish-history-group${isToday ? ' expanded' : ''}" data-group="${esc(label)}">
-        <div class="publish-history-group-head" data-toggle-publish-group="${esc(label)}">
-          <span class="publish-history-group-label">${esc(label)}</span>
-          <span class="publish-history-group-count">${items.length}</span>
-          <span class="publish-history-group-arrow">›</span>
+      return `<div class="pv2-card ${st === 'failed' ? 'failed' : ''}" data-vid="${esc(v.id)}">
+        <div class="pv2-card-head">
+          <span class="pv2-card-name" title="${esc(v.path)}">${esc(v.name)}</span>
+          <span class="pv2-card-size">${formatSize(v.size)}</span>
+          <span class="pv2-card-status">${esc(badge)}</span>
+          <button class="btn btn-xs btn-ghost pv2-card-del" data-card-del="${i}" type="button">移除</button>
         </div>
-        <div class="publish-history-group-body">${rows}</div>
+        <div class="pv2-card-plats">${platChips}</div>
+        <div class="pv2-card-params">
+          <span class="pv2-plat-ind">${PLATFORM_LABEL[curPlat]}参数</span>
+          <div class="pv2-param-row">
+            ${pv.origChip}${pv.timeSel}${pv.campInp}
+            <button class="btn btn-xs btn-ghost" data-card-copyplat="${i}:${curPlat}" type="button" title="复制该平台参数到另一平台">复制到${PLATFORM_LABEL[otherPlat(curPlat)]}</button>
+          </div>
+          ${timePicker}
+          <div class="pv2-param-row">${pv.copyInp}${pv.topicsInp}</div>
+        </div>
       </div>`;
-    }).join('');
-
-    // 折叠/展开
-    historyList.querySelectorAll('[data-toggle-publish-group]').forEach(head => {
-      head.addEventListener('click', () => {
-        const group = head.closest('.publish-history-group');
-        if (group) group.classList.toggle('expanded');
-      });
-    });
-
-    historyList.querySelectorAll('.publish-history-open').forEach(btn => {
-      btn.addEventListener('click', () => window.antbot.revealInFolder(btn.dataset.path));
-    });
-  };
-
-  const setupDragAndDrop = () => {
-    const items = videoList.querySelectorAll('.publish-video-item[draggable="true"]');
-    items.forEach((item) => {
-      item.addEventListener('dragstart', (e) => {
-        draggedItem = item;
-        draggedIndex = S.publish.videos.findIndex(v => v.path === item.dataset.path);
-        item.classList.add('dragging');
-        e.dataTransfer.effectAllowed = 'move';
-      });
-
-      item.addEventListener('dragend', () => {
-        item.classList.remove('dragging');
-        draggedItem = null;
-        draggedIndex = -1;
-        videoList.querySelectorAll('.publish-video-item').forEach(i => i.classList.remove('drag-over'));
-      });
-
-      item.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
-        if (item !== draggedItem) item.classList.add('drag-over');
-      });
-
-      item.addEventListener('dragleave', () => item.classList.remove('drag-over'));
-
-      item.addEventListener('drop', (e) => {
-        e.preventDefault();
-        item.classList.remove('drag-over');
-        const targetIndex = S.publish.videos.findIndex(v => v.path === item.dataset.path);
-        if (draggedIndex !== -1 && draggedIndex !== targetIndex) {
-          const draggedVideo = S.publish.videos[draggedIndex];
-          S.publish.videos.splice(draggedIndex, 1);
-          S.publish.videos.splice(targetIndex, 0, draggedVideo);
-          render();
-        }
-      });
-    });
-
-    videoList.querySelectorAll('.publish-video-remove').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        S.publish.videos = S.publish.videos.filter(v => v.path !== btn.dataset.path);
-        render();
-      });
-    });
-  };
-
-  const setResult = (text, type='') => { const result=document.getElementById('publish-result'); result.textContent=text; result.className=`publish-result ${type}`; };
-
-  const refreshBridge = async () => {
-    const status = document.getElementById('publish-bridge-status');
-    try {
-      const r=await window.antbot.publishBridgeStatus();
-      serviceRunning = r.status==='ready'||r.status==='busy';
-      status.className=`publish-bridge-status ${serviceRunning?'ready':'offline'}`;
-      status.querySelector('span:last-child').textContent=serviceRunning?'已连接':'未连接';
-      bridgeToggleBtn.textContent = serviceRunning ? '停止服务' : '启动服务';
-      bridgeToggleBtn.className = serviceRunning ? 'btn btn-ghost' : 'btn btn-ghost';
-    } catch {
-      serviceRunning = false;
-      status.className='publish-bridge-status offline';
-      status.querySelector('span:last-child').textContent='未连接';
-      bridgeToggleBtn.textContent = '启动服务';
     }
-    render();
-  };
 
-  bridgeToggleBtn?.addEventListener('click', async () => {
-    bridgeToggleBtn.disabled = true;
-    bridgeToggleBtn.textContent = '处理中...';
-    try {
-      if (serviceRunning) {
-        await window.antbot.publishBridgeStop();
-        setResult('服务已停止', 'success');
-      } else {
-        const result = await window.antbot.publishBridgeStart();
-        if (result.ok) setResult('服务已启动', 'success');
-        else setResult('启动失败: ' + (result.error || '未知错误'), 'error');
+    function render() {
+      if (!videoList) return;
+      const videos = S.publish.videos || [];
+      pendingCount.textContent = videos.length;
+      videoList.innerHTML = videos.length
+        ? videos.map((v, i) => renderCard(v, i)).join('')
+        : '<div class="publish-empty">拖拽视频文件到此处，或点击下方"添加"按钮</div>';
+      mainBtn.disabled = !videos.length || S.publish.running;
+      mainBtn.textContent = S.publish.running ? '发布中...' : `批量发布 (${videos.length})`;
+      renderHistory();
+      renderDefaults();
+      saveTasks();
+    }
+
+    /* 全局默认区 */
+    function renderDefaults() {
+      const d = S.publish.defaults;
+      const active = document.querySelector('#pv2-default-tabs .pv2-plat-tab.active')?.dataset?.plat || 'videoChannel';
+      const q = d[active];
+      const o = document.getElementById('pv2-def-original');
+      if (o) { o.textContent = q.isOriginal ? '原创' : '不原创'; o.classList.toggle('pv2-chip-original', !!q.isOriginal); }
+      const t = document.getElementById('pv2-def-time');
+      if (t) t.textContent = q.publishAt ? `定时 ${new Date(q.publishAt).getMonth() + 1}/${new Date(q.publishAt).getDate()} ${fmtTime(q.publishAt)}` : '立即发布';
+      const cp = document.getElementById('pv2-def-copy'); if (cp) cp.value = q.publishCopy || '';
+      const tp = document.getElementById('pv2-def-topics'); if (tp) tp.value = (q.publishTopics || []).join(' ');
+      const act = document.getElementById('pv2-def-activity'); if (act) act.value = q.campaignName || '';
+      const cpBtn = document.getElementById('pv2-copy-plat');
+      if (cpBtn) cpBtn.textContent = `复制到${PLATFORM_LABEL[otherPlat(active)]}`;
+    }
+
+    function renderHistory() {
+      if (!historyList) return;
+      const h = S.publish.history || [];
+      doneCount.textContent = h.length;
+      historyList.innerHTML = h.length ? h.map(r => `
+        <div class="pv2-history-item">
+          <span class="pv2-history-name">${esc(r.videoName || '')}</span>
+          <span class="pv2-history-meta">${PLATFORM_LABEL[r.platform === 'weixin' ? 'videoChannel' : 'douyin'] || r.platform || ''} · ${esc(r.status || '')}${r.scheduled ? ' · 定时' : ''}</span>
+        </div>`).join('') : '<div class="publish-empty">暂无发布记录</div>';
+    }
+
+    /* ── 时间选择弹层 ── */
+    function openTimePicker(key) {
+      const [i, plat] = key.split(':');
+      const v = S.publish.videos[Number(i)]; if (!v) return;
+      const q = v.params[plat];
+      const picker = document.querySelector(`[data-time-picker="${key}"]`);
+      if (!picker) return;
+      document.querySelectorAll('.pv2-time-picker').forEach(el => el.classList.add('hidden'));
+      picker.classList.toggle('hidden');
+      const now = new Date();
+      const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      const sel = q.publishAt ? new Date(q.publishAt) : null;
+      const dateKey = sel ? `${sel.getFullYear()}-${String(sel.getMonth() + 1).padStart(2, '0')}-${String(sel.getDate()).padStart(2, '0')}` : today;
+      picker.querySelector('[data-time-date]').innerHTML = dateOptions(dateKey);
+      picker.querySelector('[data-time-val]').value = sel ? fmtTime(sel) : fmtTime(now);
+    }
+
+    function setCardTime(key, dateKey, timeStr) {
+      const [i, plat] = key.split(':');
+      const v = S.publish.videos[Number(i)]; if (!v) return;
+      const q = v.params[plat];
+      const [y, m, d] = dateKey.split('-').map(Number);
+      const [hh, mm] = String(timeStr || '10:30').split(':').map(Number);
+      q.publishAt = new Date(y, m - 1, d, hh, mm);
+      if (q.publishAt.getTime() <= Date.now()) {
+        // 过期时间自动顺延一天（仍在 5 天窗口内）
+        q.publishAt = new Date(q.publishAt.getTime() + 24 * 3600 * 1000);
       }
-      await refreshBridge();
-    } catch(e) { setResult(e.message, 'error'); }
-    finally { bridgeToggleBtn.disabled = false; }
-  });
-
-  pick?.addEventListener('click', async () => {
-    try {
-      const paths = await window.antbot.pickVideoFiles();
-      if (paths && paths.length) await addVideos(paths);
-    } catch(e) { setResult(e.message, 'error'); }
-  });
-
-  tabPending?.addEventListener('click', () => { currentTab = 'pending'; tabPending.classList.add('active'); tabDone.classList.remove('active'); render(); });
-  tabDone?.addEventListener('click', () => { currentTab = 'done'; tabDone.classList.add('active'); tabPending.classList.remove('active'); render(); });
-
-  publishView?.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); publishView.classList.add('drag-over'); });
-  publishView?.addEventListener('dragleave', (e) => { if (!publishView.contains(e.relatedTarget)) publishView.classList.remove('drag-over'); });
-  publishView?.addEventListener('drop', async (e) => {
-    e.preventDefault(); e.stopPropagation(); publishView.classList.remove('drag-over');
-    const filePaths = [];
-    for (const f of e.dataTransfer?.files || []) {
-      try {
-        const p = window.antbot.getPathForFile(f);
-        if (p && /\.(mp4|mov|m4v|webm|mkv|avi|flv|wmv|ts)$/i.test(f.name)) filePaths.push(p);
-      } catch {}
-    }
-    if (filePaths.length) await addVideos(filePaths);
-  });
-
-  // 填充月份下拉
-  scheduleMonth.innerHTML = '';
-  for(let m=1;m<=12;m++){const o=document.createElement('option');o.value=m;o.textContent=m+'月';scheduleMonth.appendChild(o)}
-
-  // 平台按钮
-  let selectedPlatform = 'videoChannel';
-  platformBtns.forEach(btn => {
-    btn.addEventListener('click', () => {
-      platformBtns.forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      selectedPlatform = btn.dataset.platform;
-    });
-  });
-
-  // 开关切换
-  function bindToggle(el, onChange){
-    el.addEventListener('click', () => { el.classList.toggle('on'); onChange(el.classList.contains('on')); });
-  }
-  bindToggle(originalToggle, () => {});
-  bindToggle(scheduledToggle, (on) => {
-    scheduleWrapper.classList.toggle('hidden', !on);
-    scheduleMonth.disabled = !on;
-    scheduleDay.disabled = !on;
-    scheduleTime.disabled = !on;
-    if(on && !scheduleDay.value) setDefaultSchedule();
-    render();
-  });
-
-  scheduleMonth?.addEventListener('change', () => { updateDaysSelect(); render(); });
-  scheduleDay?.addEventListener('change', render);
-  scheduleTime?.addEventListener('change', render);
-
-  mainBtn?.addEventListener('click', async () => {
-    if (S.publish.running) {
-      // 立即更新状态
-      S.publish.running = false;
-      publishProgress = {};
+      // 抖音活动与定时互斥
+      if (plat === 'douyin' && q.campaignName) q.publishAt = null;
       render();
-      setResult('正在停止...', 'success');
-      try {
-        await window.antbot.publishStop(S.publish.requestId);
-        setResult('已停止', 'success');
-      } catch(e) {
-        setResult(e.message, 'error');
-      }
-    } else {
-      const pendingVideos = S.publish.videos.filter(v => v.status === 'pending');
-      if (!pendingVideos.length) return;
+    }
+
+    /* ── 批量发布 ── */
+    async function startPublish() {
+      const videos = S.publish.videos || [];
+      if (!videos.length || S.publish.running) return;
       S.publish.running = true;
-      S.publish.requestId = `antbot-${Date.now()}`;
-      pendingVideos.forEach(v => { v.status = 'publishing'; publishProgress[v.path] = '等待中...'; });
+      mainBtn.disabled = true;
       render();
-      setResult('正在发布...');
-      const topics = (document.getElementById('publish-topics').value || '').split(/[ ,，]+/).filter(Boolean);
-      let scheduleTimeValue = '';
-      if (scheduledToggle.classList.contains('on') && scheduleDay.value) {
-        const year = new Date().getFullYear();
-        const month = String(scheduleMonth.value).padStart(2, '0');
-        const day = String(scheduleDay.value).padStart(2, '0');
-        scheduleTimeValue = `${year}-${month}-${day}T${scheduleTime.value || '10:30'}`;
-      }
-      try {
-        for (const video of pendingVideos) {
-          if (!S.publish.running) break;
-          publishProgress[video.path] = '发布中...';
-          render();
+      const resultEl = document.getElementById('publish-result');
+      let done = 0, failed = 0;
+      for (let i = 0; i < videos.length; i++) {
+        const v = videos[i];
+        v.status = 'running'; v.message = ''; render();
+        for (const plat of v.platforms) {
+          const q = v.params[plat];
+          const platformKey = plat === 'videoChannel' ? 'videoChannel' : 'douyin';
+          const vs = {
+            isOriginal: !!q.isOriginal,
+            scheduledPublish: !!q.publishAt,
+            scheduleTime: q.publishAt ? new Date(q.publishAt).toISOString() : '',
+            exactTime: true,
+            publishCopy: q.publishCopy || '',
+            publishTopics: Array.isArray(q.publishTopics) ? q.publishTopics : [],
+            campaignName: q.campaignName || '',
+            autoGenerate: false, autoRetry: false, timeoutSeconds: 240
+          };
           try {
-            await window.antbot.publishStart({
-              requestId: S.publish.requestId + '-' + Date.now(),
-              videos: [video],
-              videoPath: '',
-              platform: selectedPlatform,
-              settings: {
-                publishCopy: document.getElementById('publish-copy').value,
-                publishTopics: topics,
-                isOriginal: originalToggle.classList.contains('on'),
-                scheduledPublish: scheduledToggle.classList.contains('on'),
-                scheduleTime: scheduleTimeValue
-              }
+            const r = await window.antbot.publishStart({
+              platform: platformKey,
+              videos: [{ name: v.name, path: v.path, size: v.size, settings: vs }],
+              settings: vs,
+              videoPath: v.path.split(/[\\/]/).slice(0, -1).join('/') || '.',
+              requestId: v.id
             });
-            const record = { path: video.path, name: video.name, success: true, time: new Date(), platform: selectedPlatform };
-            S.publish.history.unshift(record);
-            await savePublishRecord(record);
-          } catch(e) {
-            const record = { path: video.path, name: video.name, success: false, time: new Date(), platform: selectedPlatform, error: e.message };
-            S.publish.history.unshift(record);
-            await savePublishRecord(record);
+            const notices = r?.notices || [];
+            const ok = r?.ok !== false;
+            if (ok) done++;
+            v.message = notices.length ? notices.join('; ') : '';
+            await window.antbot.publishSaveRecord({
+              videoName: v.name, videoPath: v.path, platform: platformKey === 'videoChannel' ? 'weixin' : 'douyin',
+              publishTime: new Date().toISOString(), status: ok ? 'success' : 'failed',
+              scheduled: !!q.publishAt, scheduledTime: q.publishAt ? new Date(q.publishAt).toISOString() : '',
+              notice: v.message || ''
+            });
+            if (ok) { v.status = 'done'; } else { v.status = 'failed'; failed++; }
+          } catch (e) {
+            v.status = 'failed'; v.message = e.message || '发布失败'; failed++;
           }
-          delete publishProgress[video.path];
+          render();
         }
-        S.publish.videos = S.publish.videos.filter(v => v.status === 'pending');
-        setResult(S.publish.running ? '发布完成' : '已停止', 'success');
-      } catch(e) { setResult(e.message, 'error'); }
-      finally { S.publish.running = false; publishProgress = {}; render(); refreshBridge(); }
+        if (v.status === 'done') {
+          S.publish.videos.splice(i, 1); i--;
+        } else if (v.status === 'failed') {
+          v.status = 'failed';
+        }
+      }
+      S.publish.running = false;
+      if (resultEl) resultEl.textContent = `完成：成功 ${done}，失败 ${failed}`;
+      saveTasks();
+      render();
+      loadPublishHistory();
     }
-  });
 
-  setDefaultSchedule();
-  refreshBridge();
-  if(!S._bridgeInterval)S._bridgeInterval=setInterval(refreshBridge, 3000);
-  loadPublishHistory();
-  render();
-}
+    /* ── 事件绑定 ── */
+    pick?.addEventListener('click', async () => {
+      try {
+        const paths = await window.antbot.pickVideoFiles();
+        if (paths?.length) addVideos(paths);
+      } catch (e) { console.error(e); }
+    });
 
+    publishView?.addEventListener('dragover', e => { e.preventDefault(); });
+    publishView?.addEventListener('drop', e => {
+      e.preventDefault();
+      const paths = [];
+      for (const f of e.dataTransfer?.files || []) {
+        try { const p = window.antbot.getPathForFile(f); if (p) paths.push(p); } catch {}
+      }
+      if (paths.length) addVideos(paths);
+    });
+
+    videoList?.addEventListener('click', e => {
+      const del = e.target.closest('[data-card-del]');
+      if (del) { S.publish.videos.splice(Number(del.dataset.cardDel), 1); render(); return; }
+      const plat = e.target.closest('[data-card-plat]');
+      if (plat) {
+        const [i, p] = plat.dataset.cardPlat.split(':');
+        const v = S.publish.videos[Number(i)];
+        if (v.platforms.includes(p)) v.platforms = v.platforms.filter(x => x !== p);
+        else v.platforms.push(p);
+        if (!v.platforms.length) v.platforms = [p];
+        render(); return;
+      }
+      const orig = e.target.closest('[data-card-orig]');
+      if (orig) {
+        const [i, p] = orig.dataset.cardOrig.split(':');
+        const q = S.publish.videos[Number(i)].params[p];
+        q.isOriginal = !q.isOriginal;
+        render(); return;
+      }
+      const time = e.target.closest('[data-card-time]');
+      if (time) { openTimePicker(time.dataset.cardTime); return; }
+      const copyPlat = e.target.closest('[data-card-copyplat]');
+      if (copyPlat) {
+        const [i, p] = copyPlat.dataset.cardCopyplat.split(':');
+        const v = S.publish.videos[Number(i)];
+        v.params[otherPlat(p)] = cloneParams(v.params[p]);
+        render(); return;
+      }
+    });
+
+    videoList?.addEventListener('change', e => {
+      const campaign = e.target.closest('[data-card-campaign]');
+      if (campaign) {
+        const [i, p] = campaign.dataset.cardCampaign.split(':');
+        const q = S.publish.videos[Number(i)].params[p];
+        q.campaignName = campaign.value.trim();
+        if (p === 'douyin' && q.campaignName && q.publishAt) {
+          q.publishAt = null; // 抖音活动与定时互斥：参加活动则立即发布
+        }
+        render(); return;
+      }
+      const copyInp = e.target.closest('[data-card-copy]');
+      if (copyInp) {
+        const [i, p] = copyInp.dataset.cardCopy.split(':');
+        S.publish.videos[Number(i)].params[p].publishCopy = copyInp.value.trim();
+        return;
+      }
+      const topicsInp = e.target.closest('[data-card-topics]');
+      if (topicsInp) {
+        const [i, p] = topicsInp.dataset.cardTopics.split(':');
+        S.publish.videos[Number(i)].params[p].publishTopics = topicsInp.value.split(/[\s,，、]+/).filter(Boolean).map(x => x.startsWith('#') ? x : '#' + x).slice(0, 5);
+        return;
+      }
+      const dateSel = e.target.closest('[data-time-date]');
+      if (dateSel) {
+        const picker = dateSel.closest('.pv2-time-picker');
+        const key = picker?.dataset?.timePicker;
+        if (key) setCardTime(key, dateSel.value, picker.querySelector('[data-time-val]').value || '10:30');
+        return;
+      }
+      const timeVal = e.target.closest('[data-time-val]');
+      if (timeVal) {
+        const picker = timeVal.closest('.pv2-time-picker');
+        const key = picker?.dataset?.timePicker;
+        if (key) setCardTime(key, picker.querySelector('[data-time-date]').value, timeVal.value || '10:30');
+      }
+    });
+
+    videoList?.addEventListener('click', e => {
+      const timeNow = e.target.closest('[data-time-now]');
+      if (timeNow) {
+        const picker = timeNow.closest('.pv2-time-picker');
+        const key = picker?.dataset?.timePicker;
+        if (key) {
+          const [i, plat] = key.split(':');
+          S.publish.videos[Number(i)].params[plat].publishAt = null;
+          picker.classList.add('hidden');
+          render();
+        }
+      }
+    });
+
+    /* 全局默认区事件 */
+    const defaultsEl = document.getElementById('pv2-defaults');
+    defaultsEl?.addEventListener('click', e => {
+      const tab = e.target.closest('.pv2-plat-tab');
+      if (tab) {
+        document.querySelectorAll('#pv2-default-tabs .pv2-plat-tab').forEach(b => b.classList.remove('active'));
+        tab.classList.add('active');
+        renderDefaults(); return;
+      }
+      const orig = e.target.closest('#pv2-def-original');
+      if (orig) {
+        const act = document.querySelector('#pv2-default-tabs .pv2-plat-tab.active')?.dataset?.plat || 'videoChannel';
+        S.publish.defaults[act].isOriginal = !S.publish.defaults[act].isOriginal;
+        renderDefaults(); return;
+      }
+      const timeBtn = e.target.closest('#pv2-def-time');
+      if (timeBtn) {
+        const act = document.querySelector('#pv2-default-tabs .pv2-plat-tab.active')?.dataset?.plat || 'videoChannel';
+        const q = S.publish.defaults[act];
+        if (q.publishAt) { q.publishAt = null; }
+        else {
+          const now = new Date();
+          const t = new Date(now.getTime() + 3600 * 1000);
+          q.publishAt = t;
+        }
+        renderDefaults(); return;
+      }
+      const copyPlat = e.target.closest('#pv2-copy-plat');
+      if (copyPlat) {
+        const act = document.querySelector('#pv2-default-tabs .pv2-plat-tab.active')?.dataset?.plat || 'videoChannel';
+        S.publish.defaults[otherPlat(act)] = cloneParams(S.publish.defaults[act]);
+        renderDefaults(); return;
+      }
+      const applyAll = e.target.closest('#pv2-apply-all');
+      if (applyAll) {
+        for (const v of S.publish.videos) {
+          v.platforms = ['videoChannel', 'douyin'];
+          v.params.videoChannel = cloneParams(S.publish.defaults.videoChannel);
+          v.params.douyin = cloneParams(S.publish.defaults.douyin);
+          // 抖音互斥兜底
+          if (v.params.douyin.campaignName) v.params.douyin.publishAt = null;
+        }
+        render();
+      }
+    });
+    defaultsEl?.addEventListener('change', e => {
+      const act = () => document.querySelector('#pv2-default-tabs .pv2-plat-tab.active')?.dataset?.plat || 'videoChannel';
+      const copyInp = e.target.closest('#pv2-def-copy');
+      if (copyInp) { S.publish.defaults[act()].publishCopy = copyInp.value.trim(); return; }
+      const topicsInp = e.target.closest('#pv2-def-topics');
+      if (topicsInp) {
+        S.publish.defaults[act()].publishTopics = topicsInp.value.split(/[\s,，、]+/).filter(Boolean).map(x => x.startsWith('#') ? x : '#' + x).slice(0, 5);
+        return;
+      }
+      const actInp = e.target.closest('#pv2-def-activity');
+      if (actInp) {
+        const q = S.publish.defaults[act()];
+        q.campaignName = actInp.value.trim();
+        if (act() === 'douyin' && q.campaignName) q.publishAt = null;
+        renderDefaults();
+      }
+    });
+
+    tabPending?.addEventListener('click', () => { currentTab = 'pending'; tabPending.classList.add('active'); tabDone.classList.remove('active'); videoList.classList.remove('hidden'); historyList.classList.add('hidden'); });
+    tabDone?.addEventListener('click', () => { currentTab = 'done'; tabDone.classList.add('active'); tabPending.classList.remove('active'); videoList.classList.add('hidden'); historyList.classList.remove('hidden'); });
+
+    mainBtn?.addEventListener('click', () => { void startPublish(); });
+
+    /* 桥接服务 */
+    const refreshBridge = async () => {
+      try {
+        const r = await window.antbot.publishBridgeStatus();
+        serviceRunning = r?.status === 'ready' || r?.status === 'busy' || !!r?.extensionConnected;
+        const el = bridgeStatus;
+        if (el) {
+          el.className = `publish-bridge-status ${serviceRunning ? 'ready' : 'offline'}`;
+          el.querySelector('span:last-child').textContent = r?.extensionConnected ? '浏览器已连接' : '未连接';
+        }
+        bridgeToggleBtn.textContent = serviceRunning ? '停止服务' : '启动服务';
+      } catch {
+        serviceRunning = false;
+        bridgeToggleBtn.textContent = '启动服务';
+      }
+    };
+    bridgeToggleBtn?.addEventListener('click', async () => {
+      bridgeToggleBtn.disabled = true; bridgeToggleBtn.textContent = '处理中...';
+      try {
+        if (serviceRunning) await window.antbot.publishBridgeStop();
+        else { const r = await window.antbot.publishBridgeStart(); if (!r?.ok) throw new Error(r?.error || '启动失败'); }
+      } catch (e) { console.error(e); }
+      bridgeToggleBtn.disabled = false;
+      refreshBridge();
+    });
+
+    /* 初始化 */
+    (async () => {
+      await loadTasks();
+      await loadPublishHistory();
+      render();
+      refreshBridge();
+      window.antbot.onPublishProgress?.((p) => {
+        const msg = document.getElementById('publish-result');
+        if (msg && p?.message) msg.textContent = p.message;
+      });
+    })();
+  }
 
   return { bind: bindPublishPage };
 }
