@@ -497,10 +497,18 @@ function fillForm(){
   const subPos=document.getElementById('sub-position');if(subPos)subPos.value=s.style?.subtitlePositionPercent??12;
   const fontPath=document.getElementById('font-current-path');if(fontPath)fontPath.value=s.fonts?.activeFont||'系统默认';
   // API keys — 每 key 独立 baseURL/模型/用量
+  // 保留现有 DOM（避免设置保存推送重建时清掉刚添加/正在输入的 key），只补齐缺失行
   const keys=normalizeKeysForForm(s.api);
   const keysList=document.getElementById('api-keys-list');
   if(keysList){
-    keysList.innerHTML=keys.map((k,i)=>apiKeyItemHtml(k,i)).join('');
+    const existing=keysList.querySelectorAll('.api-key-item');
+    for(let i=0;i<keys.length;i++){
+      if(!existing[i]){
+        const wrap=document.createElement('div');
+        wrap.innerHTML=apiKeyItemHtml(keys[i],i);
+        keysList.appendChild(wrap.firstElementChild);
+      }
+    }
   }
   const fr=document.getElementById('s-frameRate');if(fr)fr.value=String(s.edit?.frameRate??1);
   // 开机自动启动开关
@@ -1885,6 +1893,7 @@ function bind(){
     const item=document.createElement('div');
     item.innerHTML=apiKeyItemHtml({key:'',baseUrl:last.baseUrl||S.settings?.api?.baseUrl||'',modelId:'',availableModels:last.availableModels||[]},count);
     list.appendChild(item.firstElementChild);
+    
     injectIcons();
     item.querySelector('input[name="apiKey"]')?.focus();
     void saveSettings();
