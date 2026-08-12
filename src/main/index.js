@@ -245,7 +245,20 @@ async function bootstrap() {
       store,
       taskRunner,
       mainWindowRef: () => mainWindow,
-      appLog: (level, msg) => console.log(`[${level}] ${msg}`),
+      appLog: (level, msg) => {
+        // 写入 app 日志文件（与 ipc.js 的 appLog 一致）
+        try {
+          const logLine = `[${new Date().toISOString()}] [${level}] ${msg}\n`;
+          const logDir = path.join(os.homedir(), 'AntBot', 'logs');
+          const files = fs.readdirSync(logDir).filter(f => f.startsWith('app-') && f.endsWith('.log'));
+          if (files.length) {
+            const latest = files.sort().pop();
+            fs.appendFileSync(path.join(logDir, latest), logLine);
+          }
+        } catch {}
+        if (level === 'error') console.error(`[${level}] ${msg}`);
+        else console.log(`[${level}] ${msg}`);
+      },
     });
   } catch (e) {
     console.log(`[remote] 自动启动初始化失败: ${e.message}`);
