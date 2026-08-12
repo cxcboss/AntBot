@@ -488,6 +488,43 @@ function startRemoteServer({ store, taskRunner, mainWindowRef, appLog }) {
           delete body.remote;
         }
 
+        // 拦截 editDefaults（风格/音色）：与 App 端写入路径保持一致，否则任务执行读不到。
+        //  - style   → ui-settings.json（App saveUI() 同路径，taskRunner 从这里读风格）
+        //  - voice   → store.voiceClone（App 选音色同路径，editor/taskRunner 从这里读音色）
+        if (body.editDefaults && typeof body.editDefaults === 'object') {
+          const uiPath = path.join(os.homedir(), 'AntBot', 'ui-settings.json');
+          let uiSettings = {};
+          try { uiSettings = JSON.parse(await fs.readFile(uiPath, 'utf-8')); } catch {}
+          const mergedDefaults = { ...(uiSettings.editDefaults || {}), ...body.editDefaults };
+          if (typeof mergedDefaults.voice === 'string' && mergedDefaults.voice === '') {
+            delete mergedDefaults.voice;
+          }
+          uiSettings.editDefaults = mergedDefaults;
+          await fs.mkdir(path.dirname(uiPath), { recursive: true }).catch(() => {});
+          await fs.writeFile(uiPath, JSON.stringify(uiSettings, null, 2), 'utf-8');
+          log('info', `远程更新 editDefaults: style=${mergedDefaults.style || '-'}, voice=${mergedDefaults.voice || '-'}`);
+
+          // 音色同步到 voiceClone（任务实际读音色档案）：按名称在 voices.json 反查 id
+          if (typeof mergedDefaults.voice === 'string' && mergedDefaults.voice) {
+            try {
+              const voices = JSON.parse(await fs.readFile(path.join(os.homedir(), 'AntBot', 'voices.json'), 'utf-8'));
+              const matched = voices.find(v => v.name === mergedDefaults.voice);
+              const current = await _store.getSettings();
+              await _store.updateSettings({
+                voiceClone: {
+                  ...(current.voiceClone || {}),
+                  voiceId: matched?.id || current.voiceClone?.voiceId || '',
+                  profileName: mergedDefaults.voice,
+                }
+              });
+              log('info', `远程音色已同步到 voiceClone: ${mergedDefaults.voice}${matched ? ' (id=' + matched.id.slice(0, 8) + ')' : ' (未匹配到 id)'}`);
+            } catch (e) {
+              log('error', `音色同步失败: ${e.message}`);
+            }
+          }
+          delete body.editDefaults;
+        }
+
         await _store.updateSettings(body);
         // 广播设置变更到所有 SSE 客户端
         broadcast('settings-update', body);

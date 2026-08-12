@@ -2,6 +2,9 @@ const { spawn, execFileSync } = require('node:child_process');
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
+const http = require('node:http');
+const https = require('node:https');
+const tls = require('node:tls');
 
 // 检测系统代理（cloudflared 需要走代理才能绕过 fake-ip DNS 的 UDP 超时）
 function getSystemProxy() {
@@ -39,6 +42,7 @@ let _log = null;
 let _stopped = false;
 let _deviceId = null;
 let _deviceName = null;
+let _connected = false; // 隧道已建立连接（独立于 promise settle，超时后仍允许注册）
 
 const TUNNEL_ID = '843f2a80-cd75-4724-a9ce-2f6964227d2b';
 const TUNNEL_DOMAIN = 'remote.onebugmanai.online';
@@ -85,27 +89,85 @@ function hubHeaders() {
   return { 'Content-Type': 'application/json', [HUB_SECRET_HEADER]: HUB_SECRET };
 }
 
-async function registerWithHub(deviceId, deviceName, tunnelUrl) {
-  try {
-    const res = await fetch(`${HUB_URL}/api/register`, {
-      method: 'POST',
+// 走系统代理的 Hub API 请求（Node fetch 不走系统代理，fake-ip DNS 环境下直连会超时）
+// 用 scutil 检测系统代理（与 cloudflared 同一检测逻辑），通过 CONNECT 隧道请求 Hub
+function hubRequest(method, pathname, body, timeoutMs = 15000) {
+  return new Promise((resolve) => {
+    const payload = body === undefined ? null : JSON.stringify(body);
+    const proxy = getSystemProxy();
+    const target = new URL(`${HUB_URL}${pathname}`);
+
+    const done = (err, data) => {
+      if (err) return resolve({ ok: false, error: err.message });
+      resolve(data);
+    };
+
+    const handleResponse = (res) => {
+      let raw = '';
+      res.on('data', (c) => { raw += c; });
+      res.on('end', () => {
+        try { done(null, JSON.parse(raw)); }
+        catch { done(null, { ok: false, error: `无效响应 (HTTP ${res.statusCode})`, raw }); }
+      });
+      res.on('error', (e) => done(e));
+    };
+
+    const options = {
+      method,
+      hostname: target.hostname,
+      port: target.port || 443,
+      path: target.pathname,
       headers: hubHeaders(),
-      body: JSON.stringify({ deviceId, deviceName, tunnelUrl })
+      timeout: timeoutMs,
+    };
+    if (payload !== null) options.headers['Content-Length'] = Buffer.byteLength(payload);
+
+    const doDirect = () => {
+      const req = https.request(options, handleResponse);
+      req.on('timeout', () => { req.destroy(); done(new Error('Hub 请求超时')); });
+      req.on('error', (e) => done(e));
+      if (payload !== null) req.write(payload);
+      req.end();
+    };
+
+    if (!proxy) return doDirect();
+
+    const proxyUrl = new URL(proxy);
+    const connectReq = http.request({
+      host: proxyUrl.hostname,
+      port: parseInt(proxyUrl.port) || 80,
+      method: 'CONNECT',
+      path: `${target.hostname}:${target.port || 443}`,
+      timeout: timeoutMs,
     });
-    return await res.json();
-  } catch (e) {
-    return { ok: false, error: e.message };
-  }
+    connectReq.on('connect', (res, socket) => {
+      if (res.statusCode !== 200) {
+        socket.destroy();
+        return done(new Error(`代理连接失败: HTTP ${res.statusCode}`));
+      }
+      const tlsSocket = tls.connect({ socket, servername: target.hostname }, () => {
+        const req = https.request({ ...options, createConnection: () => tlsSocket, agent: false }, handleResponse);
+        req.on('timeout', () => { req.destroy(); done(new Error('Hub 请求超时')); });
+        req.on('error', (e) => done(e));
+        if (payload !== null) req.write(payload);
+        req.end();
+      });
+      tlsSocket.on('error', (e) => done(e));
+    });
+    connectReq.on('timeout', () => { connectReq.destroy(); done(new Error('代理连接超时')); });
+    connectReq.on('error', (e) => done(e));
+    connectReq.end();
+  });
+}
+
+async function registerWithHub(deviceId, deviceName, tunnelUrl) {
+  return hubRequest('POST', '/api/register', { deviceId, deviceName, tunnelUrl });
 }
 
 async function unregisterFromHub(deviceId) {
   if (!deviceId) return;
   try {
-    await fetch(`${HUB_URL}/api/unregister`, {
-      method: 'POST',
-      headers: hubHeaders(),
-      body: JSON.stringify({ deviceId })
-    });
+    await hubRequest('POST', '/api/unregister', { deviceId });
   } catch { /* best effort */ }
 }
 
@@ -272,21 +334,27 @@ function startTunnel(port, { onUrl, onStatus, log, deviceId, deviceName } = {}) 
 
     let resolved = false;
 
+    // 连接成功后：先 settle promise，再异步注册到 Hub（注册不阻塞 resolve，失败由心跳重试）
     const onConnected = async () => {
-      if (resolved) return;
-      resolved = true;
+      if (_connected) return;
+      _connected = true;
       _restartAttempts = 0;
       _stableSince = Date.now();
       _onUrlChange(_tunnelUrl);
       _onStatusChange({ status: 'running', url: _tunnelUrl });
-      // 注册到 Hub
+      if (!resolved) { resolved = true; resolve({ url: _tunnelUrl }); }
+      registerAndHeartbeat();
+    };
+
+    async function registerAndHeartbeat() {
       if (_deviceId && _tunnelUrl) {
         const regResult = await registerWithHub(_deviceId, _deviceName || '', _tunnelUrl);
-        if (regResult.ok) { _log('info', '已注册到远程控制中心'); startHeartbeat(); }
+        if (regResult.ok) _log('info', '已注册到远程控制中心');
         else _log('error', '注册到 Hub 失败: ' + (regResult.error || '未知错误'));
       }
-      resolve({ url: _tunnelUrl });
-    };
+      // 无论首次注册是否成功都启动心跳：心跳即重试注册，保证设备最终上线
+      startHeartbeat();
+    }
 
     const parseOutput = (data) => {
       const text = data.toString();
@@ -313,6 +381,7 @@ function startTunnel(port, { onUrl, onStatus, log, deviceId, deviceName } = {}) 
       _log('info', `cloudflared 进程退出 (code=${code})`);
       _tunnelProcess = null;
       _tunnelUrl = null;
+      _connected = false;
       _onStatusChange({ status: 'stopped' });
       _onUrlChange(null);
 
@@ -335,11 +404,7 @@ function startTunnel(port, { onUrl, onStatus, log, deviceId, deviceName } = {}) 
         try {
           const result = await startTunnel(port, { onUrl, onStatus, log, deviceId: _deviceId, deviceName: _deviceName });
           _log('info', `自动重连成功: ${result.url}`);
-          if (_deviceId && result.url) {
-            await registerWithHub(_deviceId, _deviceName || '', result.url);
-            startHeartbeat();
-            _log('info', '已重新注册到远程控制中心');
-          }
+          // 重连后由 startTunnel 内部的 onConnected 负责注册 + 心跳，无需重复处理
         } catch (e) {
           _log('error', `自动重连失败: ${e.message}`);
           _onStatusChange({ status: 'error', error: '重连失败: ' + e.message });
@@ -350,22 +415,24 @@ function startTunnel(port, { onUrl, onStatus, log, deviceId, deviceName } = {}) 
     _tunnelProcess.on('error', (err) => {
       _log('error', `cloudflared 启动失败: ${err.message}`);
       _tunnelProcess = null;
+      _connected = false;
       _onStatusChange({ status: 'error', error: err.message });
       if (!resolved) { resolved = true; reject(err); }
     });
 
-    // Quick Tunnel / 命名隧道统一超时兜底
+    // 连接超时兜底：fake-ip/代理环境下 cloudflared 启动较慢，放宽到 90 秒
     setTimeout(() => {
       if (!resolved) {
         resolved = true;
         reject(new Error('Tunnel 启动超时'));
       }
-    }, 30000);
+    }, 90000);
   });
 }
 
 function stopTunnel() {
   _stopped = true;
+  _connected = false;
   if (_tunnelProcess) {
     _autoRestart = false; // 手动停止不自动重启
     stopHeartbeat();
