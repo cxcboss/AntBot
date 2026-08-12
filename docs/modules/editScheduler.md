@@ -20,23 +20,19 @@ pending → preparing → ready → composing → completed
 
 - **准备阶段**（preparing）：最多 2 个并发，调用 `smartEditor.prepareEditVideo()`
 - **合成阶段**（composing）：最多 1 个，调用 `smartEditor.composeEditVideo()`
-- **后台点火**：`_tick` 发现 `ready` 任务时立即后台启动合成（不 `await`），合成进行期间准备循环照常运转——任务 A 合成时任务 B/C 仍可并行准备，不会被串行合成卡住
+- 同一轮 `_tick` 内先处理合成（Phase 2 `_runCompose`）再处理准备（Phase 1），合成期间准备不会并行执行
 - `ready` 状态的任务自动排队等合成
 - `paused` 任务不参与调度，等用户手动继续
 
 ## 调度驱动
 
-- 所有调度触发点（`startTask`/`startAll`/`retryTask`/任务结束）统一走 `_scheduleTick(ms)`：内部用单个 `_tickTimer` 去重，避免裸 `setTimeout` 堆叠或重入
-- `_tick` 以 `_running` 标志防重入；准备（`_runPrepare`）与合成（`_runCompose`）均为后台点火（不 `await`），准备是长任务，若在本轮内 `await` 会占住 `_running` 锁导致后续 tick 全部跳过、先准备好的任务无法及时合成；`.finally` 中复位 `_composingId` 并再调度一次
-- 有任一活跃任务（pending/preparing/ready/composing）时持续 `_scheduleTick(500)` 轮询，全部结束后进入 `_maybeShutdownVoicebox()`（60 秒延迟关后端释放内存）
+- 所有调度触发点（`startTask`/`startAll`/`retryTask`/任务结束）统一走 `_tick()`：以 `_running` 标志防重入，准备（`_runPrepare`）与合成（`_runCompose`）均为后台点火（不 `await`）
+- 有任一活跃任务（pending/preparing/ready/composing）时持续 `setTimeout(_tick, 500)` 轮询，全部结束后进入 `_maybeShutdownVoicebox()`（60 秒延迟关后端释放内存）
 
-## 自动重试
+## 失败处理
 
-失败任务按 `settings.retry.failedTaskRetries`（0 = 不重试）自动重试：
-
-- 准备或合成失败、且重试次数未超限时，`_autoRetry()` 将任务复位为 `pending`（保留 `retryCount`，清空 `startedAt/completedAt/duration`），由 `_scheduleTick` 重新调度
-- 合成失败自动重试会走完整流程：重新准备（此时命中 `prepare-cache`，秒过）→ 再合成
-- 手动 `retryTask()` 不消耗自动重试次数，逻辑不变（完全重置任务后重新调度）
+- 失败任务置为 `failed`，不自动重试；用户手动点击"重试" → `retryTask()` 完全重置任务后重新调度（此时准备命中 `prepare-cache`，秒过）
+- 主控流水线的自动重试（`settings.retry.failedTaskRetries`）由 `taskRunner.js` 负责，与 EditScheduler 无关
 
 ## 关键方法
 
@@ -48,8 +44,7 @@ pending → preparing → ready → composing → completed
 | `cancelTask(id)` | 取消任务，清理任务级 clip-cache |
 | `startAll()` | 开始所有 pending/paused 任务 |
 | `_tick()` | 调度器核心：检查 ready → 后台点火合成，检查 pending → preparing（并行） |
-| `_scheduleTick(ms)` | 定时器驱动的调度入口（去重） |
-| `_autoRetry(t, phase, err)` | 失败自动重试（读 settings 重试上限） |
+| `retryTask(id)` | 手动重试失败任务（完全重置后重新调度） |
 | `loadState()` / `saveState()` | 从 `edit-tasks.json` 持久化/恢复 |
 | `shutdown()` | App 退出时中断活动任务并清理相关缓存 |
 

@@ -27,7 +27,6 @@ video-publish-extension/
 ├── local-server/              # Node.js 本地服务（由 Electron 主 App 启动）
 │   ├── server.js              # Express，视频文件读取 + 发布桥接
 │   └── package.json
-└── .github/                   # 插件仓库 CI/CD 配置
 ```
 
 ## 快速开始

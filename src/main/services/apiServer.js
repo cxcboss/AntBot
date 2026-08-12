@@ -4,6 +4,8 @@ const path = require('node:path');
 const os = require('node:os');
 const { createBridgeQueue } = require('./bridgeQueue');
 
+const { app } = require('electron');
+
 const API_PORT = 18930;
 let _server = null;
 const bridgeQueue = createBridgeQueue();
@@ -84,7 +86,7 @@ function startApiServer({ store, taskRunner, editScheduler, mainWindowRef, appLo
 
       // GET /api/health
       if (method === 'GET' && pathname === '/api/health') {
-        return send(200, { ok: true, version: store ? '0.3.6' : 'unknown' });
+        return send(200, { ok: true, version: app.getVersion() });
       }
 
       // GET /api/status
@@ -96,7 +98,7 @@ function startApiServer({ store, taskRunner, editScheduler, mainWindowRef, appLo
         try { logFiles = (await fs.readdir(path.join(dataDir, 'logs'))).filter(f => f.endsWith('.log')).sort().reverse().slice(0, 5); } catch {}
         return send(200, {
           ok: true,
-          version: settings?.app?.version || '0.3.6',
+          version: app.getVersion(),
           dataDir,
           tasks: tasks.map(t => ({ id: t.id, name: t.name, status: t.status, progress: t.progress, step: t.step, error: t.error, outputPath: t.outputPath })),
           recentLogs: logFiles,

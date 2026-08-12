@@ -28,7 +28,7 @@
 
 - 被 `smartEditor.composeEditVideo()` 调用
 - 调用 `videoComposer.composeVideoWithDub()` 执行实际合成
-- 调用 `autoDubClient.ensureVoiceCloneBackend()` 确保 Voicebox 运行
+- 调用 `autoDubClient.resolveVoiceCloneProfile()`（内部才确保 Voicebox 后端运行）
 
 ## 注意事项
 

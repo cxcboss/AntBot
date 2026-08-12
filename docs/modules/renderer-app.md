@@ -62,7 +62,6 @@ const publishPage = createPublishPage({ state: S, esc });
 
 - `onProgress` — 主任务进度
 - `onEditTaskUpdate` — 剪辑任务状态变化
-- `onSmartEditProgress` — 剪辑详细进度
 - `onVoiceboxProgress` — voicebox 安装进度
 - `onVoiceboxDepsProgress` — 逐包安装进度
 - `onDownloadTaskUpdate` — 下载任务更新

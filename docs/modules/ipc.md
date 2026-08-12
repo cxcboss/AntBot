@@ -1,6 +1,6 @@
 # ipc.js — IPC Handler 注册中心
 
-> 路径：`src/main/ipc.js`（~490 行）
+> 路径：`src/main/ipc.js`（~546 行）
 > 子模块：`src/main/ipc/*.js`（8 个功能域模块）
 
 ## 职责
@@ -15,9 +15,9 @@ IPC handler 的注册中心。核心逻辑委托给 `ipc/` 子模块，本文件
 | 模块 | 行数 | 通道前缀 | 说明 |
 |------|------|----------|------|
 | `ipc/voicebox.js` | ~384 | `voicebox:*` | voicebox 环境管理（check/install/reset/GPU） |
-| `ipc/library.js` | ~533 | `styles:*`, `fonts:*`, `voices:*`, `ui:*`, `api:*`, `app:get-data-info`, `app:migrate-data` | 风格/字体/音色/UI 持久化、API 调用、数据迁移 |
-| `ipc/models.js` | ~180 | `models:*` | Whisper 模型管理（list/download/delete） |
-| `ipc/publish.js` | ~169 | `publish:*`, `bridge:*` | 发布桥接服务、平台登录检测 |
+| `ipc/library.js` | ~417 | `styles:*`, `fonts:*`, `voices:*`, `ui:*`, `api:*`, `app:get-data-info` | 风格/字体/音色/UI 持久化、API 调用、数据迁移 |
+| `ipc/models.js` | ~292 | `models:*` | Whisper 模型管理（list/download/delete） |
+| `ipc/publish.js` | ~211 | `publish:*`, `bridge:*` | 发布桥接服务、平台登录检测 |
 | `ipc/remote.js` | ~169 | `remote:*`, `open-dir`, `open-plugin-dir` | 远程控制服务器、Cloudflare 隧道、凭证管理 |
 | `ipc/edit.js` | ~150 | `edit:*`, `history:get` | 剪辑调度器（EditScheduler 实例化、任务 CRUD） |
 | `ipc/download.js` | ~111 | `download:*` | 下载管理器（DownloadManager 实例化、yt-dlp） |

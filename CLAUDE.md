@@ -18,8 +18,8 @@ AntBot（搬运蚁）is an Electron desktop app for video automation: download �
 ```bash
 npm install                    # installs deps + playwright chromium
 npm run dev                    # run locally
-npm run build:mac              # macOS DMG → release/
-npm run build:win              # Windows NSIS
+npm run build:mac              # macOS .app → 项目根目录（产物规则见 docs/packaging.md）
+npm run build:win              # Windows NSIS（仅用户明确要求时）
 ```
 
 The `postinstall` hook runs `playwright install chromium`. The build script runs `prepare:icon:mac` and `prepare:voicebox` before `electron-builder`.
@@ -43,14 +43,14 @@ prepareEditVideo (smartEditor.js)     →  { srtContent, srtPath, videoName, tmp
   extractFrames → AI Vision → generateSrt → generateVideoName
 
 composeEditVideo (smartEditor.js)     →  { outputPath }
-  delegates to editVideo (editor.js) → processWithAutoDub (autoDubClient.js)
+  delegates to editVideo (editor.js) → composeVideoWithDub (videoComposer.js)
 ```
 
 **Edit scheduler** (`editScheduler.js`): manages task lifecycle with states `pending → preparing → ready → composing → completed`. Preparation runs up to 2 concurrently; composition runs sequentially. State persisted to `~/AntBot/edit-tasks.json`.
 
 **Voicebox backend** (Python, port 17493): TTS engine. Started by `autoDubClient.js`. Data stored at `~/AntBot/voicebox-data/` (fixed path, survives project rebuilds). Venv at `~/AntBot/voicebox-env/.venv-voicebox/`.
 
-**auto_dub_web** (Node.js, port 5001): video composition server at `vendors/auto_dub_web/server.mjs`. Handles TTS synthesis + subtitle burning + audio mixing.
+**Video composition** (`videoComposer.js`): ffmpeg-based composition (TTS synthesis via voicebox + subtitle burning + audio mixing). Runs directly in the main process — the old auto_dub_web Node.js server (`server.mjs`, port 5001) was removed.
 
 ## Key Paths
 
@@ -83,7 +83,7 @@ composeEditVideo (smartEditor.js)     →  { outputPath }
 |--------|-------------|-------|
 | `smartEditor.js` | `prepareEditVideo`, `composeEditVideo` | AI frame extraction uses Vision API; composition delegates to `editVideo` |
 | `editScheduler.js` | `EditScheduler` class | Pipeline: 2 concurrent prepares, 1 sequential compose |
-| `autoDubClient.js` | `processWithAutoDub`, `ensureVoiceCloneBackend` | Manages both auto_dub_web and voicebox processes |
+| `autoDubClient.js` | `ensureVoiceCloneBackend`, `shutdownVoicebox` | Manages voicebox backend lifecycle (start/install/ready/close) |
 | `dependencyInstaller.js` | `installDependencies` | Parses pip stderr for progress; `PYTHONUNBUFFERED=1` required |
 | `voiceClone.js` | `runVoiceClone` | Thin wrapper; delegates to `autoDubClient` |
 | `store.js` | `getSettings`, `updateSettings` | Deep-merge settings; persisted per-user |

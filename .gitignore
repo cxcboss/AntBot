@@ -26,3 +26,6 @@ clients/antbot_flutter/macos/Flutter/ephemeral
 
 # macOS app bundles
 *.app/
+
+# Cloudflare workers build cache
+workers/antbot-hub/.wrangler

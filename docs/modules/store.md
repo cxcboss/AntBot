@@ -27,11 +27,13 @@
 | `getHistory()` / `appendHistory(record)` | 历史记录（最多 200 条） |
 | `getLoginState()` / `setLoginState(service, loggedIn)` | 平台登录状态 |
 | `setVoiceClone(result)` | 保存音色克隆结果 |
-| `getPublishRecords()` / `addPublishRecord()` | 发布记录 |
+| `appendPublishedRecords(records)` | 追加发布记录 |
 
 ## 存储位置
 
-每个用户独立文件：`~/AntBot/users/{userId}/store.json`
+**单一文件**：`~/AntBot/antbot-store.json`（`STORE_FILE` 常量，`dataDir || app.getPath('userData')`）。
+
+多用户数据（`users` 数组 + `activeUserId`）存于同一文件内，不再按用户拆目录。
 
 ## 向后兼容
 

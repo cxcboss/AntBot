@@ -15,11 +15,10 @@
 ## 调用链
 
 ```
-ipc.js voice:clone handler
+ipc/voicebox.js voice:clone handler（实际注册在 ipc.js 基础 handler）
   → voiceClone.runVoiceClone()
     → autoDubClient.createVoiceCloneProfileWithAutoDub()
-      → ensureAutoDubServer()
-      → ensureVoiceCloneBackend()
+      → ensureVoiceCloneBackend()   (启动 voicebox 并等待就绪)
       → createVoiceCloneProfileDirect() (voicebox /profiles API)
 ```
 

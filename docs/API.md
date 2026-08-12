@@ -22,7 +22,7 @@ GET /api/health
 
 **响应：**
 ```json
-{ "ok": true, "version": "0.3.6" }
+{ "ok": true, "version": "0.7.2" }
 ```
 
 用于确认 App 已启动且 API 服务可用。
@@ -39,7 +39,7 @@ GET /api/status
 ```json
 {
   "ok": true,
-  "version": "0.3.6",
+  "version": "0.7.2",
   "dataDir": "/Users/xxx/AntBot",
   "tasks": [
     {

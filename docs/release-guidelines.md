@@ -40,25 +40,18 @@ App 版本号**唯一来源**是 `package.json` → `version`，构建时固化�
 
 ### 2.1 构建流程
 
-```bash
-# 1. 升版本号（唯一需要改的地方）
-npm version 0.4.1 --no-git-tag-version
+**产物规则以 `docs/packaging.md` 为准**（mac 只打 `.app` 移动到项目根目录，win 只打 exe；不需要 dmg/zip）：
 
-# 2. 构建
+```bash
+# 1. 升版本号（唯一需要改的地方，+0.0.1）
+npm version 0.7.3 --no-git-tag-version
+
+# 2. 构建（build:mac 内部自动完成签名 + 复制到根目录）
 npm run build:mac
 
 # 3. 清理垃圾文件
-rm -rf release/mac-arm64/搬运蚁.app/.DS_Store
-find release/mac-arm64/搬运蚁.app -name '__MACOSX' -type d -exec rm -rf {} +
 find release/mac-arm64/搬运蚁.app -name '.DS_Store' -delete
-xattr -cr release/mac-arm64/
-
-# 4. 签名
-codesign --force --deep --sign - release/mac-arm64/搬运蚁.app
-
-# 5. 打包 zip（使用 ASCII 文件名）
-cd release/mac-arm64
-ditto -c -k --sequesterRsrc --keepParent "搬运蚁.app" "/tmp/antbot-macos-arm64.zip"
+find release/mac-arm64/搬运蚁.app -name '__MACOSX' -type d -exec rm -rf {} +
 ```
 
 ### 2.2 发布到 GitHub
@@ -66,22 +59,24 @@ ditto -c -k --sequesterRsrc --keepParent "搬运蚁.app" "/tmp/antbot-macos-arm6
 ```bash
 # 1. 提交并打 tag
 git add -A
-git commit -m "v0.4.1: 更新说明"
-git tag v0.4.1
+git commit -m "v0.7.3: 更新说明"
+git tag v0.7.3
 git push origin main --tags
 
-# 2. 创建 Release
-gh release create v0.4.1 /tmp/antbot-macos-arm64.zip \
-  --title "v0.4.1" \
-  --notes "## v0.4.1\n\n### 修复\n- xxx\n### 新功能\n- xxx" \
+# 2. 创建 Release（可选：同时上传 .app 压缩包作为资产）
+ditto -c -k --sequesterRsrc --keepParent "./搬运蚁.app" "/tmp/antbot-macos-arm64.zip"
+gh release create v0.7.3 /tmp/antbot-macos-arm64.zip \
+  --title "v0.7.3" \
+  --notes "## v0.7.3\n\n### 修复\n- xxx\n### 新功能\n- xxx" \
   --repo cxcboss/AntBot
 ```
 
 ### 2.3 注意事项
 
+- 给用户交付的是项目根目录的 `搬运蚁.app`（本地测试/直接拷贝）；GitHub Release 的 zip 资产用于 App 内更新检测
 - zip 文件名必须用 ASCII（`antbot-macos-arm64.zip`），中文文件名会导致 GitHub Release 资产名乱码
 - 打包前必须清理 `__MACOSX` 和 `.DS_Store`
-- 发布后恢复本地版本号为测试版本（`npm version 0.3.7 --no-git-tag-version`），以便测试更新功能
+- 发布后恢复本地版本号为测试版本（`npm version 0.5.5 --no-git-tag-version`），以便测试更新功能；**发布版本以 git tag 为准**
 
 ### 2.4 更新检测原理
 
@@ -214,7 +209,7 @@ GitHub raw version.json（如 1.0.4）
 
 ### App 专属
 - [ ] `package.json` 版本号已更新（**唯一需要改的地方**）
-- [ ] 构建完成后签名（`codesign`）
+- [ ] 构建完成已自动签名并复制到项目根目录（`./搬运蚁.app`）
 - [ ] 构建前删除项目根目录的旧 `搬运蚁.app`
 
 ### 浏览器插件专属
