@@ -42,10 +42,13 @@ const VOICE_PRIORITY = [
 let ffmpegFilterSupport = null;
 let cachedVoices = null;
 let cachedSubtitleFont = null;
+let cachedFfmpegBin = null;
+let cachedFfprobeBin = null;
 
-// ─── ffmpeg/ffprobe path resolution (via dependencyManager) ───────────────────
+// ─── ffmpeg/ffprobe path resolution (cached) ─────────────────────────────────
 
 async function getFfmpegBin() {
+  if (cachedFfmpegBin !== null) return cachedFfmpegBin;
   // 优先使用 ffmpeg-full（Homebrew 完整版，带 subtitles/drawtext 滤镜）
   if (process.platform === 'darwin') {
     try {
@@ -54,14 +57,17 @@ async function getFfmpegBin() {
       if (prefix) {
         const bin = path.join(prefix, 'bin', 'ffmpeg');
         await fs.access(bin);
+        cachedFfmpegBin = bin;
         return bin;
       }
     } catch {}
   }
-  return await resolveDependencyPath('ffmpeg') || 'ffmpeg';
+  cachedFfmpegBin = await resolveDependencyPath('ffmpeg') || 'ffmpeg';
+  return cachedFfmpegBin;
 }
 
 async function getFfprobeBin() {
+  if (cachedFfprobeBin !== null) return cachedFfprobeBin;
   if (process.platform === 'darwin') {
     try {
       const { execFileSync } = require('node:child_process');
@@ -69,11 +75,13 @@ async function getFfprobeBin() {
       if (prefix) {
         const bin = path.join(prefix, 'bin', 'ffprobe');
         await fs.access(bin);
+        cachedFfprobeBin = bin;
         return bin;
       }
     } catch {}
   }
-  return await resolveDependencyPath('ffprobe') || 'ffprobe';
+  cachedFfprobeBin = await resolveDependencyPath('ffprobe') || 'ffprobe';
+  return cachedFfprobeBin;
 }
 
 // ─── Generic command runner ───────────────────────────────────────────────────
