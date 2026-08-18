@@ -53,6 +53,8 @@
 - Windows：`cwd` 必须是 `vendor/voicebox/`（`backend` 模块所在目录）
 - `spawn()` 全部加 `windowsHide: true`
 - Python 二进制平台感知：`process.platform === 'win32' ? 'python' : 'python3'`
+- **Python 版本支持 3.10~3.13**（`resolvePythonBinary` / venv 校验统一范围）
+- **Python 3.13 兼容**：`setup_voicebox_backend.sh` 与 `ipc/voicebox.js` 安装时自动将 requirements 中 `numba>=0.60.0,<0.61.0` 改写为 `>=0.61.2,<0.62.0`（numba 0.60 在 3.13 无 wheel）
 
 ## 已废弃方案
 

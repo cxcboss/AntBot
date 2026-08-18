@@ -12,6 +12,8 @@ const MAX_BODY_BYTES = 1024 * 1024; // 请求体上限 1MB
 const MAX_LOGIN_FAILURES = 10; // 10 次登录失败
 const LOGIN_LOCK_MS = 15 * 60 * 1000; // 锁 15 分钟
 let _server = null;
+let _startPromise = null;
+let _remotePort = REMOTE_PORT;
 let _taskRunner = null;
 let _store = null;
 let _mainWindowRef = null;
@@ -181,15 +183,15 @@ async function getVoiceboxStatus() {
 
 async function getServicesStatus() {
   const tunnel = (() => { try { return require('./tunnelManager').getStatus(); } catch { return { running: false }; } })();
-  const [api, bridge, voicebox, remote, tunnelUp] = await Promise.all([
-    checkPortOpen(18930), checkPortOpen(18321), getVoiceboxStatus(), checkPortOpen(18931), Promise.resolve(true),
+  const [api, bridge, voicebox, remote] = await Promise.all([
+    checkPortOpen(18930), checkPortOpen(18321), getVoiceboxStatus(), checkPortOpen(18931),
   ]);
   return {
     api: { name: '本地 API', port: 18930, running: api },
     bridge: { name: '桥接服务', port: 18321, running: bridge },
     voicebox: { name: '配音引擎', port: 17493, running: voicebox.running },
     remote: { name: '远程服务', port: 18931, running: remote },
-    tunnel: { name: '隧道', port: null, running: Boolean(tunnel.running && tunnelUp), url: tunnel.url || null },
+    tunnel: { name: '隧道', port: null, running: Boolean(tunnel.running), url: tunnel.url || null },
   };
 }
 
@@ -257,7 +259,16 @@ function startRemoteServer({ store, taskRunner, mainWindowRef, appLog }) {
   _mainWindowRef = mainWindowRef;
   _appLog = appLog;
 
-  _server = http.createServer(async (req, res) => {
+  // 支持通过 settings.remote.port / ANTBOT_REMOTE_PORT 配置端口（默认 18931）
+  const envPort = Number(process.env.ANTBOT_REMOTE_PORT) || null;
+  if (envPort) _remotePort = envPort;
+
+  if (_server) return _startPromise || Promise.resolve();
+  // 防重复启动：并发调用共享同一个启动 Promise，避免 EADDRINUSE 产生孤儿 server
+  if (_startPromise) return _startPromise;
+
+  _startPromise = new Promise((resolveStart) => {
+    _server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://localhost:${REMOTE_PORT}`);
     const method = req.method;
     const pathname = url.pathname;
@@ -280,18 +291,17 @@ function startRemoteServer({ store, taskRunner, mainWindowRef, appLog }) {
         const body = await readBody(req, res);
         if (!body) return;
 
-        // 从统一凭证模块读取（safeStorage 加密存储）
-        const { readCreds } = require('./remoteCredentials');
+        // 从统一凭证模块读取（hash 验证优先，safeStorage 解密失败也能工作）
+        const { readCreds, verifyPassword } = require('./remoteCredentials');
         const creds = await readCreds();
-        const remotePass = creds.password || '';
 
-        if (!remotePass) {
+        if (!creds.passwordHash && !creds.password) {
           return sendJson(res, 400, { ok: false, error: '请先在 App 中设置远程访问密码' });
         }
         if (isLoginLocked()) {
           return sendJson(res, 429, { ok: false, error: '尝试次数过多，请 15 分钟后再试' });
         }
-        if (body.password !== remotePass) {
+        if (!verifyPassword(body.password, creds)) {
           recordLoginFailure();
           return sendJson(res, 401, { ok: false, error: '密码错误' });
         }
@@ -595,13 +605,19 @@ function startRemoteServer({ store, taskRunner, mainWindowRef, appLog }) {
     }
   });
 
-  _server.listen(REMOTE_PORT, '127.0.0.1', () => {
-    log('info', `远程控制服务已启动: http://127.0.0.1:${REMOTE_PORT}`);
+  _server.listen(_remotePort, '127.0.0.1', () => {
+    log('info', `远程控制服务已启动: http://127.0.0.1:${_remotePort}`);
+    resolveStart();
   });
 
   _server.on('error', (err) => {
     log('error', `远程控制服务启动失败: ${err.message}`);
+    if (err.code === 'EADDRINUSE') _server = null;
+    resolveStart();
   });
+  }).finally(() => { _startPromise = null; });
+
+  return _startPromise;
 }
 
 function stopRemoteServer() {
@@ -621,7 +637,14 @@ function isServerRunning() {
 }
 
 function getRemotePort() {
-  return REMOTE_PORT;
+  return _remotePort;
+}
+
+// 从设置读取配置的端口（设置可能在服务启动前已加载，用于隧道指向正确端口）
+function configureRemotePort(port) {
+  const parsed = Number(port);
+  if (parsed && parsed >= 1024 && parsed <= 65535) _remotePort = parsed;
+  return _remotePort;
 }
 
 // Export for taskRunner to broadcast events
@@ -635,5 +658,6 @@ module.exports = {
   isServerRunning,
   clearSessions,
   getRemotePort,
+  configureRemotePort,
   broadcastTaskUpdate,
 };

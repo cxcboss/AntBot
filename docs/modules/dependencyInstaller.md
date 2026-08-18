@@ -6,6 +6,11 @@
 
 逐个安装 Python pip 包，解析 stderr 获取下载进度/速度，支持取消。
 
+## 稳定性
+
+- pip 调用固定带 `--timeout 60 --retries 5`，网络抖动可自动重试
+- 单包安装最长 60 分钟，超时强制终止（SIGTERM）并上报 `package-error`，避免 UI 无限等待
+
 ## 核心函数
 
 | 函数 | 说明 |

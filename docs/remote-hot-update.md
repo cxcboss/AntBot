@@ -107,11 +107,13 @@ git push origin main
 
 ```bash
 # 确认版本号已更新
-curl https://raw.githubusercontent.com/cxcboss/antbot-remote-ui/main/version.json
+curl https://api.github.com/repos/cxcboss/antbot-remote-ui/contents/version.json
 
 # App 启动时会自动检测并下载
 # 或在设置中手动点击"检查更新"
 ```
+
+> **版本检测走 GitHub API**（`api.github.com/.../contents/version.json`），raw.githubusercontent.com 仅作次要回退（国内直连常被限流/屏蔽）。文件下载同样先走 raw、失败后回退 GitHub API contents（限单文件 ≤1MB）。
 
 ## App 端更新流程
 
@@ -120,11 +122,11 @@ App 启动
   ↓
 读取 ~/AntBot/remote-ui/version.json（无则视为 v0.0.0）
   ↓
-用 curl 从 GitHub 获取 version.json（支持系统代理）
+用 GitHub API 获取 version.json（失败回退 raw.githubusercontent.com）
   ↓
 semver 比较版本号
   ├── 当前 >= 远程 → 跳过
-  └── 远程更新 → 逐文件下载（每个文件最多重试 3 次）
+  └── 远程更新 → 逐文件下载（每个文件最多重试 3 次，raw 失败回退 GitHub API）
                     ↓
                   SHA256 校验（如果 version.json 中提供了 hash）
                     ↓

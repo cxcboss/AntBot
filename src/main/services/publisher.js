@@ -94,8 +94,7 @@ async function publishVideo(taskContext) {
       baseUrl: extensionConfig.baseUrl,
       timeoutMs: extensionConfig.timeoutMs || 5 * 60 * 1000
     });
-    try {
-      const bridgeStatus = await bridge.getStatus();
+    const bridgeStatus = await bridge.getStatus();
       log(`桥接状态: ${bridgeStatus.status}, 插件连接: ${bridgeStatus.extensionConnected ? '是' : '否'}`);
       // H1: 插件未连接时快速失败，避免 60s 登录检测 + 90s 发布等待后才报超时
       if (!bridgeStatus.extensionConnected) {
@@ -162,9 +161,6 @@ async function publishVideo(taskContext) {
           partialFailed: anyPartial ? allResults.filter(r => r && r.status !== 'success') : []
         };
       }
-    } catch (error) {
-      throw error;
-    }
   }
 
   throw new Error('发布桥接服务未运行，请在发布页面启动服务后重试');

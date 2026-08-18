@@ -194,14 +194,16 @@ class DownloadManager {
       const env = { ...process.env, PATH: buildRuntimePath(process.env.PATH) };
       const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], env, windowsHide: true });
       let output = '';
+      let settled = false;
+      const timer = setTimeout(() => { if (settled) return; settled = true; try { child.kill(); } catch {} reject(new Error('timeout')); }, 8000);
+      const finish = (fn, val) => { if (settled) return; settled = true; clearTimeout(timer); fn(val); };
       child.stdout?.on('data', d => { output += d.toString(); });
       child.stderr?.on('data', d => { output += d.toString(); });
       child.on('close', () => {
-        if (output.includes('.') || output.includes('version')) resolve(true);
-        else reject(new Error(`no version output: ${output.slice(0, 100)}`));
+        if (output.includes('.') || output.includes('version')) finish(resolve, true);
+        else finish(reject, new Error(`no version output: ${output.slice(0, 100)}`));
       });
-      child.on('error', reject);
-      setTimeout(() => { child.kill(); reject(new Error('timeout')); }, 8000);
+      child.on('error', (e) => finish(reject, e));
     });
   }
 
@@ -228,14 +230,20 @@ class DownloadManager {
   }
 
   async installYtDlp() {
-    const target = path.join(os.homedir(), 'AntBot', 'tools', 'yt-dlp');
+    const isWin = process.platform === 'win32';
+    const exeName = isWin ? 'yt-dlp.exe' : 'yt-dlp';
+    const target = path.join(os.homedir(), 'AntBot', 'tools', exeName);
     await fs.mkdir(path.dirname(target), { recursive: true });
-    const url = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos';
+    // 按平台选择官方二进制（Windows 是 .exe，macOS 用 macos 版，Linux 分 x64/aarch64）
+    let artifact = 'yt-dlp_macos';
+    if (isWin) artifact = 'yt-dlp.exe';
+    else if (process.platform === 'linux') artifact = process.arch === 'arm64' ? 'yt-dlp_linux_aarch64' : 'yt-dlp_linux';
+    const url = `https://github.com/yt-dlp/yt-dlp/releases/latest/download/${artifact}`;
     const res = await fetch(url);
     if (!res.ok) throw new Error(`下载 yt-dlp 失败: HTTP ${res.status}`);
     const buf = Buffer.from(await res.arrayBuffer());
     await fs.writeFile(target, buf);
-    await fs.chmod(target, 0o755);
+    if (!isWin) await fs.chmod(target, 0o755);
     this._ytDlpPath = target;
     return target;
   }

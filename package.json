@@ -1,6 +1,6 @@
 {
   "name": "antbot",
-  "version": "0.5.5",
+  "version": "0.7.10",
   "description": "搬运蚁 - 内置浏览器的视频下载、字幕生成、剪辑与发布工作台",
   "main": "src/main/index.js",
   "author": "",
@@ -8,6 +8,7 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron .",
+    "test": "node --test \"src/main/services/tests/*.test.js\" \"publish-extension/local-server/tests/*.test.js\"",
     "postinstall": "playwright install chromium",
     "prepare:playwright:win": "node ./scripts/prepare-playwright-win.js",
     "prepare:voicebox": "node ./scripts/prepare-voicebox.js",
@@ -23,6 +24,7 @@
   "dependencies": {
     "dayjs": "^1.11.13",
     "lucide-static": "^1.26.0",
+    "msedge-tts": "^2.0.7",
     "playwright": "^1.52.0",
     "qrcode": "^1.5.4"
   },

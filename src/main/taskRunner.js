@@ -306,7 +306,7 @@ class TaskRunner {
     }
 
     for (const job of this.queue) {
-      if (job.userId !== requestUserId) {
+      if (requestUserId && job.userId !== requestUserId) {
         continue;
       }
       const queuedTasks = job.kind === 'debug-publish'

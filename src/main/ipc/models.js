@@ -1,4 +1,5 @@
 const fs = require('node:fs/promises');
+const fsSync = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { shell } = require('electron');
@@ -29,9 +30,15 @@ function register({ ipcMain, store, mainWindowRef }) {
       let downloaded = false;
       let localPath = '';
       if (meta.hfDownload) {
-        // HuggingFace models are directories
+        // HuggingFace models are directories；以完成标记或模型文件判断是否完整下载
         const modelDir = path.join(dir, key);
-        try { const stat = await fs.stat(modelDir); downloaded = stat.isDirectory(); localPath = modelDir; } catch { localPath = modelDir; }
+        try {
+          const files = await fs.readdir(modelDir);
+          downloaded = files.includes('.antbot-complete')
+            || files.some(f => f.endsWith('.safetensors'))
+            || files.includes('config.json');
+          localPath = modelDir;
+        } catch { localPath = modelDir; }
       } else {
         const filePath = path.join(dir, meta.filename);
         try { const stat = await fs.stat(filePath); downloaded = stat.size > 0; localPath = filePath; } catch { localPath = filePath; }
@@ -108,28 +115,46 @@ function register({ ipcMain, store, mainWindowRef }) {
           const resp = await proxyFetch(fileUrl, { signal: controller.signal, redirect: 'follow' });
           if (!resp.ok) throw new Error(`下载 ${file.path} 失败: HTTP ${resp.status}`);
 
-          const fileBytes = [];
+          // 流式写入，避免大文件全部驻留内存
           const reader = resp.body.getReader();
           let fileDownloaded = 0;
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            fileBytes.push(value);
-            fileDownloaded += value.length;
-            downloadedBytes += value.length;
-            if (totalBytes > 0) {
-              const percent = Math.round((downloadedBytes / totalBytes) * 100);
-              sendProgress({ model: modelKey, status: 'downloading', percent, message: `${file.path} (${(downloadedBytes / 1024 / 1024).toFixed(0)}MB / ${(totalBytes / 1024 / 1024).toFixed(0)}MB)` });
-            }
-          }
-          await fs.writeFile(destPath, Buffer.concat(fileBytes));
+          await new Promise((resolveWrite, rejectWrite) => {
+            const outStream = fsSync.createWriteStream(destPath);
+            outStream.on('error', rejectWrite);
+            outStream.on('finish', resolveWrite);
+            (async () => {
+              try {
+                while (true) {
+                  const { done, value } = await reader.read();
+                  if (done) break;
+                  if (!outStream.write(value)) {
+                    await new Promise(r => outStream.once('drain', r));
+                  }
+                  fileDownloaded += value.length;
+                  downloadedBytes += value.length;
+                  if (totalBytes > 0) {
+                    const percent = Math.round((downloadedBytes / totalBytes) * 100);
+                    sendProgress({ model: modelKey, status: 'downloading', percent, message: `${file.path} (${(downloadedBytes / 1024 / 1024).toFixed(0)}MB / ${(totalBytes / 1024 / 1024).toFixed(0)}MB)` });
+                  }
+                }
+                outStream.end();
+              } catch (e) {
+                outStream.destroy();
+                rejectWrite(e);
+              }
+            })();
+          });
         }
+
+        // 写入完成标记，供 models:list 判断下载完整性
+        await fs.writeFile(path.join(destDir, '.antbot-complete'), JSON.stringify({ model: modelKey, completedAt: new Date().toISOString() }));
 
         activeDownloads.delete(modelKey);
         sendProgress({ model: modelKey, status: 'completed', percent: 100, message: '下载完成' });
         return { ok: true, path: destDir };
       } catch (error) {
         activeDownloads.delete(modelKey);
+        await fs.rm(destDir, { recursive: true, force: true }).catch(() => {});
         if (error.name === 'AbortError' || error.message === '已取消') {
           sendProgress({ model: modelKey, status: 'cancelled', message: '已取消' });
           return { ok: false, message: '已取消' };
@@ -213,16 +238,6 @@ function register({ ipcMain, store, mainWindowRef }) {
     const dir = await getModelsDir();
     await shell.openPath(dir);
     return { path: dir };
-  });
-
-  ipcMain.handle('models:change-path', async (_event, newPath) => {
-    if (!newPath) return { ok: false, message: '路径不能为空' };
-    await fs.mkdir(newPath, { recursive: true }).catch(() => {});
-    const settings = await store.getSettings();
-    settings.api = settings.api || {};
-    settings.api.modelsDir = newPath;
-    await store.updateSettings({ api: settings.api });
-    return { ok: true, path: newPath };
   });
 
   // 浏览器下载：返回模型的下载 URL

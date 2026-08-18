@@ -53,26 +53,6 @@ function detectSystemProxy() {
 
     // 3. 探测常见 VPN 代理端口（Clash/V2Ray/Shadowsocks）
     if (!_proxyUrl) {
-      const candidates = [
-        { port: 7890, name: 'Clash' },
-        { port: 7891, name: 'Clash (备选)' },
-        { port: 10809, name: 'V2Ray/SS' },
-        { port: 10808, name: 'V2Ray (备选)' },
-        { port: 1080, name: 'SOCKS' },
-        { port: 8080, name: 'HTTP 代理' },
-      ];
-      for (const c of candidates) {
-        try {
-          const net = require('node:net');
-          const sock = net.createConnection({ host: '127.0.0.1', port: c.port });
-          const connected = new Promise((resolve) => {
-            sock.on('connect', () => { sock.destroy(); resolve(true); });
-            sock.on('error', () => { sock.destroy(); resolve(false); });
-            setTimeout(() => { sock.destroy(); resolve(false); }, 500);
-          });
-          // 同步等待不现实，用同步检测
-        } catch {}
-      }
       // 异步端口探测（非阻塞，结果缓存到下次调用）
       _probeCommonPorts();
     }
@@ -142,6 +122,20 @@ function createHttpProxyFetch(proxyUrl) {
     const isHttps = parsedUrl.protocol === 'https:';
 
     return new Promise((resolve, reject) => {
+      const onAbort = () => {
+        const err = new Error('已取消');
+        err.name = 'AbortError';
+        reject(err);
+        try { connectReq.destroy(); } catch {}
+      };
+      const cleanupSignal = () => {
+        if (options.signal) options.signal.removeEventListener('abort', onAbort);
+      };
+      if (options.signal) {
+        if (options.signal.aborted) return onAbort();
+        options.signal.addEventListener('abort', onAbort, { once: true });
+      }
+
       const connectReq = http.request({
         host: proxy.hostname,
         port: parseInt(proxy.port) || 80,
@@ -150,10 +144,12 @@ function createHttpProxyFetch(proxyUrl) {
       });
 
       connectReq.on('connect', (res, socket, head) => {
+        if (options.signal?.aborted) { socket.destroy(); cleanupSignal(); return; }
         if (res.statusCode !== 200) {
           socket.destroy();
           logToAppFile(`CONNECT 被拒绝: HTTP ${res.statusCode}`);
-          return globalThis.fetch(url, options).then(resolve).catch(reject);
+          cleanupSignal();
+          return reject(new Error(`代理 CONNECT 被拒绝: HTTP ${res.statusCode}`));
         }
         logToAppFile(`CONNECT 成功 → ${parsedUrl.hostname}，建立 TLS...`);
 
@@ -190,7 +186,7 @@ function createHttpProxyFetch(proxyUrl) {
           // 读取响应
           const chunks = [];
           tlsSocket.on('data', chunk => chunks.push(chunk));
-          tlsSocket.on('error', e => { logToAppFile(`TLS 读取错误: ${e.message}`); reject(e); });
+          tlsSocket.on('error', e => { logToAppFile(`TLS 读取错误: ${e.message}`); cleanupSignal(); reject(e); });
           tlsSocket.on('end', () => {
             const raw = Buffer.concat(chunks).toString('utf8');
             const headerEnd = raw.indexOf('\r\n\r\n');
@@ -205,6 +201,8 @@ function createHttpProxyFetch(proxyUrl) {
               const idx = line.indexOf(':');
               if (idx > 0) headerMap.set(line.slice(0, idx).trim().toLowerCase(), line.slice(idx + 1).trim());
             }
+            const bodyBytes = Buffer.from(bodyPart, 'utf8');
+            cleanupSignal();
             resolve({
               ok: statusCode >= 200 && statusCode < 300,
               status: statusCode,
@@ -212,21 +210,28 @@ function createHttpProxyFetch(proxyUrl) {
               headers: headerMap,
               text: () => Promise.resolve(bodyPart),
               json: () => Promise.resolve(JSON.parse(bodyPart)),
-              arrayBuffer: () => Promise.resolve(Buffer.from(bodyPart).buffer),
-              body: null
+              arrayBuffer: () => Promise.resolve(bodyBytes.buffer.slice(bodyBytes.byteOffset, bodyBytes.byteOffset + bodyBytes.byteLength)),
+              body: new ReadableStream({
+                start(controller) {
+                  controller.enqueue(bodyBytes);
+                  controller.close();
+                }
+              })
             });
           });
         });
 
         tlsSocket.on('error', (e) => {
           logToAppFile(`TLS 握手失败: ${e.message}`);
-          globalThis.fetch(url, options).then(resolve).catch(reject);
+          cleanupSignal();
+          reject(e);
         });
       });
 
       connectReq.on('error', (e) => {
         logToAppFile(`CONNECT 失败: ${e.message}`);
-        globalThis.fetch(url, options).then(resolve).catch(reject);
+        cleanupSignal();
+        reject(e);
       });
       connectReq.end();
     });

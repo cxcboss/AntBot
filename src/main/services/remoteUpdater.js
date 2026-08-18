@@ -73,6 +73,7 @@ function getHttpOptions(urlStr) {
 }
 
 const GITHUB_RAW = 'https://raw.githubusercontent.com/cxcboss/antbot-remote-ui/main';
+const GITHUB_API = 'https://api.github.com/repos/cxcboss/antbot-remote-ui';
 const VERSION_URL = `${GITHUB_RAW}/version.json`;
 const LOCAL_DIR = path.join(os.homedir(), 'AntBot', 'remote-ui');
 const LOCAL_VERSION_FILE = path.join(LOCAL_DIR, 'version.json');
@@ -151,8 +152,33 @@ async function getLocalVersion() {
 }
 
 async function getRemoteVersion() {
+  // 优先走 GitHub API（raw.githubusercontent.com 在国内常被限流/屏蔽，导致检测不到新版本）
+  try {
+    const json = await nodeGet(`${GITHUB_API}/contents/version.json`);
+    const data = JSON.parse(json);
+    if (data && data.content) {
+      const text = Buffer.from(data.content, 'base64').toString('utf-8');
+      return JSON.parse(text);
+    }
+    throw new Error('GitHub API 响应缺少 content');
+  } catch (e) {
+    _log('warn', `[热更新] GitHub API 获取远程版本失败: ${e.message}`);
+  }
   const text = await nodeGet(VERSION_URL);
   return JSON.parse(text);
+}
+
+async function getRemoteVersionWithRetry() {
+  let lastErr = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      return await getRemoteVersion();
+    } catch (e) {
+      lastErr = e;
+      if (attempt < 3) await new Promise((r) => setTimeout(r, 1200 * attempt));
+    }
+  }
+  throw lastErr;
 }
 
 // ─── 带重试的下载 ───
@@ -166,7 +192,19 @@ async function downloadWithRetry(relativePath, maxRetry = MAX_RETRY) {
       return content;
     } catch (e) {
       _log('warn', `[热更新] 下载 ${relativePath} 第${attempt}次失败: ${e.message}`);
-      if (attempt === maxRetry) throw e;
+      if (attempt === maxRetry) {
+        // raw 全部失败时回退 GitHub API（contents 接口，限 1MB 内文件）
+        try {
+          const json = await nodeGet(`${GITHUB_API}/contents/${encodeURI(relativePath)}`);
+          const data = JSON.parse(json);
+          if (data && data.content) {
+            return Buffer.from(data.content, 'base64').toString('utf-8');
+          }
+        } catch (apiErr) {
+          _log('warn', `[热更新] ${relativePath} GitHub API 回退失败: ${apiErr.message}`);
+        }
+        throw e;
+      }
       await new Promise(r => setTimeout(r, 1000 * attempt));
     }
   }
@@ -212,7 +250,7 @@ async function checkForUpdates() {
   const local = await getLocalVersion();
   let remote;
   try {
-    remote = await getRemoteVersion();
+    remote = await getRemoteVersionWithRetry();
   } catch (e) {
     _log('info', `[热更新] 无法获取远程版本: ${e.message}`);
     return { hasUpdate: false, localVersion: local.version, error: e.message };

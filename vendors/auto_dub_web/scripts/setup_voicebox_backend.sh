@@ -132,7 +132,7 @@ PY
   rm -rf "$stage_dir" "$VOICEBOX_TMP_DIR" "$VOICEBOX_ZIP_PATH"
 }
 
-if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
+if ! command -v "$PYTHON_BIN" >/dev/null 2>&1 && [ ! -x "$PYTHON_BIN" ]; then
   echo "Python not found: $PYTHON_BIN"
   echo "Try: PYTHON_BIN=python3.11 $0"
   exit 1
@@ -141,9 +141,9 @@ fi
 PY_VER="$("$PYTHON_BIN" -c 'import sys;print(f"{sys.version_info[0]}.{sys.version_info[1]}")')"
 PY_MAJOR="${PY_VER%%.*}"
 PY_MINOR="${PY_VER##*.}"
-if [ "$PY_MAJOR" -ne 3 ] || [ "$PY_MINOR" -lt 10 ] || [ "$PY_MINOR" -gt 12 ]; then
+if [ "$PY_MAJOR" -ne 3 ] || [ "$PY_MINOR" -lt 10 ] || [ "$PY_MINOR" -gt 13 ]; then
   echo "[voicebox] unsupported Python version: $PY_VER"
-  echo "[voicebox] requires Python 3.10 ~ 3.12"
+  echo "[voicebox] requires Python 3.10 ~ 3.13"
   echo "Try: PYTHON_BIN=/usr/local/bin/python3.11 $0"
   exit 1
 fi
@@ -177,7 +177,18 @@ if [ -z "$VENV_PYTHON" ]; then
 fi
 
 "$VENV_PYTHON" -m pip install --upgrade pip wheel setuptools
-"$VENV_PYTHON" -m pip install -r "$VOICEBOX_REQUIREMENTS"
+
+# Python 3.13 兼容：numba<0.61 在 3.13 上无 wheel，改写约束到临时文件
+REQ_FILE="$VOICEBOX_REQUIREMENTS"
+if [ "$PY_MINOR" -ge 13 ]; then
+  PATCHED_REQ="$(mktemp)"
+  if sed 's/numba>=0\.60\.0,<0\.61\.0/numba>=0.61.2,<0.62.0/g' "$VOICEBOX_REQUIREMENTS" > "$PATCHED_REQ" 2>/dev/null; then
+    echo "[voicebox] Python 3.13 detected, adapting numba constraint for compatibility."
+    REQ_FILE="$PATCHED_REQ"
+  fi
+fi
+
+"$VENV_PYTHON" -m pip install -r "$REQ_FILE"
 
 # Apple Silicon users can optionally enable MLX backend.
 # Disabled by default because upstream dependencies may conflict.

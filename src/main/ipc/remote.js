@@ -5,9 +5,12 @@ const { shell } = require('electron');
 
 function register({ ipcMain, store, taskRunner, mainWindowRef, appLog }) {
   // 远程控制服务（延迟启动，按需开启）
-  const { startRemoteServer, stopRemoteServer, isServerRunning, getRemotePort, broadcastTaskUpdate, clearSessions } = require('../services/remoteServer');
+  const { startRemoteServer, stopRemoteServer, isServerRunning, getRemotePort, configureRemotePort, broadcastTaskUpdate, clearSessions } = require('../services/remoteServer');
   const tunnelManager = require('../services/tunnelManager');
   const { readCreds, writeCreds, getDeviceId } = require('../services/remoteCredentials');
+
+  // 同步配置端口（settings.remote.port），使隧道指向正确端口
+  store.getSettings().then(s => { if (s?.remote?.port) configureRemotePort(s.remote.port); }).catch(() => {});
 
   // 主控任务进度推送到远程 SSE
   taskRunner.onProgress = ((originalOnProgress) => (payload) => {
@@ -146,7 +149,7 @@ function register({ ipcMain, store, taskRunner, mainWindowRef, appLog }) {
       const updater = require('../services/remoteUpdater');
       updater.setLogger(appLog);
       const result = await updater.checkForUpdates();
-      return { hasUpdate: result.hasUpdate, latestVersion: result.remoteVersion, currentVersion: result.localVersion, changelog: '', downloadUrl: '' };
+      return { hasUpdate: result.hasUpdate, latestVersion: result.remoteVersion, currentVersion: result.localVersion, changelog: '', downloadUrl: '', error: result.error || '' };
     } catch (e) { return { hasUpdate: false, error: e.message }; }
   });
 

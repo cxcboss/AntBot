@@ -131,7 +131,7 @@ async function resolvePythonBinary() {
     }
     const major = Number(match[1]);
     const minor = Number(match[2]);
-    return major === 3 && minor >= 10 && minor <= 12;
+    return major === 3 && minor >= 10 && minor <= 13;
   };
 
   const candidates = [];
@@ -146,9 +146,11 @@ async function resolvePythonBinary() {
   if (process.platform === 'win32') {
     const home = process.env.USERPROFILE || require('node:os').homedir();
     const localAppData = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+    pushCandidate(path.join(localAppData, 'Programs', 'Python', 'Python313', 'python.exe'));
     pushCandidate(path.join(localAppData, 'Programs', 'Python', 'Python312', 'python.exe'));
     pushCandidate(path.join(localAppData, 'Programs', 'Python', 'Python311', 'python.exe'));
     pushCandidate(path.join(localAppData, 'Programs', 'Python', 'Python310', 'python.exe'));
+    pushCandidate(path.join(home, 'AppData', 'Local', 'Programs', 'Python', 'Python313', 'python.exe'));
     pushCandidate(path.join(home, 'AppData', 'Local', 'Programs', 'Python', 'Python312', 'python.exe'));
     pushCandidate(path.join(home, 'AppData', 'Local', 'Programs', 'Python', 'Python311', 'python.exe'));
     pushCandidate(path.join(home, 'AppData', 'Local', 'Programs', 'Python', 'Python310', 'python.exe'));
@@ -196,7 +198,7 @@ async function resolvePythonBinary() {
     }
   }
   if (unsupported.length) {
-    throw new Error(`未找到可用 Python 3.10~3.12。检测到但不兼容：${unsupported.join(', ')}`);
+    throw new Error(`未找到可用 Python 3.10~3.13。检测到但不兼容：${unsupported.join(', ')}`);
   }
   return '';
 }
@@ -949,7 +951,7 @@ async function ensureVoiceCloneBackend(projectPath, logger = () => {}, progress 
     }
     const major = Number(match[1]);
     const minor = Number(match[2]);
-    return major === 3 && minor >= 10 && minor <= 12;
+    return major === 3 && minor >= 10 && minor <= 13;
   };
 
   let venvOk = hasVenvPython;
@@ -1008,7 +1010,7 @@ async function ensureVoiceCloneBackend(projectPath, logger = () => {}, progress 
 
     const pythonBinary = await resolvePythonBinary();
     if (!pythonBinary) {
-      throw new Error('未找到可用 Python 3.10~3.12。');
+      throw new Error('未找到可用 Python 3.10~3.13。');
     }
 
     progress({

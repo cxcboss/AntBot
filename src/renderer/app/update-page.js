@@ -14,7 +14,7 @@ async function initUpdatePage() {
 
   setupUpdater('plugin', {
     checkFn: async () => {
-      const r = await window.antbot.checkAllUpdates();
+      const r = await window.antbot.checkAllUpdates({ force: true });
       return r?.plugin || {hasUpdate: false};
     },
     downloadFn: async (url) => window.antbot.downloadPluginUpdate(url),
@@ -32,7 +32,7 @@ async function initUpdatePage() {
   });
   setupUpdater('app', {
     checkFn: async () => {
-      const r = await window.antbot.checkAllUpdates();
+      const r = await window.antbot.checkAllUpdates({ force: true });
       return r?.app || {hasUpdate: false};
     },
     downloadFn: async (url) => window.antbot.downloadAppUpdate(url),
@@ -123,6 +123,12 @@ function setupUpdater(key, { checkFn, downloadFn, installFn, noRestart }) {
 
     try {
       const result = await checkFn();
+      if (result.error && !result.hasUpdate) {
+        log('检查失败: ' + result.error, 'error');
+        checkBtn.disabled = false;
+        checkBtn.textContent = '重新检查';
+        return;
+      }
       if (result.hasUpdate) {
         const latestEl = $t(`upd-${key}-latest`);
         const latestLbl = $t(`upd-${key}-latest-label`);

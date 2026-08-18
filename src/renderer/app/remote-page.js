@@ -1,5 +1,8 @@
 export function createRemotePage({ toast, injectIcons }) {
 /* ── Remote Control page ── */
+let currentUrl = '';
+let _bound = false;
+
 async function initRemotePage() {
   const statusText = document.getElementById('remote-status-text');
   const urlEl = document.getElementById('remote-url');
@@ -14,8 +17,6 @@ async function initRemotePage() {
   const passToggle = document.getElementById('remote-pass-toggle');
   const autoToggle = document.getElementById('remote-auto-toggle');
 
-  let currentUrl = '';
-
   // 加载当前设置
   try {
     const creds = await window.antbot.remoteGetCredentials();
@@ -24,7 +25,7 @@ async function initRemotePage() {
     if (autoToggle && creds.autoStart) autoToggle.classList.add('on');
   } catch {}
 
-  // 检查当前状态
+  // 检查当前状态（每次进入页面刷新）
   try {
     const status = await window.antbot.remoteStatus();
     if (status.serverRunning) {
@@ -39,6 +40,10 @@ async function initRemotePage() {
       }
     }
   } catch {}
+
+  // 事件绑定与 IPC 订阅：仅首次绑定，避免切页重复注册导致 N 次触发
+  if (_bound) return;
+  _bound = true;
 
   // 密码显示/隐藏
   passToggle?.addEventListener('click', () => {
@@ -141,8 +146,6 @@ async function initRemotePage() {
     if (statusText) statusText.textContent = s.status === 'running' ? '已连接' : s.status === 'starting' ? '连接中...' : '未连接';
   });
 }
-
-
 
   return { init: initRemotePage };
 }

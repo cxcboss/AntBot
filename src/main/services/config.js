@@ -106,7 +106,7 @@ const BASE_DEFAULT_SETTINGS = {
   },
   remote: {
     enabled: false,
-    port: 17888,
+    port: 18931,
     password: '',
     deviceName: '',
     publicMode: 'off',
@@ -169,6 +169,9 @@ function getSettingsOverridesFromEnv() {
   const youtubeProjectPath = resolvePathEnv(process.env.ANTBOT_YOUTUBE_PROJECT_PATH);
   const publishProjectPath = resolvePathEnv(process.env.ANTBOT_PUBLISH_PROJECT_PATH);
 
+  if (dataRoot) {
+    overrides.dataDir = dataRoot;
+  }
   if (tempDir) {
     pathOverrides.tempDir = tempDir;
   }
@@ -207,7 +210,7 @@ function getSettingsOverridesFromEnv() {
   }
 
   if (remotePortRaw) {
-    remoteOverrides.port = parseNumberEnv(remotePortRaw, 17888, 1024, 65535);
+    remoteOverrides.port = parseNumberEnv(remotePortRaw, 18931, 1024, 65535);
   }
 
   if (remotePublicMode === 'cloudflare-quick' || remotePublicMode === 'off') {

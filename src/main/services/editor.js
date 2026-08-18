@@ -2,6 +2,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { ensureDir } = require('./fileUtil');
 const { composeVideoWithDub } = require('./videoComposer');
+const { isAzureVoiceId, azureVoiceShortName } = require('./azureTts');
 
 async function ensureReadableFile(filePath, label) {
   try {
@@ -36,7 +37,9 @@ async function editVideo(taskContext) {
   }
   await ensureDir(path.dirname(outputPath));
 
-  const useVoiceClone = !!(settings.voiceClone?.voiceId || settings.voiceClone?.profileName);
+  const rawVoiceId = settings.voiceClone?.voiceId || '';
+  const useAzureTts = isAzureVoiceId(rawVoiceId);
+  const useVoiceClone = !useAzureTts && !!(settings.voiceClone?.profileName || rawVoiceId);
 
   let cloneProfileId = '';
   let cloneProfileName = '';
@@ -76,7 +79,8 @@ async function editVideo(taskContext) {
     outputPath,
     voiceoverEnabled,
     subtitleEnabled,
-    ttsMode: useVoiceClone ? 'voice_clone' : 'system',
+    ttsMode: useAzureTts ? 'azure' : (useVoiceClone ? 'voice_clone' : 'system'),
+    azureVoiceId: useAzureTts ? azureVoiceShortName(rawVoiceId) : '',
     cloneProfileId,
     cloneProfileName,
     cloneLanguage: settings.voiceClone?.language || 'zh',

@@ -47,7 +47,11 @@ class EditScheduler {
         tempDir: os.tmpdir(),
         log: this.log,
       });
+      // apiConfig 不再持久化（含 API Key），从全局设置重新填充
+      let settingsApi = null;
+      try { settingsApi = this._settingsGetter ? (await this._settingsGetter())?.api || null : null; } catch {}
       for (const t of reconciled.tasks) {
+        t.apiConfig = settingsApi || {};
         this.tasks.set(t.id, t);
       }
       if (reconciled.removed.length) {
@@ -72,7 +76,7 @@ class EditScheduler {
         tmpDir: t.tmpDir, videoDuration: t.videoDuration,
         videoWidth: t.videoWidth, videoHeight: t.videoHeight,
         voiceProfileId: t.voiceProfileId, voiceProfileName: t.voiceProfileName,
-        voiceSpeed: t.voiceSpeed, apiConfig: t.apiConfig,
+        voiceSpeed: t.voiceSpeed,
         outputDir: t.outputDir, language: t.language, frameRate: t.frameRate,
         retryCount: t.retryCount || 0,
       }));
@@ -120,7 +124,7 @@ class EditScheduler {
     const t = this.tasks.get(id);
     if (!t || (t.status !== 'pending' && t.status !== 'paused')) return;
     t.status = 'pending'; t.error = ''; t.message = '';
-    this.onTaskUpdate(t);
+this.onTaskUpdate(t);
     this.saveState();
     this._tick();
   }
@@ -267,23 +271,28 @@ class EditScheduler {
     this._running = true;
 
     try {
-      // Phase 2: 如果没有正在合成的，取第一个 ready 的开始合成
+      // Phase 2: 后台点火合成（不 await，避免阻塞准备阶段，实现"2 并发准备 + 串行合成"流水线）
       if (!this._composingId) {
         const readyTask = [...this.tasks.values()].find(t => t.status === 'ready');
         if (readyTask) {
           this._composingId = readyTask.id;
-          await this._runCompose(readyTask);
-          this._composingId = null;
+          this._runCompose(readyTask)
+            .catch((err) => this.log(`[调度] 合成异常: ${err.message}`))
+            .finally(() => {
+              this._composingId = null;
+              this._tick();
+            });
         }
       }
 
-      // Phase 1: 如果 preparing 的 < MAX_PREPARING，取 pending 的开始准备
+      // Phase 1: 后台点火准备（最多 MAX_PREPARING 并发）
       const preparingCount = [...this.tasks.values()].filter(t => t.status === 'preparing').length;
       const pendingTasks = [...this.tasks.values()].filter(t => t.status === 'pending');
       const slots = MAX_PREPARING - preparingCount;
       if (slots > 0 && pendingTasks.length > 0) {
-        const toStart = pendingTasks.slice(0, slots);
-        await Promise.all(toStart.map(t => this._runPrepare(t)));
+        for (const t of pendingTasks.slice(0, slots)) {
+          this._runPrepare(t).catch((err) => this.log(`[调度] 准备异常: ${err.message}`));
+        }
       }
     } catch (err) {
       this.log(`调度器错误: ${err.message}`);
@@ -394,6 +403,7 @@ class EditScheduler {
     }
     this.onTaskUpdate(t);
     this.saveState();
+    this._tick();
   }
 
   async _runCompose(t) {
@@ -420,7 +430,7 @@ class EditScheduler {
     };
 
     const now = new Date();
-    const ts = `${String(now.getFullYear()).slice(2)}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
+    const ts = `${String(now.getFullYear()).slice(2)}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
     const dayDir = `${String(now.getFullYear()).slice(2)}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
     const outDir = path.join(t.outputDir || path.dirname(t.path), '完成剪辑', dayDir);
     const outputPath = path.join(outDir, `${t.videoName || '视频'}_${ts}.mp4`);
@@ -441,7 +451,7 @@ class EditScheduler {
         positionPercent: settings?.style?.subtitlePositionPercent ?? 12,
       };
       voiceoverEnabled = settings?.style?.voiceoverEnabled !== false;
-      subtitleEnabled = voiceoverEnabled && settings?.style?.subtitleEnabled !== false;
+      subtitleEnabled = t.subtitle !== '关闭' && voiceoverEnabled && settings?.style?.subtitleEnabled !== false;
     } catch {}
 
     try {

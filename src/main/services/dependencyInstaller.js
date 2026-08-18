@@ -55,22 +55,6 @@ function parsePipProgressLine(line) {
 }
 
 /**
- * 从 pip 输出行中提取正在处理的包名
- */
-function extractPackageNameFromLine(line) {
-  const downloadMatch = line.match(/Downloading\s+([a-zA-Z0-9_.]+?)-[\d]/);
-  if (downloadMatch) return downloadMatch[1].toLowerCase().replace(/[-_.]+/g, '-');
-  const installMatch = line.match(/Installing collected packages:\s*(.+)/);
-  if (installMatch) {
-    const names = installMatch[1].split(',').map((s) => s.trim());
-    return names[names.length - 1].toLowerCase().replace(/[-_.]+/g, '-');
-  }
-  const cachedMatch = line.match(/Using cached\s+([a-zA-Z0-9_.]+?)-[\d]/);
-  if (cachedMatch) return cachedMatch[1].toLowerCase().replace(/[-_.]+/g, '-');
-  return '';
-}
-
-/**
  * 安装单个包，支持进度解析和取消
  */
 function installSinglePackage(venvPython, pkg, env, pushEvent, abortSignal) {
@@ -78,18 +62,26 @@ function installSinglePackage(venvPython, pkg, env, pushEvent, abortSignal) {
     const spec = pkg.constraint ? `${pkg.rawName}${pkg.constraint}` : pkg.rawName;
     pushEvent({ type: 'package-start', name: pkg.rawName, normalizedName: pkg.name, constraint: pkg.constraint, percent: 0, speed: '', size: '', message: `准备安装 ${pkg.rawName}...` });
 
-    const child = spawn(venvPython, ['-u', '-m', 'pip', 'install', '--no-cache-dir', '--progress-bar', 'on', spec], {
+    const child = spawn(venvPython, ['-u', '-m', 'pip', 'install', '--no-cache-dir', '--progress-bar', 'on', '--timeout', '60', '--retries', '5', spec], {
       env: { ...env, PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' },
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true
     });
 
     let killed = false;
+    let timedOut = false;
     const onAbort = () => { killed = true; try { child.kill('SIGTERM'); } catch {} };
     if (abortSignal) {
       if (abortSignal.aborted) onAbort();
       else abortSignal.addEventListener('abort', onAbort, { once: true });
     }
+    // 单包安装最长 60 分钟（大模型包下载慢），超时强制结束，避免 UI 无限等待
+    const TIMEOUT_MS = 60 * 60 * 1000;
+    const timeoutTimer = setTimeout(() => {
+      timedOut = true;
+      try { child.kill('SIGTERM'); } catch {}
+    }, TIMEOUT_MS);
+    timeoutTimer.unref?.();
 
     let lastPercent = -1;
     let stderrBuffer = '';
@@ -128,20 +120,32 @@ function installSinglePackage(venvPython, pkg, env, pushEvent, abortSignal) {
       for (const line of lines) processLine(line);
     });
 
-    child.once('error', () => {
+    child.once('error', (error) => {
+      clearTimeout(timeoutTimer);
       if (abortSignal) abortSignal.removeEventListener('abort', onAbort);
       if (killed) {
         pushEvent({ type: 'package-cancelled', name: pkg.rawName, normalizedName: pkg.name, constraint: pkg.constraint, percent: 0, speed: '', size: '', message: '已取消' });
         resolve({ status: 'cancelled', name: pkg.rawName });
+      } else {
+        const msg = `启动失败: ${error?.message || error}`;
+        pushEvent({ type: 'package-error', name: pkg.rawName, normalizedName: pkg.name, constraint: pkg.constraint, percent: 0, speed: '', size: '', message: msg });
+        resolve({ status: 'error', name: pkg.rawName, error: msg });
       }
     });
 
     child.once('close', (code) => {
+      clearTimeout(timeoutTimer);
       if (abortSignal) abortSignal.removeEventListener('abort', onAbort);
       if (stderrBuffer.trim()) processLine(stderrBuffer);
       if (killed) {
         pushEvent({ type: 'package-cancelled', name: pkg.rawName, normalizedName: pkg.name, constraint: pkg.constraint, percent: 0, speed: '', size: '', message: '已取消' });
         resolve({ status: 'cancelled', name: pkg.rawName });
+        return;
+      }
+      if (timedOut) {
+        const msg = `安装超时（超过 60 分钟），已强制终止`;
+        pushEvent({ type: 'package-error', name: pkg.rawName, normalizedName: pkg.name, constraint: pkg.constraint, percent: 0, speed: '', size: '', message: msg });
+        resolve({ status: 'error', name: pkg.rawName, error: msg });
         return;
       }
       if (code === 0) {

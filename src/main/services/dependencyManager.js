@@ -170,7 +170,7 @@ async function resolveExistingBinary(candidates, tool) {
 function getWindowsPythonCandidates() {
   const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
   const userProfile = process.env.USERPROFILE || os.homedir();
-  const versions = ['312', '311', '310'];
+  const versions = ['312', '313', '311', '310'];
   const candidates = [process.env.ANTBOT_PYTHON_BIN];
 
   for (const suffix of versions) {
@@ -487,7 +487,7 @@ async function getDependencyState() {
     ['ffmpeg', 'FFmpeg', true, true],
     ['ffprobe', 'FFprobe', true, true],
     ['cloudflared', 'cloudflared', false, true],
-    ['python', 'Python 3.10~3.12', false, false],
+    ['python', 'Python 3.10~3.13', false, false],
     ['bash', 'Git Bash/bash', false, false]
   ];
 

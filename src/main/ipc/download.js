@@ -40,12 +40,6 @@ function register({ ipcMain, store, mainWindowRef, appLog }) {
     const resolved = await resolveDependencyPath('ffmpeg');
     return { available: !!resolved, path: resolved ? require('node:path').dirname(resolved) : '' };
   });
-  ipcMain.handle('download:open-folder', async () => {
-    const dir = downloadManager.downloadDir;
-    await fs.mkdir(dir, { recursive: true }).catch(() => {});
-    shell.openPath(dir);
-  });
-
   ipcMain.handle('download:delete-file', async (_event, taskId) => {
     const task = downloadManager.tasks.get(taskId);
     if (task?.outputPath) {

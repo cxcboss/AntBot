@@ -114,44 +114,60 @@ function register({ ipcMain, store, mainWindowRef, appLog }) {
     if (!venvExists) {
       send({ status: 'installing', message: '正在创建虚拟环境...' });
       const pythonBin = await resolveDependencyPath('python') || (process.platform === 'win32' ? 'python' : 'python3');
-      await new Promise((resolve) => {
+      const venvResult = await new Promise((resolve) => {
         const child = spawn(pythonBin, ['-m', 'venv', info.venvDir], {
           cwd: info.projectPath, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true
         });
         let stderr = '';
         child.stderr?.on('data', d => { stderr += d.toString(); });
         child.on('close', (code) => {
-          if (code !== 0) send({ status: 'installing', message: `venv 创建失败 (exit ${code}): ${stderr.slice(0, 200)}` });
-          resolve();
+          if (code !== 0) {
+            send({ status: 'installing', message: `venv 创建失败 (exit ${code}): ${stderr.slice(0, 200)}` });
+            appLog('error', `[voicebox] venv 创建失败 (exit ${code}): ${stderr.slice(0, 500)}`);
+          }
+          resolve(code === 0);
         });
         child.on('error', (e) => {
           send({ status: 'installing', message: `venv 创建错误: ${e.message}` });
-          resolve();
+          appLog('error', `[voicebox] venv 创建错误: ${e.message}`);
+          resolve(false);
         });
       });
+      if (!venvResult) {
+        send({ status: 'failed', message: '虚拟环境创建失败：请确认已安装 Python 3.10-3.13（Microsoft Store 版 Python 可能缺少 venv 模块，请从 python.org 安装）' });
+        return { ok: false, message: '虚拟环境创建失败' };
+      }
     }
 
     // 3. 升级 pip + 预装基础依赖
     send({ status: 'installing', message: '正在升级 pip...' });
-    await new Promise((resolve) => {
+    const pipUpgradeOk = await new Promise((resolve) => {
       const child = spawn(info.venvPython, ['-m', 'pip', 'install', '--upgrade', 'pip', 'wheel', 'setuptools', 'huggingface_hub'], {
         cwd: info.projectPath, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true
       });
-      child.on('close', () => resolve());
-      child.on('error', () => resolve());
+      child.on('close', (code) => resolve(code === 0));
+      child.on('error', () => resolve(false));
     });
+    if (!pipUpgradeOk) {
+      send({ status: 'failed', message: 'pip 升级失败，无法继续安装依赖' });
+      return { ok: false, message: 'pip 升级失败' };
+    }
 
     // 3.5确保基础依赖已安装
     const basePackages = ['huggingface_hub', 'transformers', 'qwen_tts'];
     for (const pkg of basePackages) {
       send({ status: 'installing', message: `检查 ${pkg}...` });
-      await new Promise((resolve) => {
+      const baseOk = await new Promise((resolve) => {
         const child = spawn(info.venvPython, ['-m', 'pip', 'install', '-q', pkg], {
           cwd: info.projectPath, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true
         });
-        child.on('close', () => resolve());
-        child.on('error', () => resolve());
+        child.on('close', (code) => resolve(code === 0));
+        child.on('error', () => resolve(false));
       });
+      if (!baseOk) {
+        send({ status: 'failed', message: `${pkg} 安装失败，无法继续` });
+        return { ok: false, message: `${pkg} 安装失败` };
+      }
     }
 
     // 4. 逐包安装依赖，发送粒度进度
@@ -161,11 +177,37 @@ function register({ ipcMain, store, mainWindowRef, appLog }) {
       return { ok: false, message: 'requirements.txt 不存在' };
     }
 
+    // 4.0 Python 3.13 兼容：numba<0.61 在 3.13 上无 wheel 必失败，改写约束到临时文件
+    let effectiveRequirementsPath = requirementsPath;
+    const pythonVersionText = await new Promise((resolve) => {
+      const c = spawn(info.venvPython, ['-c', 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")'], { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+      let out = '';
+      c.stdout?.on('data', d => { out += d.toString(); });
+      c.on('close', () => resolve(out.trim()));
+      c.on('error', () => resolve(''));
+    });
+    const pyMinor = Number((pythonVersionText.match(/^3\.(\d+)$/) || [])[1] || 0);
+    if (pyMinor >= 13) {
+      try {
+        const raw = await fs.readFile(requirementsPath, 'utf8');
+        const patched = raw.replace(/numba>=0\.60\.0,<0\.61\.0/g, 'numba>=0.61.2,<0.62.0');
+        if (patched !== raw) {
+          const tmpReqs = path.join(os.tmpdir(), `antbot-voicebox-requirements-${Date.now()}.txt`);
+          await fs.writeFile(tmpReqs, patched, 'utf8');
+          effectiveRequirementsPath = tmpReqs;
+          send({ status: 'installing', message: '检测到 Python 3.13，已自动适配 numba 版本约束' });
+          appLog('info', '[voicebox] Python 3.13 检测，numba 约束已改写为 >=0.61.2,<0.62.0');
+        }
+      } catch (e) {
+        appLog('warn', `[voicebox] requirements 改写失败: ${e.message}`);
+      }
+    }
+
     send({ status: 'installing', message: '开始逐包安装依赖...' });
 
     const result = await installDependencies({
       venvPython: info.venvPython,
-      requirementsPath,
+      requirementsPath: effectiveRequirementsPath,
       env: process.env,
       pushEvent: sendDeps,
       abortControllers: activeVoiceboxAbortControllers
@@ -210,8 +252,11 @@ function register({ ipcMain, store, mainWindowRef, appLog }) {
             const child = spawn(info.venvPython, [
               '-m', 'pip', 'install', 'torch', 'torchaudio',
               '--index-url', 'https://download.pytorch.org/whl/cu121',
-              '--force-reinstall', '--no-deps'
+              '--force-reinstall', '--no-deps',
+              '--timeout', '60', '--retries', '5'
             ], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+            const gpuTimer = setTimeout(() => { try { child.kill('SIGTERM'); gpuLog('CUDA PyTorch 安装超时（90 分钟），已强制终止'); } catch {} }, 90 * 60 * 1000);
+            gpuTimer.unref?.();
             let lastGpuMsg = '';
             const onGpuLine = (chunk) => {
               const lines = chunk.toString().split(/\r?\n/).filter(Boolean);
@@ -223,8 +268,8 @@ function register({ ipcMain, store, mainWindowRef, appLog }) {
             };
             child.stdout?.on('data', onGpuLine);
             child.stderr?.on('data', onGpuLine);
-            child.on('close', code => { gpuLog(`CUDA PyTorch 安装完成: exit=${code}`); resolve(); });
-            child.on('error', e => { gpuLog(`CUDA PyTorch 安装错误: ${e.message}`); resolve(); });
+            child.on('close', code => { clearTimeout(gpuTimer); gpuLog(`CUDA PyTorch 安装完成: exit=${code}`); resolve(); });
+            child.on('error', e => { clearTimeout(gpuTimer); gpuLog(`CUDA PyTorch 安装错误: ${e.message}`); resolve(); });
           });
           // 验证安装结果
           const gpuOk = await new Promise(resolve => {
@@ -328,8 +373,11 @@ function register({ ipcMain, store, mainWindowRef, appLog }) {
       const c = sp(info.venvPython, [
         '-m', 'pip', 'install', 'torch', 'torchaudio',
         '--index-url', 'https://download.pytorch.org/whl/cu121',
-        '--force-reinstall', '--no-deps'
+        '--force-reinstall', '--no-deps',
+        '--timeout', '60', '--retries', '5'
       ], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+      const gpuTimer = setTimeout(() => { try { c.kill('SIGTERM'); send({ status: 'installing', message: 'CUDA PyTorch 下载超时（90 分钟），已终止，请检查网络后重试' }); } catch {} }, 90 * 60 * 1000);
+      gpuTimer.unref?.();
       let lastMsg = '';
       const onLine = (chunk) => {
         // pip 进度用 \r 覆盖同一行，取最后一段
@@ -342,8 +390,8 @@ function register({ ipcMain, store, mainWindowRef, appLog }) {
       };
       c.stdout?.on('data', onLine);
       c.stderr?.on('data', onLine);
-      c.on('close', code => resolve(code));
-      c.on('error', () => resolve(1));
+      c.on('close', code => { clearTimeout(gpuTimer); resolve(code); });
+      c.on('error', () => { clearTimeout(gpuTimer); resolve(1); });
     });
     if (exitCode !== 0) return { ok: false, message: '安装失败，请检查网络' };
 

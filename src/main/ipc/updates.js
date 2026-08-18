@@ -1,12 +1,10 @@
-const { app } = require('electron');
-
 function register({ ipcMain, appLog }) {
   // ── Update system ──
   const updater = require('../services/appUpdater');
   updater.setLogger(appLog);
 
-  ipcMain.handle('update:check-all', async () => {
-    try { return await updater.checkAllUpdates(); } catch (e) { return { error: e.message }; }
+  ipcMain.handle('update:check-all', async (_event, options) => {
+    try { return await updater.checkAllUpdates(options || {}); } catch (e) { return { error: e.message }; }
   });
 
   ipcMain.handle('update:download-app', async (_event, downloadUrl) => {
@@ -46,8 +44,6 @@ function register({ ipcMain, appLog }) {
   ipcMain.handle('update:get-plugin-version', async () => {
     try { return await updater.getPluginVersion(); } catch { return '0.0.0'; }
   });
-
-  ipcMain.handle('app:quit', async () => { app.quit(); });
 }
 
 module.exports = { register };

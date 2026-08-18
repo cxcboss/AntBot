@@ -68,7 +68,7 @@ test('startup reconciliation cleans terminal and interrupted task caches while p
     { id: 'interrupted-task', status: 'composing', tmpDir: interruptedDir, srtPath: path.join(interruptedDir, 'subtitle.srt'), progress: 70 },
   ];
 
-  const result = await reconcileEditTaskCaches(tasks, { dataDir, tempDir, now: Date.now() });
+  const result = await reconcileEditTaskCaches(tasks, { dataDir, tempDir });
   const byId = new Map(result.tasks.map((task) => [task.id, task]));
 
   assert.equal(await exists(failedDir), false);

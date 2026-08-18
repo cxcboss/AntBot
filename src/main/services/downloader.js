@@ -44,7 +44,6 @@ function normalizeVideoUrl(rawUrl) {
 function buildYtDlpArgs(task, outputPath, options = {}) {
   const {
     forceIpv4 = false,
-    noCheckCertificates = false,
     urlOverride = '',
     ffmpegLocation = '',
     cookiesArgs = [],
@@ -277,7 +276,7 @@ function getPythonCandidates() {
 
   if (process.platform === 'win32') {
     const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
-    const versions = ['312', '311', '310'];
+    const versions = ['313', '312', '311', '310'];
     for (const v of versions) {
       candidates.push(path.join(localAppData, 'Programs', 'Python', `Python${v}`, 'python.exe'));
     }
@@ -524,8 +523,7 @@ async function downloadVideo(taskContext) {
 
   const attempts = [
     { name: '默认参数', args: buildYtDlpArgs(task, outputPath, baseOptions) },
-    { name: 'IPv4 加强重试', args: buildYtDlpArgs(task, outputPath, { ...baseOptions, forceIpv4: true }) },
-    { name: 'IPv4 + 跳过证书校验', args: buildYtDlpArgs(task, outputPath, { ...baseOptions, forceIpv4: true, noCheckCertificates: true }) }
+    { name: 'IPv4 加强重试', args: buildYtDlpArgs(task, outputPath, { ...baseOptions, forceIpv4: true }) }
   ];
 
   let result = null;

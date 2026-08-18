@@ -11,12 +11,15 @@ const path = require('node:path');
 const os = require('node:os');
 const { spawn, execFile } = require('node:child_process');
 const { resolveDependencyPath } = require('./dependencyManager');
-const { parseSrt } = require('./subtitleParser');
+const { parseSrt, entriesToSrt } = require('./subtitleParser');
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const SUBTITLE_HORIZONTAL_MARGIN = 64;
 const VOICEBOX_BASE_URL = process.env.VOICEBOX_BASE_URL ?? 'http://127.0.0.1:17493';
+const FFMPEG_PROBE_TIMEOUT = 30 * 1000;      // 探测类命令
+const FFMPEG_COMPOSE_TIMEOUT = 30 * 60 * 1000; // 合成类命令（TTS/混音/烧录，最长 30 分钟）
+const BREW_INSTALL_TIMEOUT = 15 * 60 * 1000; // brew install 最长 15 分钟
 
 const VOICE_FALLBACK = {
   Tingting: '系统语音 zh_CN',
@@ -109,6 +112,18 @@ function runCommand(command, args, options = {}) {
       else options.signal.addEventListener('abort', onAbort, { once: true });
     }
 
+    let timer = null;
+    if (options.timeout) {
+      timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        cleanupSignal();
+        try { child.kill('SIGKILL'); } catch {}
+        reject(new Error(`命令超时(${(options.timeout / 1000).toFixed(0)}s): ${command} ${args.join(' ')}`));
+      }, options.timeout);
+    }
+    const clearTimer = () => { if (timer) { clearTimeout(timer); timer = null; } };
+
     child.stdout.on('data', (chunk) => {
       stdout += chunk.toString();
     });
@@ -120,6 +135,7 @@ function runCommand(command, args, options = {}) {
     child.on('error', (error) => {
       if (settled) return;
       settled = true;
+      clearTimer();
       cleanupSignal();
       reject(error);
     });
@@ -127,6 +143,7 @@ function runCommand(command, args, options = {}) {
     child.on('close', (code) => {
       if (settled) return;
       settled = true;
+      clearTimer();
       cleanupSignal();
       if (options.signal?.aborted) {
         reject(new Error('已取消'));
@@ -169,6 +186,24 @@ function runCommandCapture(command, args, options = {}) {
       else options.signal.addEventListener('abort', onAbort, { once: true });
     }
 
+    let timer = null;
+    if (options.timeout) {
+      timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        cleanupSignal();
+        try { child.kill('SIGKILL'); } catch {}
+        resolve({
+          ok: false,
+          code: -2,
+          stdout,
+          stderr,
+          error: `命令超时(${(options.timeout / 1000).toFixed(0)}s): ${command} ${args.join(' ')}`,
+        });
+      }, options.timeout);
+    }
+    const clearTimer = () => { if (timer) { clearTimeout(timer); timer = null; } };
+
     child.stdout.on('data', (chunk) => {
       stdout += chunk.toString();
     });
@@ -180,6 +215,7 @@ function runCommandCapture(command, args, options = {}) {
     child.on('error', (error) => {
       if (settled) return;
       settled = true;
+      clearTimer();
       cleanupSignal();
       resolve({
         ok: false,
@@ -193,6 +229,7 @@ function runCommandCapture(command, args, options = {}) {
     child.on('close', (code) => {
       if (settled) return;
       settled = true;
+      clearTimer();
       cleanupSignal();
       resolve({
         ok: code === 0 && !options.signal?.aborted,
@@ -255,16 +292,6 @@ function calculateMaxUnitsPerLine(videoWidth, fontSize) {
 // ─── SRT / Subtitle parsing ──────────────────────────────────────────────────
 
 // SRT parsing via shared ./subtitleParser (same robust parser as the prepare phase)
-
-function normalizeToggle(value, fallback = true) {
-  if (value === null || value === undefined || value === '') {
-    return fallback;
-  }
-  const text = String(value).trim().toLowerCase();
-  if (['1', 'true', 'on', 'yes'].includes(text)) return true;
-  if (['0', 'false', 'off', 'no'].includes(text)) return false;
-  return fallback;
-}
 
 function splitTextIntoSentences(text) {
   const normalized = text.replace(/\s+/g, ' ').trim();
@@ -494,7 +521,7 @@ async function getFfmpegFilterSupport() {
   const ffmpegBin = await getFfmpegBin();
   const ffprobeBin = await getFfprobeBin();
 
-  const filtersProbe = await runCommandCapture(ffmpegBin, ['-filters']);
+  const filtersProbe = await runCommandCapture(ffmpegBin, ['-filters'], { timeout: FFMPEG_PROBE_TIMEOUT });
   if (!filtersProbe.ok) {
     ffmpegFilterSupport = { ffmpegBin, ffprobeBin, subtitles: false, drawtext: false, overlay: false };
     return ffmpegFilterSupport;
@@ -508,8 +535,8 @@ async function getFfmpegFilterSupport() {
   if (!subtitles && !drawtext && process.platform === 'darwin') {
     console.log('[ffmpeg] 缺少 subtitles/drawtext 滤镜，尝试 brew install ffmpeg-full ...');
     try {
-      const brewBin = (await runCommandCapture('brew', ['--prefix'])).stdout.trim() + '/bin/brew';
-      const repair = await runCommandCapture(brewBin, ['install', 'ffmpeg-full'], { cwd: '/' });
+      const brewBin = (await runCommandCapture('brew', ['--prefix'], { timeout: 30_000 })).stdout.trim() + '/bin/brew';
+      const repair = await runCommandCapture(brewBin, ['install', 'ffmpeg-full'], { cwd: '/', timeout: BREW_INSTALL_TIMEOUT });
       if (repair.ok) {
         // 重置缓存，重新检测
         ffmpegFilterSupport = null;
@@ -540,7 +567,7 @@ async function getVideoEncoder() {
   }
 
   const ffmpegBin = await getFfmpegBin();
-  const probe = await runCommandCapture(ffmpegBin, ['-hide_banner', '-encoders']);
+  const probe = await runCommandCapture(ffmpegBin, ['-hide_banner', '-encoders'], { timeout: FFMPEG_PROBE_TIMEOUT });
   const combined = `${probe.stdout}\n${probe.stderr}`;
   const has = (name) => new RegExp(`\\b${name}\\b`).test(combined);
 
@@ -689,7 +716,7 @@ async function getDuration(videoPath, options = {}) {
     '-of',
     'default=noprint_wrappers=1:nokey=1',
     videoPath,
-  ], { signal: options.signal });
+  ], { signal: options.signal, timeout: FFMPEG_PROBE_TIMEOUT });
 
   const duration = Number.parseFloat(stdout.trim());
   if (!Number.isFinite(duration) || duration <= 0) {
@@ -705,7 +732,7 @@ async function getVideoDimensions(videoPath, options = {}) {
     '-show_entries', 'stream=width,height',
     '-of', 'csv=s=x:p=0',
     videoPath,
-  ], { signal: options.signal });
+  ], { signal: options.signal, timeout: FFMPEG_PROBE_TIMEOUT });
 
   const [width, height] = stdout.trim().split('x').map(Number);
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
@@ -725,7 +752,7 @@ async function videoHasAudio(videoPath) {
     '-of',
     'csv=p=0',
     videoPath,
-  ]);
+  ], { timeout: FFMPEG_PROBE_TIMEOUT });
   return stdout.trim().length > 0;
 }
 
@@ -1112,7 +1139,7 @@ async function buildVoiceoverTrack(ttsOutputs, durationSec, outputAudioPath, tts
     outputAudioPath,
   );
 
-  await runFfmpegCommand(args, { signal: options.signal });
+  await runFfmpegCommand(args, { signal: options.signal, timeout: FFMPEG_COMPOSE_TIMEOUT });
 }
 
 async function generateSilentTrack(durationSec, outputAudioPath, options = {}) {
@@ -1127,7 +1154,7 @@ async function generateSilentTrack(durationSec, outputAudioPath, options = {}) {
     '-c:a',
     'pcm_s16le',
     outputAudioPath,
-  ], { signal: options.signal });
+  ], { signal: options.signal, timeout: FFMPEG_COMPOSE_TIMEOUT });
 }
 
 async function applyDubSpeed(inputAudioPath, outputAudioPath, speed, options = {}) {
@@ -1141,7 +1168,7 @@ async function applyDubSpeed(inputAudioPath, outputAudioPath, speed, options = {
     '-c:a',
     'pcm_s16le',
     outputAudioPath,
-  ], { signal: options.signal });
+  ], { signal: options.signal, timeout: FFMPEG_COMPOSE_TIMEOUT });
 }
 
 async function transcodeExternalDubTrack(inputAudioPath, durationSec, outputAudioPath, options = {}) {
@@ -1156,7 +1183,7 @@ async function transcodeExternalDubTrack(inputAudioPath, durationSec, outputAudi
     '-c:a',
     'pcm_s16le',
     outputAudioPath,
-  ], { signal: options.signal });
+  ], { signal: options.signal, timeout: FFMPEG_COMPOSE_TIMEOUT });
 }
 
 function buildAtTempoFilter(speed) {
@@ -1329,12 +1356,92 @@ async function composeVideo({
     outputPath,
   );
 
-  await runFfmpegCommand(args, { signal });
+  await runFfmpegCommand(args, { signal, timeout: FFMPEG_COMPOSE_TIMEOUT });
 
   return {
     subtitleMode,
     subtitleUrl: null,
   };
+}
+
+// ─── Voice-driven timeline micro-adjustment ─────────────────────────────────
+
+async function measureAllDurations(filePaths, options = {}) {
+  const concurrency = 4;
+  const durations = new Array(filePaths.length);
+  const queue = filePaths.map((_, i) => i);
+  const executing = new Set();
+  const errors = [];
+
+  while (queue.length || executing.size) {
+    while (executing.size < concurrency && queue.length) {
+      const idx = queue.shift();
+      const promise = (async () => {
+        try {
+          durations[idx] = await getDuration(filePaths[idx], { signal: options.signal });
+        } catch (err) {
+          errors.push({ idx, err });
+        }
+      })().finally(() => { executing.delete(promise); });
+      executing.add(promise);
+    }
+    if (executing.size) {
+      await Promise.race(executing);
+    }
+  }
+
+  if (errors.length) {
+    throw new Error(`语音时长测量失败：${errors[0].err?.message}`);
+  }
+
+  return durations;
+}
+
+async function adjustTimelineToVoice(ttsOutputs, sentenceEntries, dubSpeed, videoDurationMs, options = {}) {
+  const logFn = options.log || console.log;
+
+  if (ttsOutputs.length === 0 || sentenceEntries.length === 0) {
+    return { ttsOutputs, adjustedSentenceEntries: null };
+  }
+
+  const filePaths = ttsOutputs.map((o) => o.filePath);
+  const durations = await measureAllDurations(filePaths, options);
+
+  const playbackDurations = durations.map((d) => d / Math.max(0.5, dubSpeed));
+
+  const adjusted = [];
+  let prevEnd = sentenceEntries[0].startMs;
+  for (let i = 0; i < sentenceEntries.length; i++) {
+    const gap = i === 0 ? 0 : Math.max(0, sentenceEntries[i].startMs - sentenceEntries[i - 1].endMs);
+    const start = i === 0 ? sentenceEntries[0].startMs : prevEnd + gap;
+    const end = start + Math.round(playbackDurations[i] * 1000);
+    adjusted.push({ startMs: Math.round(start), endMs: Math.round(end), text: sentenceEntries[i].text });
+    prevEnd = end;
+  }
+
+  const lastEnd = adjusted[adjusted.length - 1].endMs;
+  const videoEnd = Math.round(videoDurationMs);
+  if (lastEnd > videoEnd) {
+    const firstStart = adjusted[0].startMs;
+    const totalSpan = lastEnd - firstStart;
+    const available = videoEnd - firstStart;
+    if (available > 0 && totalSpan > 0) {
+      const scale = available / totalSpan;
+      for (const a of adjusted) {
+        const offset = a.startMs - firstStart;
+        a.startMs = Math.round(firstStart + offset * scale);
+        a.endMs = Math.round(firstStart + (a.endMs - firstStart) * scale);
+      }
+    }
+  }
+
+  for (let i = 0; i < ttsOutputs.length; i++) {
+    if (ttsOutputs[i]) ttsOutputs[i].startMs = adjusted[i].startMs;
+  }
+
+  logFn(`[timeline] 微调时间轴: ${sentenceEntries.length} 句，语音总时长 ${(lastEnd / 1000).toFixed(1)}s，视频时长 ${(videoDurationMs / 1000).toFixed(1)}s`);
+
+  return { ttsOutputs, adjustedSentenceEntries: adjusted };
 }
 
 // ─── Main entry point ────────────────────────────────────────────────────────
@@ -1345,8 +1452,9 @@ async function composeVideoWithDub({
   outputPath,
   voiceoverEnabled,
   subtitleEnabled,
-  ttsMode,           // 'voice_clone' | 'system'
+  ttsMode,           // 'voice_clone' | 'azure' | 'system'
   cloneProfileId,    // Voicebox profile ID
+  azureVoiceId,      // Azure TTS voice short name (e.g. zh-CN-XiaoxiaoNeural)
   cloneLanguage,     // 'zh' | 'en'
   dubSpeed,          // 0.5 - 3.0
   subtitleStyle,     // { textColor, strokeColor, positionPercent, fontSize }
@@ -1419,42 +1527,81 @@ async function composeVideoWithDub({
       progressFn({ percent: 20, step: 'silent', message: '生成静音轨道...' });
       logFn('[compose] 配音关闭，生成静音轨道');
       await generateSilentTrack(duration, voiceTrackPath, { signal: abortSignal });
-    } else if (ttsMode === 'voice_clone' && cloneProfileId) {
-      checkAbort();
-      progressFn({ percent: 20, step: 'tts-clone', message: '语音克隆合成中...' });
-      logFn(`[compose] 语音克隆模式，profileId=${cloneProfileId}，${sentenceEntries.length} 句`);
-      // 检查 Voicebox 是否可用
-      try {
-        await fetchVoicebox('/health', { timeoutMs: 5000, signal: abortSignal });
-        logFn('[compose] Voicebox 已就绪');
-      } catch (e) {
-        if (abortSignal?.aborted) throw new Error('已取消');
-        throw new Error(`Voicebox 未运行或不可达（${VOICEBOX_BASE_URL}）：${e.message}。请先在设置中安装语音克隆环境。`);
-      }
-      const cloneOutputs = await synthesizeSpeechWithVoiceClone(
-        sentenceEntries,
-        cloneProfileId,
-        cloneLanguage || 'zh',
-        ttsDir,
-        { signal: abortSignal, log: logFn, gpuMode },
-      );
-      logFn(`[compose] 生成 ${cloneOutputs.length} 个语音片段`);
-      progressFn({ percent: 60, step: 'mixing', message: '混合配音轨道...' });
-      await buildVoiceoverTrack(cloneOutputs, duration, voiceTrackPath, 20, { signal: abortSignal });
-      dubSource = 'voice_clone';
     } else {
-      progressFn({ percent: 20, step: 'tts-system', message: '系统语音合成中...' });
-      logFn(`[compose] 系统语音模式，${sentenceEntries.length} 句`);
-      // Use first available system voice
-      const voices = await getSayVoices();
-      const voice = Object.prototype.hasOwnProperty.call(voices, 'Tingting')
-        ? 'Tingting'
-        : Object.keys(voices)[0];
-      const ttsOutputs = await synthesizeSpeech(sentenceEntries, voice, 220, ttsDir, { signal: abortSignal });
-      logFn(`[compose] 生成 ${ttsOutputs.length} 个系统语音片段`);
+      let ttsOutputs = [];
+      let ttsGainDb = 18;
+
+      if (ttsMode === 'voice_clone' && cloneProfileId) {
+        checkAbort();
+        progressFn({ percent: 20, step: 'tts-clone', message: '语音克隆合成中...' });
+        logFn(`[compose] 语音克隆模式，profileId=${cloneProfileId}，${sentenceEntries.length} 句`);
+        try {
+          await fetchVoicebox('/health', { timeoutMs: 5000, signal: abortSignal });
+          logFn('[compose] Voicebox 已就绪');
+        } catch (e) {
+          if (abortSignal?.aborted) throw new Error('已取消');
+          throw new Error(`Voicebox 未运行或不可达（${VOICEBOX_BASE_URL}）：${e.message}。请先在设置中安装语音克隆环境。`);
+        }
+        ttsOutputs = await synthesizeSpeechWithVoiceClone(
+          sentenceEntries,
+          cloneProfileId,
+          cloneLanguage || 'zh',
+          ttsDir,
+          { signal: abortSignal, log: logFn, gpuMode },
+        );
+        logFn(`[compose] 生成 ${ttsOutputs.length} 个语音片段`);
+        dubSource = 'voice_clone';
+        ttsGainDb = 20;
+      } else if (ttsMode === 'azure' && azureVoiceId) {
+        checkAbort();
+        progressFn({ percent: 20, step: 'tts-azure', message: 'Azure 语音合成中...' });
+        logFn(`[compose] Azure TTS 模式，voice=${azureVoiceId}，${sentenceEntries.length} 句`);
+        const { synthesizeWithAzure } = require('./azureTts');
+        ttsOutputs = await synthesizeWithAzure(
+          sentenceEntries,
+          `azure:${azureVoiceId}`,
+          ttsDir,
+          { signal: abortSignal, log: logFn },
+        );
+        logFn(`[compose] 生成 ${ttsOutputs.length} 个 Azure 语音片段`);
+        dubSource = 'azure';
+      } else {
+        progressFn({ percent: 20, step: 'tts-system', message: '系统语音合成中...' });
+        logFn(`[compose] 系统语音模式，${sentenceEntries.length} 句`);
+        const voices = await getSayVoices();
+        const voice = Object.prototype.hasOwnProperty.call(voices, 'Tingting')
+          ? 'Tingting'
+          : Object.keys(voices)[0];
+        ttsOutputs = await synthesizeSpeech(sentenceEntries, voice, 220, ttsDir, { signal: abortSignal });
+        logFn(`[compose] 生成 ${ttsOutputs.length} 个系统语音片段`);
+        dubSource = 'tts';
+      }
+
+      // 时间轴微调：以语音实际时长校准字幕窗口（保留 LLM 节奏，不改变语音速度）
+      if (ttsOutputs.length > 0 && sentenceEntries.length > 0) {
+        checkAbort();
+        progressFn({ percent: 55, step: 'timing', message: '校准时间轴...' });
+        const adjusted = await adjustTimelineToVoice(ttsOutputs, sentenceEntries, dubSpeedNumber, duration * 1000, {
+          signal: abortSignal, log: logFn,
+        });
+        ttsOutputs = adjusted.ttsOutputs;
+        if (adjusted.adjustedSentenceEntries) {
+          const newSrtEntries = adjusted.adjustedSentenceEntries.map((a, i) => ({
+            index: i + 1,
+            startMs: a.startMs,
+            endMs: a.endMs,
+            text: a.text,
+          }));
+          const srtContent = entriesToSrt(newSrtEntries);
+          const newSrtPath = path.join(tmpDir, 'adjusted_subtitle.srt');
+          await fs.writeFile(newSrtPath, srtContent, 'utf-8');
+          subtitlePath = newSrtPath;
+          entries = newSrtEntries;
+        }
+      }
+
       progressFn({ percent: 60, step: 'mixing', message: '混合配音轨道...' });
-      await buildVoiceoverTrack(ttsOutputs, duration, voiceTrackPath, 18, { signal: abortSignal });
-      dubSource = 'tts';
+      await buildVoiceoverTrack(ttsOutputs, duration, voiceTrackPath, ttsGainDb, { signal: abortSignal });
     }
 
     // 4. Apply dub speed if needed

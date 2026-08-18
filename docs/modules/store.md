@@ -44,3 +44,5 @@
 - 设置更新是增量 merge，不是全量覆盖
 - 历史记录最多保留 200 条
 - `cloneSettingsForUser()` 会清理敏感字段（API key 等）
+- `*ForUser(userId)` 系列方法（`getSettingsForUser`/`updateSettingsForUser`/`getHistoryForUser`/`appendHistoryForUser`/`appendPublishedRecordsForUser`/`setLoginStateForUser`）按传入的 `userId` 定位用户；`userId` 无效时回退到当前活跃用户
+- `updateSettingsForUser` 只更新目标用户的设置，不再污染其他用户；voiceClone/remote/system 共享段仍写入 shared 区

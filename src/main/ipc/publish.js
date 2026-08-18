@@ -57,47 +57,6 @@ function register({ ipcMain, store, mainWindowRef, appLog }) {
     return { ok: true, status: bridgeServiceManager.getStatus() };
   });
 
-  ipcMain.handle('publish:bridge-service-status', async () => {
-    const { bridgeServiceManager } = require('../services/bridgeServiceManager');
-    return bridgeServiceManager.getStatus();
-  });
-
-  ipcMain.handle('publish:bridge-capabilities', async () => {
-    const { createBrowserPublishBridge } = require('../services/browserPublishBridge');
-    const settings = await store.getSettings();
-    const config = settings.publish?.browserExtension || {};
-    try { return await createBrowserPublishBridge({ baseUrl: config.baseUrl }).getCapabilities(); }
-    catch (error) { return { ok: false, capabilities: [], message: error.message }; }
-  });
-
-  ipcMain.handle('bridge:check-platform-login', async (_event, platform) => {
-    const { createBrowserPublishBridge } = require('../services/browserPublishBridge');
-    const settings = await store.getSettings();
-    const config = settings.publish?.browserExtension || {};
-    if (!config.enabled) return { ok: false, error: '浏览器插件未启用' };
-    try {
-      const bridge = createBrowserPublishBridge({ baseUrl: config.baseUrl, timeoutMs: 60000 });
-      const result = await bridge.checkLogin({ platform: platform || 'douyin' });
-      return { ok: true, ...result };
-    } catch (error) {
-      return { ok: false, error: error.message };
-    }
-  });
-
-  ipcMain.handle('bridge:select-account', async (_event, platform, accountIndex) => {
-    const { createBrowserPublishBridge } = require('../services/browserPublishBridge');
-    const settings = await store.getSettings();
-    const config = settings.publish?.browserExtension || {};
-    if (!config.enabled) return { ok: false, error: '浏览器插件未启用' };
-    try {
-      const bridge = createBrowserPublishBridge({ baseUrl: config.baseUrl, timeoutMs: 30000 });
-      const result = await bridge.selectAccount({ platform: platform || 'weixin', accountIndex });
-      return { ok: true, ...result };
-    } catch (error) {
-      return { ok: false, error: error.message };
-    }
-  });
-
   ipcMain.handle('publish:start', async (_event, payload) => {
     appLog('info', '[publish] 开始发布视频');
     const { createBrowserPublishBridge } = require('../services/browserPublishBridge');
@@ -143,22 +102,6 @@ function register({ ipcMain, store, mainWindowRef, appLog }) {
       return result;
     } catch (error) {
       appLog('error', `[publish] 发布失败: ${error.message}`);
-      throw error;
-    }
-  });
-
-  ipcMain.handle('publish:stop', async (_event, requestId) => {
-    appLog('info', `[publish] 停止发布: ${requestId || '(未指定)'}`);
-    const { createBrowserPublishBridge } = require('../services/browserPublishBridge');
-    const settings = await store.getSettings();
-    const config = settings.publish?.browserExtension || {};
-    try {
-      // M2: 不传 id 时由服务端生成，避免重复 stop / 复用旧 id 触发"命令 ID 已存在"
-      return await createBrowserPublishBridge({ baseUrl: config.baseUrl }).invoke('publish.stop', {}, requestId ? { id: requestId } : {});
-    } catch (error) {
-      if (/ECONNREFUSED|ECONNRESET/.test(error.message)) {
-        throw new Error('桥接服务未运行，无法停止发布');
-      }
       throw error;
     }
   });

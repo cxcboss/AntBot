@@ -557,7 +557,7 @@ class StoreService {
 
   async getSettingsForUser(userId) {
     await this.load();
-    return this.cloneSettingsForUser(this.getActiveUserRecord());
+    return this.cloneSettingsForUser(this.getUserRecordById(userId) || this.getActiveUserRecord());
   }
 
   async updateSettings(partialSettings) {
@@ -568,7 +568,7 @@ class StoreService {
   async updateSettingsForUser(userId, partialSettings) {
     await this.load();
 
-    const user = this.getActiveUserRecord();
+    const user = this.getUserRecordById(userId) || this.getActiveUserRecord();
     const nextPartial = clone(partialSettings || {});
     const voiceClonePatch = nextPartial.voiceClone && typeof nextPartial.voiceClone === 'object'
       ? nextPartial.voiceClone
@@ -605,10 +605,8 @@ class StoreService {
       this.state.sharedSystem = deepMerge(this.state.sharedSystem, systemPatch);
     }
 
-    for (const item of this.state.users) {
-      item.settings = deepMerge(item.settings, clone(nextPartial));
-      this.touchUser(item);
-    }
+    user.settings = deepMerge(user.settings, clone(nextPartial));
+    this.touchUser(user);
     this.syncSharedVoiceCloneToUsers();
     this.syncSharedRemoteToUsers();
     this.syncSharedSystemToUsers();
@@ -623,7 +621,7 @@ class StoreService {
 
   async getHistoryForUser(userId) {
     await this.load();
-    return clone(this.getActiveUserRecord().history || []);
+    return clone((this.getUserRecordById(userId) || this.getActiveUserRecord()).history || []);
   }
 
   async appendHistory(runRecord) {
@@ -653,7 +651,7 @@ class StoreService {
 
   async appendHistoryForUser(userId, runRecord) {
     await this.load();
-    const user = this.getActiveUserRecord();
+    const user = this.getUserRecordById(userId) || this.getActiveUserRecord();
     if (!runRecord || !Array.isArray(runRecord.items) || !runRecord.items.length) {
       return clone(user.history);
     }
@@ -676,7 +674,7 @@ class StoreService {
 
   async appendPublishedRecordsForUser(userId, records) {
     await this.load();
-    const user = this.getActiveUserRecord();
+    const user = this.getUserRecordById(userId) || this.getActiveUserRecord();
     const items = Array.isArray(records) ? clone(records) : [];
     user.publishedRecords.unshift(...items);
     user.publishedRecords = user.publishedRecords.slice(0, 500);
@@ -697,7 +695,7 @@ class StoreService {
 
   async setLoginStateForUser(userId, service, loggedIn) {
     await this.load();
-    const user = this.getActiveUserRecord();
+    const user = this.getUserRecordById(userId) || this.getActiveUserRecord();
     if (!Object.hasOwn(buildDefaultLoginState(), service)) {
       return clone(user.loginState);
     }

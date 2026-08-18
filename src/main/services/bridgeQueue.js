@@ -63,7 +63,8 @@ function createBridgeQueue({ maxEvents = 200, maxHistory = 100 } = {}) {
     const cmdId = String(id);
     setTimeout(() => {
       commands.delete(cmdId);
-      events.delete(`cmd:${cmdId}`);
+      events.delete(cmdId);
+      sequences.delete(cmdId);
     }, 30_000);
     return { ...command };
   }

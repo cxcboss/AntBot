@@ -117,7 +117,7 @@ export function createPublishPage({ state: S, esc }) {
           <span class="pv2-card-name" title="${esc(v.path)}">${esc(v.name)}</span>
           <span class="pv2-card-size">${formatSize(v.size)}</span>
           <span class="pv2-card-status">${esc(badge)}</span>
-          <button class="btn btn-xs btn-ghost pv2-card-del" data-card-del="${i}" type="button">移除</button>
+          <button class="btn btn-xs btn-ghost pv2-card-del" data-card-del="${i}" type="button"${S.publish.running ? ' disabled title="发布中不可移除"' : ''}>移除</button>
         </div>
         <div class="pv2-card-plats">${platChips}</div>
         <div class="pv2-card-params">
@@ -215,8 +215,10 @@ export function createPublishPage({ state: S, esc }) {
       render();
       const resultEl = document.getElementById('publish-result');
       let done = 0, failed = 0;
-      for (let i = 0; i < videos.length; i++) {
-        const v = videos[i];
+      const snapshot = [...videos]; // 迭代快照，避免运行中数组被 splice 打乱索引
+      const completedIds = new Set();
+      for (let i = 0; i < snapshot.length; i++) {
+        const v = snapshot[i];
         v.status = 'running'; v.message = ''; render();
         for (const plat of v.platforms) {
           const q = v.params[plat];
@@ -255,12 +257,10 @@ export function createPublishPage({ state: S, esc }) {
           }
           render();
         }
-        if (v.status === 'done') {
-          S.publish.videos.splice(i, 1); i--;
-        } else if (v.status === 'failed') {
-          v.status = 'failed';
-        }
+        if (v.status === 'done') completedIds.add(v.id);
       }
+      // 统一移除已完成任务（避免循环内 splice 打乱索引）
+      S.publish.videos = S.publish.videos.filter(v => !completedIds.has(v.id));
       S.publish.running = false;
       if (resultEl) resultEl.textContent = `完成：成功 ${done}，失败 ${failed}`;
       saveTasks();
@@ -276,9 +276,11 @@ export function createPublishPage({ state: S, esc }) {
       } catch (e) { console.error(e); }
     });
 
-    publishView?.addEventListener('dragover', e => { e.preventDefault(); });
+    publishView?.addEventListener('dragover', e => { e.preventDefault(); publishView.classList.add('drag-over'); });
+    publishView?.addEventListener('dragleave', () => publishView.classList.remove('drag-over'));
     publishView?.addEventListener('drop', e => {
       e.preventDefault();
+      publishView.classList.remove('drag-over');
       const paths = [];
       for (const f of e.dataTransfer?.files || []) {
         try { const p = window.antbot.getPathForFile(f); if (p) paths.push(p); } catch {}
@@ -288,7 +290,7 @@ export function createPublishPage({ state: S, esc }) {
 
     videoList?.addEventListener('click', e => {
       const del = e.target.closest('[data-card-del]');
-      if (del) { S.publish.videos.splice(Number(del.dataset.cardDel), 1); render(); return; }
+      if (del) { if (S.publish.running) return; S.publish.videos.splice(Number(del.dataset.cardDel), 1); render(); return; }
       const plat = e.target.closest('[data-card-plat]');
       if (plat) {
         const [i, p] = plat.dataset.cardPlat.split(':');

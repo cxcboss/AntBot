@@ -15,7 +15,9 @@
     <div class="sidebar-overlay" id="sidebar-overlay"></div>
 
     <nav class="sidebar" id="sidebar">
-      <div class="sidebar-header" id="sidebar-drag"></div>
+      <div class="sidebar-header" id="sidebar-drag">
+        <div class="sidebar-ver" id="sidebar-ver">v<span id="app-badge">-</span></div>
+      </div>
 
       <!-- 侧边栏标签切换 -->
       <div class="sidebar-tabs">
@@ -317,7 +319,7 @@
             <!-- 音色克隆区 -->
             <div class="sv-block">
               <h3 class="sv-title">音色克隆</h3>
-              <p class="sv-desc">上传音频样本，克隆专属音色</p>
+              <p class="sv-desc">上方为内置 Azure 音色（免克隆直接使用）；下方为克隆音色。克隆需语音克隆环境，未安装也可用内置音色</p>
               <div class="voice-list" id="voice-list"></div>
 
               <!-- 预置音色下载 -->
@@ -545,6 +547,7 @@
             <div class="card mb-4">
               <div class="card-body">
                 <h2 class="card-title">语音克隆环境</h2>
+                <p class="text-sm text-muted"70 style="margin-bottom:8px">可选安装。不安装也能使用"字幕与音色"中的内置 Azure 音色朗读，仅克隆专属音色时需要此环境</p>
                 <div class="voicebox-status" id="voicebox-status">
                   <div class="voicebox-items" id="voicebox-items"></div>
                   <div id="voicebox-deps-list" class="voicebox-deps-list"></div>
@@ -572,46 +575,6 @@
       </div>
     </main>
   </div>
-
-  <!-- 右键菜单 -->
-  <div class="ctx-menu hidden" id="ctx-menu">
-    <button class="ctx-item" data-ctx="delete" type="button">删除此任务</button>
-  </div>
-
-  <!-- 语音克隆弹窗 -->
-  <dialog id="voice-clone-dialog" class="dlg"><div class="dlg-box">
-    <div class="dlg-head"><h3>语音克隆</h3><button type="button" aria-label="关闭" class="dlg-close" id="voice-clone-close-btn"><span class="icon" data-icon="x"></span></button></div>
-    <form id="voice-clone-form" method="dialog" class="dlg-body">
-      <p class="dlg-hint">上传音频样本，克隆完成后写入全局音色。</p>
-      <div class="dlg-grid">
-        <label class="full">样本音频<div class="input-row"><input name="samplePath" type="text" placeholder="路径" /><button type="button" id="voice-clone-pick-sample-btn" class="btn btn-sm btn-ghost"><span class="icon" data-icon="folder"></span></button></div></label>
-        <label class="full">参考文本<textarea name="referenceText" rows="3" placeholder="必须和音频内容一致"></textarea></label>
-        <label>档案名<input name="profileName" type="text" /></label>
-        <label>语言<select name="language"><option value="zh">中文</option><option value="en">英文</option></select></label>
-      </div>
-      <div class="progress-box" id="voice-clone-progress-box">
-        <div class="prog-info"><span id="voice-clone-progress-step">等待</span><strong id="voice-clone-progress-percent">0%</strong></div>
-        <div class="prog-track"><div id="voice-clone-progress-bar" class="prog-bar"></div></div>
-        <pre class="log-box" id="voice-clone-progress-log">暂无日志</pre>
-      </div>
-      <div class="dlg-actions"><button type="button" id="voice-clone-run-btn" class="btn btn-primary"><span class="icon" data-icon="play"></span>开始克隆</button></div>
-    </form>
-  </div></dialog>
-
-  <!-- 数据管理弹窗 -->
-  <dialog id="data-dialog" class="dlg"><div class="dlg-box">
-    <div class="dlg-head"><h3>数据管理</h3><button type="button" aria-label="关闭" class="dlg-close" id="close-data-btn"><span class="icon" data-icon="x"></span></button></div>
-    <div class="dlg-body">
-      <div class="info-list">
-        <div class="info-row"><span>版本</span><strong id="data-version">-</strong></div>
-        <div class="info-row"><span>数据</span><div class="info-val"><span id="data-path" class="info-path">-</span><button id="open-data-dir-btn" class="btn btn-sm btn-ghost"><span class="icon" data-icon="folderOpen"></span></button></div></div>
-        <div class="info-row"><span>日志</span><div class="info-val"><span id="data-log-path" class="info-path">-</span><button id="open-log-dir-btn" class="btn btn-sm btn-ghost"><span class="icon" data-icon="folderOpen"></span></button></div></div>
-      </div>
-      <div class="dlg-actions">
-        <button id="open-data-dir-main-btn" class="btn btn-primary"><span class="icon" data-icon="folderOpen"></span>打开数据目录</button>
-      </div>
-    </div>
-  </div></dialog>
 
   <!-- 添加文本风格弹窗 -->
   <dialog id="style-text-dialog" class="dlg"><div class="dlg-box">
@@ -643,7 +606,6 @@
   </div></dialog>
 
   <div class="toasts" id="toast-container"></div>
-  <script src="./anime.min.js"></script>
   <script type="module" src="./app.js"></script>
 </body>
 </html>

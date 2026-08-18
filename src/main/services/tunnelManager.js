@@ -39,7 +39,6 @@ let _tunnelUrl = null;
 let _onUrlChange = null;
 let _onStatusChange = null;
 let _log = null;
-let _stopped = false;
 let _deviceId = null;
 let _deviceName = null;
 let _connected = false; // 隧道已建立连接（独立于 promise settle，超时后仍允许注册）
@@ -55,20 +54,24 @@ const RESTART_RESET_MS = 5 * 60 * 1000; // 稳定运行 5 分钟后重置计数
 function findCloudflared() {
   const { getManagedBinDir } = require('./dependencyManager');
   const managedBin = getManagedBinDir();
-  const candidates = process.platform === 'win32'
-    ? [
-        path.join(managedBin, 'cloudflared.exe'),
-        path.join(os.homedir(), 'AntBot', 'bin', 'cloudflared.exe'),
-        path.join(process.env.ProgramFiles || 'C:\\Program Files', 'cloudflared', 'cloudflared.exe'),
-        'cloudflared.exe'
-      ]
-    : [
-        path.join(managedBin, 'cloudflared'),
-        path.join(os.homedir(), 'AntBot', 'tools', 'cloudflared'),
-        '/opt/homebrew/bin/cloudflared',
-        '/usr/local/bin/cloudflared',
-        'cloudflared'
-      ];
+  const envCandidates = [process.env.ANTBOT_CLOUDFLARED_PATH, process.env.ANTBOT_CLOUDFLARED_BIN].filter(Boolean);
+  const candidates = [
+    ...envCandidates,
+    ...(process.platform === 'win32'
+      ? [
+          path.join(managedBin, 'cloudflared.exe'),
+          path.join(os.homedir(), 'AntBot', 'bin', 'cloudflared.exe'),
+          path.join(process.env.ProgramFiles || 'C:\\Program Files', 'cloudflared', 'cloudflared.exe'),
+          'cloudflared.exe'
+        ]
+      : [
+          path.join(managedBin, 'cloudflared'),
+          path.join(os.homedir(), 'AntBot', 'tools', 'cloudflared'),
+          '/opt/homebrew/bin/cloudflared',
+          '/usr/local/bin/cloudflared',
+          'cloudflared'
+        ])
+  ];
   for (const bin of candidates) {
     try {
       fs.accessSync(bin, fs.constants.X_OK);
@@ -281,7 +284,6 @@ function startTunnel(port, { onUrl, onStatus, log, deviceId, deviceName } = {}) 
     if (_tunnelProcess) {
       return resolve({ url: _tunnelUrl, alreadyRunning: true });
     }
-    _stopped = false;
 
     if (deviceId) _deviceId = deviceId;
     if (deviceName) _deviceName = deviceName;
@@ -303,6 +305,21 @@ function startTunnel(port, { onUrl, onStatus, log, deviceId, deviceName } = {}) 
 
     _log('info', `启动 Cloudflare Tunnel (端口 ${port})...`);
     _onStatusChange({ status: 'starting' });
+
+    // 使用命名隧道时，确保 config.yml 中的 ingress 端口与当前服务端口一致
+    if (useNamed) {
+      try {
+        let configText = fs.readFileSync(CONFIG_PATH, 'utf-8');
+        const portMatch = configText.match(/service:\s*http:\/\/localhost:(\d+)/);
+        if (portMatch && Number(portMatch[1]) !== port) {
+          configText = configText.replace(/service:\s*http:\/\/localhost:\d+/, `service: http://localhost:${port}`);
+          fs.writeFileSync(CONFIG_PATH, configText, 'utf-8');
+          _log('info', `更新 tunnel ingress 端口: ${portMatch[1]} → ${port}`);
+        }
+      } catch (e) {
+        _log('error', `更新 tunnel 配置失败: ${e.message}（使用现有配置）`);
+      }
+    }
 
     let args;
     if (useNamed) {
@@ -333,6 +350,7 @@ function startTunnel(port, { onUrl, onStatus, log, deviceId, deviceName } = {}) 
     });
 
     let resolved = false;
+    let timeoutTimer = null;
 
     // 连接成功后：先 settle promise，再异步注册到 Hub（注册不阻塞 resolve，失败由心跳重试）
     const onConnected = async () => {
@@ -342,7 +360,7 @@ function startTunnel(port, { onUrl, onStatus, log, deviceId, deviceName } = {}) 
       _stableSince = Date.now();
       _onUrlChange(_tunnelUrl);
       _onStatusChange({ status: 'running', url: _tunnelUrl });
-      if (!resolved) { resolved = true; resolve({ url: _tunnelUrl }); }
+      if (!resolved) { resolved = true; if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; } resolve({ url: _tunnelUrl }); }
       registerAndHeartbeat();
     };
 
@@ -382,6 +400,8 @@ function startTunnel(port, { onUrl, onStatus, log, deviceId, deviceName } = {}) 
       _tunnelProcess = null;
       _tunnelUrl = null;
       _connected = false;
+      // 若初始 promise 仍未 settle，直接拒绝（避免挂到 90s 超时误报）
+      if (!resolved) { resolved = true; if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; } reject(new Error(`Tunnel 进程意外退出 (code=${code})`)); }
       _onStatusChange({ status: 'stopped' });
       _onUrlChange(null);
 
@@ -417,11 +437,11 @@ function startTunnel(port, { onUrl, onStatus, log, deviceId, deviceName } = {}) 
       _tunnelProcess = null;
       _connected = false;
       _onStatusChange({ status: 'error', error: err.message });
-      if (!resolved) { resolved = true; reject(err); }
+      if (!resolved) { resolved = true; if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; } reject(err); }
     });
 
     // 连接超时兜底：fake-ip/代理环境下 cloudflared 启动较慢，放宽到 90 秒
-    setTimeout(() => {
+    timeoutTimer = setTimeout(() => {
       if (!resolved) {
         resolved = true;
         reject(new Error('Tunnel 启动超时'));
@@ -431,7 +451,6 @@ function startTunnel(port, { onUrl, onStatus, log, deviceId, deviceName } = {}) 
 }
 
 function stopTunnel() {
-  _stopped = true;
   _connected = false;
   if (_tunnelProcess) {
     _autoRestart = false; // 手动停止不自动重启

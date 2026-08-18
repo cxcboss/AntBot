@@ -102,13 +102,6 @@ function register({ ipcMain, store, mainWindowRef, appLog }) {
     } catch { return []; }
   });
 
-  ipcMain.handle('history:get', async () => {
-    try {
-      const filePath = path.join(os.homedir(), 'AntBot', 'edit-history.json');
-      return JSON.parse(await fs.readFile(filePath, 'utf-8').catch(() => '[]'));
-    } catch { return []; }
-  });
-
   ipcMain.handle('edit:save-history', async (_event, record) => {
     try {
       const filePath = path.join(os.homedir(), 'AntBot', 'edit-history.json');

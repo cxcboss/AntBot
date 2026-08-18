@@ -457,13 +457,6 @@ function calculateSubtitleFontSize(videoHeight, videoWidth) {
   return Math.max(minFontSize, Math.min(maxFontSize, baseFontSize));
 }
 
-function calculateMaxCharsPerLine(videoWidth, fontSize) {
-  const charWidth = fontSize * 1.0;
-  const usableWidth = videoWidth * 0.8;
-  // Minimum 8 chars per line, maximum 30
-  return Math.max(8, Math.min(30, Math.floor(usableWidth / charWidth)));
-}
-
 function validateAndFixSrt(entries, videoDurationMs) {
   if (!entries.length) throw new Error('AI 未生成有效字幕');
   const fixed = [];
@@ -483,12 +476,24 @@ function validateAndFixSrt(entries, videoDurationMs) {
         if (entry.endMs - entry.startMs < minDur) entry.endMs = entry.startMs + minDur;
       }
     }
-    if (entry.startMs >= videoEnd) break;
+    if (entry.startMs >= videoEnd) continue;
     if (entry.endMs > videoEnd) entry.endMs = videoEnd;
     entry.index = fixed.length + 1;
     fixed.push(entry);
   }
   if (!fixed.length) throw new Error('字幕校验后无有效条目');
+
+  // 若总时长超出视频，等比压缩保留相对节奏（不丢弃尾部字幕）
+  const firstStart = fixed[0].startMs;
+  const lastEnd = fixed[fixed.length - 1].endMs;
+  if (lastEnd > videoEnd) {
+    const scale = (videoEnd - firstStart) / (lastEnd - firstStart);
+    for (const entry of fixed) {
+      const offset = entry.startMs - firstStart;
+      entry.startMs = Math.round(firstStart + offset * scale);
+      entry.endMs = Math.round(firstStart + (entry.endMs - firstStart) * scale);
+    }
+  }
 
   // 确保最后一句字幕有足够时间朗读完
   if (fixed.length > 0) {
@@ -809,6 +814,7 @@ function forceSplit(text) {
 }
 
 function splitLongSubtitles(entries) {
+  if (entries == null) return null;
   const result = [];
 
   for (const entry of entries) {
@@ -1012,16 +1018,15 @@ async function composeEditVideo({
   const fontSize = videoHeight > 0 ? calculateSubtitleFontSize(videoHeight, videoWidth) : 48;
   log(`合成: ${path.basename(videoPath)} → ${path.basename(outputPath)} (fontSize=${fontSize})`);
 
-  try {
-    const result = await editVideo({
-      task: { taskName: path.basename(videoPath) },
-      settings: {
-        style: {
-          voiceoverEnabled: voiceoverEnabled,
-          subtitleEnabled: subtitleEnabled,
-          voiceSpeed,
-          subtitleTextColor: subtitleStyle.textColor || '#0D9488',
-          subtitleStrokeColor: subtitleStyle.strokeColor || '#000000',
+  const result = await editVideo({
+    task: { taskName: path.basename(videoPath) },
+    settings: {
+      style: {
+        voiceoverEnabled: voiceoverEnabled,
+        subtitleEnabled: subtitleEnabled,
+        voiceSpeed,
+        subtitleTextColor: subtitleStyle.textColor || '#0D9488',
+        subtitleStrokeColor: subtitleStyle.strokeColor || '#000000',
           subtitlePositionPercent: subtitleStyle.positionPercent ?? 12,
           subtitleFontSize: fontSize,
         },
@@ -1039,14 +1044,12 @@ async function composeEditVideo({
       subtitlePath: srtPath,
       outputPath,
       abortSignal,
-      log
+      log,
+      progress
     });
 
     progress({ step: '完成', percent: 100, message: '合成完成' });
     return { outputPath: result.outputPath || outputPath };
-  } finally {
-    // 不在这里关闭 voicebox，由调度器统一管理（带延迟预热）
-  }
 }
 
 /* ── Cleanup ── */
@@ -1065,5 +1068,5 @@ module.exports = {
   generateSrt, repairSrt, extractFrames, recognizeVideoContent, generateVideoName,
   splitLongSubtitle, splitTextAtBoundaries, splitAtPunctuation, splitAtNaturalBoundary, forceSplit,
   fmtMs, entriesToSrt, cleanSubtitleText,
-  calculateSubtitleFontSize, calculateMaxCharsPerLine,
+  calculateSubtitleFontSize,
 };

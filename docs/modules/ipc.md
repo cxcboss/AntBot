@@ -16,6 +16,8 @@ IPC handler 的注册中心。核心逻辑委托给 `ipc/` 子模块，本文件
 |------|------|----------|------|
 | `ipc/voicebox.js` | ~384 | `voicebox:*` | voicebox 环境管理（check/install/reset/GPU） |
 | `ipc/library.js` | ~417 | `styles:*`, `fonts:*`, `voices:*`, `ui:*`, `api:*`, `app:get-data-info` | 风格/字体/音色/UI 持久化、API 调用、数据迁移 |
+
+> `voices:list`（2026-08 起）返回内置 Azure 音色（`source: 'azure'`，来自 `azureTts.js`）+ 克隆音色（`source: 'clone'`）合并列表；后端 profile 验证只过滤克隆音色，内置音色不受影响。`voices:save` 只写克隆音色（过滤 `azure:` 前缀）。
 | `ipc/models.js` | ~292 | `models:*` | Whisper 模型管理（list/download/delete） |
 | `ipc/publish.js` | ~211 | `publish:*`, `bridge:*` | 发布桥接服务、平台登录检测 |
 | `ipc/remote.js` | ~169 | `remote:*`, `open-dir`, `open-plugin-dir` | 远程控制服务器、Cloudflare 隧道、凭证管理 |

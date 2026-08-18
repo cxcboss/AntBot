@@ -18,6 +18,8 @@ assets/icon-build\ 2.iconset
 src/main/**/tmp
 src/renderer/output.css
 vendors/ms-playwright/*
+AntBot-*.exe
+搬运蚁.app
 !vendors/ms-playwright/.gitkeep
 vendors/auto_dub_web/.voicebox-setup-done
 clients/antbot_flutter/build

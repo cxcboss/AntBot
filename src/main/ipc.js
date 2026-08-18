@@ -55,7 +55,7 @@ function appLog(level, message) {
 let _storeRef = null;
 const { runStartupChecks } = require('./services/startupCheck');
 const { runVoiceClone } = require('./services/voiceClone');
-const { getDependencyState, repairMissingDependencies } = require('./services/dependencyManager');
+const { getDependencyState } = require('./services/dependencyManager');
 const { getAppInfo } = require('./services/appInfo');
 
 function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl = null }) {
@@ -101,9 +101,6 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
     await sendWindowState();
     return settings;
   });
-
-  ipcMain.handle('deps:get-state', async () => getDependencyState());
-  ipcMain.handle('deps:repair', async () => repairMissingDependencies());
 
   ipcMain.handle('app:open-external', async (_event, url) => {
     const target = String(url || '').trim();
@@ -166,27 +163,6 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
       pushProgress({ status: 'failed', step: '克隆失败', message: userMsg });
       throw new Error(userMsg);
     }
-  });
-
-  // 批量克隆音色（临时功能，用于预置音色）
-  ipcMain.handle('voice:batch-clone', async (_event, { voices, refText }) => {
-    const settings = await store.getSettings();
-    const win = mainWindowRef();
-    const results = [];
-    for (const v of voices) {
-      if (win && !win.isDestroyed()) win.webContents.send('voice:batch-progress', { name: v.name, status: 'cloning', total: voices.length, done: results.length });
-      try {
-        const result = await runVoiceClone({ samplePath: v.path, referenceText: refText, profileName: v.name, language: 'zh' }, settings, {
-          log: () => {},
-          progress: (p) => { if (win && !win.isDestroyed()) win.webContents.send('voice:batch-progress', { name: v.name, status: 'cloning', step: p.step, percent: p.percent, total: voices.length, done: results.length }); }
-        });
-        results.push({ name: v.name, ok: true, voiceId: result.voiceId });
-      } catch (e) {
-        results.push({ name: v.name, ok: false, error: e.message });
-      }
-    }
-    if (win && !win.isDestroyed()) win.webContents.send('voice:batch-progress', { name: '', status: 'done', total: voices.length, done: results.length, results });
-    return results;
   });
 
   // 下载预置音色
@@ -411,40 +387,6 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
     await shell.openPath(dataDir);
     return { path: dataDir };
   });
-
-  ipcMain.handle('deps:open-dir', async () => {
-    const { getManagedBinDir } = require('./services/dependencyManager');
-    const binDir = getManagedBinDir();
-    await shell.openPath(binDir);
-    return { path: binDir };
-  });
-
-  ipcMain.handle('deps:uninstall', async (_event, toolKey) => {
-    const { resolveDependencyPath, getManagedBinDir } = require('./services/dependencyManager');
-    const resolved = await resolveDependencyPath(String(toolKey || ''));
-    const managedBin = getManagedBinDir();
-    if (resolved && (resolved === managedBin || resolved.startsWith(managedBin + path.sep))) {
-      await fs.rm(resolved, { force: true });
-      return { ok: true, removed: resolved };
-    }
-    return { ok: false, message: '该依赖不是受管安装，无法自动删除。' };
-  });
-
-  ipcMain.handle('deps:reinstall', async (_event, toolKey) => {
-    const win = mainWindowRef();
-    const sendProgress = (p) => { if (win && !win.isDestroyed()) win.webContents.send('deps:progress', p); };
-    try {
-      sendProgress({ tool: toolKey, status: 'installing', message: `正在安装 ${toolKey}...` });
-      const { ensureWindowsDependency } = require('./services/dependencyManager');
-      const result = await ensureWindowsDependency(toolKey, (msg) => sendProgress({ tool: toolKey, status: 'installing', message: msg }));
-      sendProgress({ tool: toolKey, status: 'completed', message: `${toolKey} 安装完成`, path: result });
-      return { ok: true, path: result, state: await getDependencyState() };
-    } catch (error) {
-      sendProgress({ tool: toolKey, status: 'failed', message: error.message });
-      return { ok: false, message: error.message };
-    }
-  });
-
 
   ipcMain.handle('deps:check', async (_event, tool) => {
     const { spawn } = require('node:child_process');

@@ -4,6 +4,7 @@ const path = require('node:path');
 const { app, dialog } = require('electron');
 const { resolveDependencyPath } = require('../services/dependencyManager');
 const { proxyFetch } = require('../services/proxyFetch');
+const { getAzureVoices, isAzureVoiceId } = require('../services/azureTts');
 
 function register({ ipcMain, store, mainWindowRef, appLog }) {
   // ── Style learning: video → audio → speech-to-text ──
@@ -157,63 +158,7 @@ function register({ ipcMain, store, mainWindowRef, appLog }) {
     }
   });
 
-  ipcMain.handle('api:transcribe', async (_event, { baseUrl, apiKey, modelId, audioPath }) => {
-    const fsPromises = require('node:fs/promises');
-    try {
-      const audioBuffer = await fsPromises.readFile(audioPath);
-      const boundary = '----FormBoundary' + Date.now();
-      const fileName = path.basename(audioPath);
-      const ext = path.extname(audioPath).slice(1) || 'mp3';
-      const mimeTypes = { mp3: 'audio/mpeg', wav: 'audio/wav', m4a: 'audio/mp4', ogg: 'audio/ogg', flac: 'audio/flac', webm: 'audio/webm' };
-      const mime = mimeTypes[ext] || 'audio/mpeg';
-
-      const bodyParts = [];
-      bodyParts.push(`--${boundary}\r\nContent-Disposition: form-data; name="file"\r\nfilename="${fileName}"\r\nContent-Type: ${mime}\r\n\r\n`);
-      bodyParts.push(audioBuffer);
-      bodyParts.push(`\r\n--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\n${modelId || 'whisper-1'}`);
-      bodyParts.push(`\r\n--${boundary}--\r\n`);
-
-      const body = Buffer.concat(bodyParts.map(p => typeof p === 'string' ? Buffer.from(p) : p));
-
-      const url = `${String(baseUrl || '').replace(/\/+$/, '')}/audio/transcriptions`;
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': `multipart/form-data; boundary=${boundary}`
-        },
-        body
-      });
-
-      if (!response.ok) {
-        const text = await response.text().catch(() => '');
-        throw new Error(`转写失败 ${response.status}: ${text.slice(0, 200)}`);
-      }
-      const result = await response.json();
-      return { ok: true, text: result.text || result.result || '' };
-    } catch (error) {
-      return { ok: false, message: error.message, text: '' };
-    }
-  });
-
   // ── Font management ──
-  ipcMain.handle('fonts:list', async () => {
-    const settings = await store.getSettings();
-    const dataDir = settings.dataDir || path.join(os.homedir(), 'AntBot');
-    const fontsDir = path.join(dataDir, 'fonts');
-    await fs.mkdir(fontsDir, { recursive: true }).catch(() => {});
-    const fonts = [];
-    try {
-      const files = await fs.readdir(fontsDir);
-      for (const f of files) {
-        if (/\.(ttf|otf|woff|woff2)$/i.test(f)) {
-          fonts.push({ name: f, path: path.join(fontsDir, f) });
-        }
-      }
-    } catch {}
-    return { fonts, activeFont: settings.fonts?.activeFont || '' };
-  });
-
   ipcMain.handle('fonts:add', async (_event, { name, path: fontPath }) => {
     const settings = await store.getSettings();
     const dataDir = settings.dataDir || path.join(os.homedir(), 'AntBot');
@@ -221,14 +166,6 @@ function register({ ipcMain, store, mainWindowRef, appLog }) {
     await fs.mkdir(fontsDir, { recursive: true });
     const dest = path.join(fontsDir, name);
     await fs.copyFile(fontPath, dest);
-    return { ok: true };
-  });
-
-  ipcMain.handle('fonts:remove', async (_event, name) => {
-    const settings = await store.getSettings();
-    const dataDir = settings.dataDir || path.join(os.homedir(), 'AntBot');
-    const fontPath = path.join(dataDir, 'fonts', name);
-    await fs.unlink(fontPath).catch(() => {});
     return { ok: true };
   });
 
@@ -257,6 +194,7 @@ function register({ ipcMain, store, mainWindowRef, appLog }) {
     {id:'builtin-8',name:'情感文案',prompt:'你是一位有洞察力的情感文案创作者。文案风格要求：\n- 以一个具体场景或细节切入，不空谈道理\n- 语言偏文艺但不矫情，用短句营造节奏感\n- 善用第二人称“你”，让观众有代入感\n- 情感递进：场景→感受→思考→领悟\n- 金句要精炼，适合截图分享\n- 用“后来才明白”“终于发现”等顿悟式表达\n- 不说教不灌输，引导观众自己感受\n- 结尾留白，给读者思考空间',type:'text',builtin:true},
     {id:'builtin-9',name:'美食制作',prompt:'你是一位有烟火气的美食制作博主。文案风格要求：\n- 开头交代菜品故事或季节背景，营造氛围\n- 食材描述具体到量：“两勺生抽”“一小撮盐”\n- 关键步骤用感官词描述状态：“煸到微微焦黄”“听到滋滋响”\n- 语气温暖亲切，像在厨房边做边聊\n- 穿插小技巧和替代方案：“没有XX可以用YY代替”\n- 用“这个时候”“接下来”“等到”串联步骤\n- 适当加入家常感悟，增加人情味\n- 结尾描述成品和品尝感受，激发食欲',type:'text',builtin:true},
     {id:'builtin-10',name:'旅行记录',prompt:'你是一位有审美感的旅行记录者。文案风格要求：\n- 开头用地点和第一印象切入，制造向往感\n- 描写风景时注重视觉层次：色彩、光影、空间感\n- 用五感丰富画面：风声、温度、气味、触感\n- 穿插当地人文故事或历史小知识\n- 推荐路线和时间要具体实用\n- 用“如果你也来”“建议你一定要”等推荐句式\n- 适当表达个人感受，但不滥情\n- 结尾升华旅行意义，激发出发的冲动',type:'text',builtin:true},
+    {id:'builtin-11',name:'通用风格',prompt:'你是一位视频内容创作者。请根据视频内容生成自然流畅的解说文案。\n- 内容描述准确清晰，与画面同步\n- 语言自然口语化，像在跟观众聊天\n- 句子长短结合，节奏适中\n- 适当使用过渡词串联内容\n- 表达方式直白易懂，不绕弯子',type:'text',builtin:true},
   ];
 
   // ── Style reference persistence ──
@@ -283,27 +221,6 @@ function register({ ipcMain, store, mainWindowRef, appLog }) {
     }
 
     return styles;
-  });
-
-  ipcMain.handle('styles:reload-defaults', async () => {
-    const filePath = await getStylesFilePath();
-    let styles = [];
-    try { styles = JSON.parse(await fs.readFile(filePath, 'utf-8')); } catch {}
-    styles = styles.filter(s => !s.builtin);
-    styles = [...BUILTIN_STYLES, ...styles];
-    await fs.writeFile(filePath, JSON.stringify(styles, null, 2), 'utf-8');
-    appLog('info', `重新加载了 ${BUILTIN_STYLES.length} 个内置风格`);
-    return { ok: true, count: BUILTIN_STYLES.length, styles };
-  });
-
-  ipcMain.handle('styles:save', async (_event, styles) => {
-    try {
-      const filePath = await getStylesFilePath();
-      await fs.writeFile(filePath, JSON.stringify(styles, null, 2), 'utf-8');
-      return { ok: true };
-    } catch (error) {
-      return { ok: false, message: error.message };
-    }
   });
 
   ipcMain.handle('styles:delete', async (_event, styleId) => {
@@ -345,11 +262,16 @@ function register({ ipcMain, store, mainWindowRef, appLog }) {
   ipcMain.handle('voices:list', async () => {
     try {
       const filePath = await getVoicesFilePath();
-      const raw = await fs.readFile(filePath, 'utf-8');
-      let voices = JSON.parse(raw);
+      let cloneVoices = [];
+      try {
+        const raw = await fs.readFile(filePath, 'utf-8');
+        cloneVoices = JSON.parse(raw);
+      } catch {
+        // voices.json 不存在或损坏，视为无克隆音色
+      }
       const settings = await store.getSettings();
 
-      // 验证 voicebox 后端是否真的有这些 profile
+      // 验证 voicebox 后端是否真的有这些 profile（仅克隆音色）
       try {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 3000);
@@ -358,29 +280,36 @@ function register({ ipcMain, store, mainWindowRef, appLog }) {
         if (resp.ok) {
           const backendProfiles = await resp.json();
           const backendIds = new Set((backendProfiles || []).map(p => p.id));
-          const validVoices = voices.filter(v => backendIds.has(v.id));
+          const validVoices = cloneVoices.filter(v => backendIds.has(v.id));
           // 如果有失效的音色，更新 voices.json 并记录日志
-          if (validVoices.length < voices.length) {
-            const removed = voices.filter(v => !backendIds.has(v.id)).map(v => v.name);
+          if (validVoices.length < cloneVoices.length) {
+            const removed = cloneVoices.filter(v => !backendIds.has(v.id)).map(v => v.name);
             appLog('info', `音色验证：${removed.join(', ')} 在 voicebox 后端不存在，已自动移除`);
-            voices = validVoices;
-            await fs.writeFile(filePath, JSON.stringify(voices, null, 2), 'utf-8').catch(() => {});
+            cloneVoices = validVoices;
+            await fs.writeFile(filePath, JSON.stringify(cloneVoices, null, 2), 'utf-8').catch(() => {});
           }
         }
       } catch {
         // voicebox 后端未运行，不做过滤
       }
 
+      const azureVoices = getAzureVoices();
+      const voices = [
+        ...azureVoices,
+        ...cloneVoices.map((v) => ({ id: v.id, name: v.name, source: 'clone' })),
+      ];
       return { voices, activeVoiceId: settings.voiceClone?.voiceId || '' };
     } catch {
-      return { voices: [], activeVoiceId: '' };
+      const azureVoices = getAzureVoices();
+      return { voices: azureVoices, activeVoiceId: '' };
     }
   });
 
   ipcMain.handle('voices:save', async (_event, voices) => {
     try {
       const filePath = await getVoicesFilePath();
-      await fs.writeFile(filePath, JSON.stringify(voices, null, 2), 'utf-8');
+      const cloneVoices = (voices || []).filter((v) => !isAzureVoiceId(v.id));
+      await fs.writeFile(filePath, JSON.stringify(cloneVoices, null, 2), 'utf-8');
       return { ok: true };
     } catch (error) {
       return { ok: false, message: error.message };

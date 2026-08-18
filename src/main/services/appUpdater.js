@@ -93,6 +93,7 @@ function getHttpOptions(urlStr, extraHeaders = {}) {
 let _log = () => {};
 let _updating = false;
 let _abortController = null;
+let _lastExtractDir = null;
 
 function cancelDownload() {
   if (_abortController) {
@@ -146,8 +147,20 @@ function nodeGet(url, maxRedirects = 5) {
 }
 
 async function nodeGetJson(url) {
-  const text = await nodeGet(url);
-  return JSON.parse(text);
+  // GitHub API 偶发 5xx/超时（国内网络尤其常见），轻量重试
+  let lastErr = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const text = await nodeGet(url);
+      return JSON.parse(text);
+    } catch (e) {
+      lastErr = e;
+      if (attempt < 3) {
+        await new Promise((r) => setTimeout(r, 1200 * attempt));
+      }
+    }
+  }
+  throw lastErr;
 }
 
 const { parseSemver, compareSemver, formatBytes } = require('./versionUtils');
@@ -258,28 +271,63 @@ function nodeDownload(url, destPath, onProgress, maxRedirects = 5, signal = null
 
 // ─── GitHub API ───
 
-async function getLatestRelease() {
+const GITHUB_TAGS_URL = 'https://api.github.com/repos/cxcboss/AntBot/tags';
+
+// 部分发布流程只打 tag 不创建 release 对象，releases API 返回空导致检测不到更新。
+// 这里在 releases 为空时回退到 tags API（tag 名即版本号）。
+async function latestTagByPrefix(prefix, excludePrefix = '') {
+  const tags = await nodeGetJson(GITHUB_TAGS_URL);
+  const names = (Array.isArray(tags) ? tags : [])
+    .map(t => String(t.name || '').trim())
+    .filter(n => n.startsWith(prefix) && (!excludePrefix || !n.startsWith(excludePrefix)));
+  names.sort((a, b) => compareSemver(b, a));
+  return names[0] || '';
+}
+
+async function getLatestRelease(force = false) {
   const now = Date.now();
-  if (_cache.app && now - _cache.app.ts < CACHE_TTL) {
+  if (!force && _cache.app && now - _cache.app.ts < CACHE_TTL) {
     return _cache.app.data;
   }
   // 获取所有 release，过滤出 app release（tag 以 v 开头，排除 plugin-）
-  const releases = await nodeGetJson(`${GITHUB_API}`);
+  let releases = [];
+  try {
+    releases = await nodeGetJson(`${GITHUB_API}`);
+  } catch (e) {
+    _log('warn', `[更新] 获取 releases 失败: ${e.message}`);
+  }
   const appReleases = (Array.isArray(releases) ? releases : [])
     .filter(r => r.tag_name && r.tag_name.startsWith('v') && !r.tag_name.startsWith('plugin-'))
     .sort((a, b) => new Date(b.published_at) - new Date(a.published_at));
   const data = appReleases[0] || {};
   const result = { tag_name: data.tag_name || '', body: data.body || '', assets: data.assets || [] };
+  if (!result.tag_name) {
+    // releases 为空（只有 tag 没有 release 对象）→ 回退 tags API
+    try {
+      const tagName = await latestTagByPrefix('v', 'plugin-');
+      if (tagName) {
+        _log('info', `[更新] releases 为空，从 tags 回退检测到 ${tagName}`);
+        result.tag_name = tagName;
+      }
+    } catch (e) {
+      _log('warn', `[更新] 获取 tags 失败: ${e.message}`);
+    }
+  }
   _cache.app = { ts: now, data: result };
   return result;
 }
 
-async function getLatestPluginRelease() {
+async function getLatestPluginRelease(force = false) {
   const now = Date.now();
-  if (_cache.plugin && now - _cache.plugin.ts < CACHE_TTL) {
+  if (!force && _cache.plugin && now - _cache.plugin.ts < CACHE_TTL) {
     return _cache.plugin.data;
   }
-  const releases = await nodeGetJson(GITHUB_API);
+  let releases = [];
+  try {
+    releases = await nodeGetJson(GITHUB_API);
+  } catch (e) {
+    _log('warn', `[更新] 获取插件 releases 失败: ${e.message}`);
+  }
   const pluginReleases = (Array.isArray(releases) ? releases : [])
     .filter((r) => String(r.tag_name || '').startsWith('plugin-'))
     .sort((a, b) => {
@@ -287,7 +335,19 @@ async function getLatestPluginRelease() {
       const vb = b.tag_name.replace(/^plugin-/, '');
       return compareSemver(vb, va);
     });
-  const release = pluginReleases[0] || null;
+  let release = pluginReleases[0] || null;
+  if (!release) {
+    // releases 为空 → 回退 tags API（插件 tag 形如 plugin-v1.2.3）
+    try {
+      const tagName = await latestTagByPrefix('plugin-');
+      if (tagName) {
+        _log('info', `[更新] 插件 releases 为空，从 tags 回退检测到 ${tagName}`);
+        release = { tag_name: tagName, body: '', assets: [] };
+      }
+    } catch (e) {
+      _log('warn', `[更新] 获取插件 tags 失败: ${e.message}`);
+    }
+  }
   const result = release ? { tag_name: release.tag_name, body: release.body, assets: release.assets || [] } : null;
   _cache.plugin = { ts: now, data: result };
   return result;
@@ -295,12 +355,12 @@ async function getLatestPluginRelease() {
 
 // ─── 更新检查 ───
 
-async function checkAppUpdate() {
+async function checkAppUpdate(force = false) {
   try {
     const versionData = await getAppVersion();
     const currentVersion = versionData.version || '0.0.0';
 
-    const release = await getLatestRelease();
+    const release = await getLatestRelease(force);
     const latestVersion = release.tag_name.replace(/^v/, '');
 
     if (compareSemver(latestVersion, currentVersion) <= 0) {
@@ -329,6 +389,18 @@ async function checkAppUpdate() {
       String(a.name || '').endsWith('.zip') && String(a.name || '').includes('mac')
     ) || release.assets.find((a) => String(a.name || '').endsWith('.zip')) || null;
 
+    // 仅有 tag 无附件（releases 回退场景）→ 引导去 GitHub 手动下载
+    if (!macAsset) {
+      return {
+        hasUpdate: true,
+        currentVersion,
+        latestVersion,
+        changelog: release.body || '',
+        openBrowser: true,
+        releaseUrl: `https://github.com/cxcboss/AntBot/releases/tag/${release.tag_name}`
+      };
+    }
+
     return {
       hasUpdate: true,
       currentVersion,
@@ -344,12 +416,12 @@ async function checkAppUpdate() {
   }
 }
 
-async function checkPluginUpdate() {
+async function checkPluginUpdate(force = false) {
   try {
     const versionData = await getPluginVersion();
     const currentVersion = versionData.version || '0.0.0';
 
-    const release = await getLatestPluginRelease();
+    const release = await getLatestPluginRelease(force);
     if (!release) {
       return { hasUpdate: false, currentVersion, latestVersion: '0.0.0' };
     }
@@ -362,14 +434,26 @@ async function checkPluginUpdate() {
 
     const zipAsset = release.assets.find((a) => String(a.name || '').endsWith('.zip')) || null;
 
+    // 仅有 tag 无 release 附件时，引导用户去 GitHub 手动下载
+    if (!zipAsset) {
+      return {
+        hasUpdate: true,
+        currentVersion,
+        latestVersion,
+        changelog: release.body || '',
+        openBrowser: true,
+        releaseUrl: `https://github.com/cxcboss/AntBot/releases/tag/${release.tag_name}`
+      };
+    }
+
     return {
       hasUpdate: true,
       currentVersion,
       latestVersion,
       changelog: release.body || '',
-      downloadUrl: zipAsset ? zipAsset.browser_download_url : '',
-      fileSize: zipAsset ? zipAsset.size : 0,
-      assetName: zipAsset ? zipAsset.name : ''
+      downloadUrl: zipAsset.browser_download_url,
+      fileSize: zipAsset.size,
+      assetName: zipAsset.name
     };
   } catch (e) {
     _log('warn', `[更新] 检查插件更新失败: ${e.message}`);
@@ -377,8 +461,11 @@ async function checkPluginUpdate() {
   }
 }
 
-async function checkAllUpdates() {
-  const [app, plugin] = await Promise.all([checkAppUpdate(), checkPluginUpdate()]);
+async function checkAllUpdates({ force = false } = {}) {
+  const [app, plugin] = await Promise.all([
+    checkAppUpdate(force),
+    checkPluginUpdate(force)
+  ]);
   return { app, plugin };
 }
 
@@ -386,16 +473,22 @@ async function checkAllUpdates() {
 
 async function downloadAppUpdate(assetUrl, onProgress) {
   if (!assetUrl) return { ok: false, error: '下载地址为空' };
+  if (_updating) return { ok: false, error: '更新进行中' };
+  _updating = true;
 
-  _abortController = new AbortController();
-  await fs.mkdir(DOWNLOAD_CACHE_DIR, { recursive: true });
-  const zipPath = path.join(DOWNLOAD_CACHE_DIR, `app-update.zip`);
+  try {
+    _abortController = new AbortController();
+    await fs.mkdir(DOWNLOAD_CACHE_DIR, { recursive: true });
+    const zipPath = path.join(DOWNLOAD_CACHE_DIR, `app-update.zip`);
 
-  _log('info', `[更新] 开始下载 App 更新...`);
-  await nodeDownload(assetUrl, zipPath, onProgress, 5, _abortController.signal);
-  _log('info', `[更新] 下载完成: ${zipPath}`);
+    _log('info', `[更新] 开始下载 App 更新...`);
+    await nodeDownload(assetUrl, zipPath, onProgress, 5, _abortController.signal);
+    _log('info', `[更新] 下载完成: ${zipPath}`);
 
-  return { ok: true, zipPath };
+    return { ok: true, zipPath };
+  } finally {
+    _updating = false;
+  }
 }
 
 async function installAppUpdate(zipPath, newVersion) {
@@ -403,15 +496,13 @@ async function installAppUpdate(zipPath, newVersion) {
   _updating = true;
 
   try {
-    // 清理之前的解压目录
-    const downloadsDir = path.join(os.homedir(), 'Downloads');
-    const existingDirs = await fs.readdir(downloadsDir).catch(() => []);
-    for (const d of existingDirs) {
-      if (d.startsWith('antbot-update-')) {
-        await fs.rm(path.join(downloadsDir, d), { recursive: true, force: true }).catch(() => {});
-      }
+    // 只清理上一次解压的目录（避免误删用户自己的 antbot-update-* 目录）
+    if (_lastExtractDir) {
+      await fs.rm(_lastExtractDir, { recursive: true, force: true }).catch(() => {});
+      _lastExtractDir = null;
     }
 
+    const downloadsDir = path.join(os.homedir(), 'Downloads');
     const tmpDir = path.join(downloadsDir, `antbot-update-${Date.now()}`);
     await fs.mkdir(tmpDir, { recursive: true });
 
@@ -442,6 +533,7 @@ async function installAppUpdate(zipPath, newVersion) {
     const appPath = await findApp(tmpDir);
     if (!appPath) throw new Error('更新包中未找到 .app 文件');
 
+    _lastExtractDir = tmpDir;
     _log('info', `[更新] 已解压到: ${appPath}`);
     return { ok: true, appPath, appDir: tmpDir };
   } catch (e) {

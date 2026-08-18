@@ -16,16 +16,6 @@ const el = {
   resizeHandle:$('#resize-handle'), composer:$('#composer'), chatArea:$('#chat-area'),
   status:$('#startup-status'),
   openVideoBtn:$('#open-video-channel'), openDouyinBtn:$('#open-douyin'),
-  vcDlg:$('#voice-clone-dialog'), vcForm:$('#voice-clone-form'),
-  vcRun:$('#voice-clone-run-btn'), vcClose:$('#voice-clone-close-btn'),
-  vcPick:$('#voice-clone-pick-sample-btn'),
-  vcStep:$('#voice-clone-progress-step'), vcPct:$('#voice-clone-progress-percent'),
-  vcBar:$('#voice-clone-progress-bar'), vcLog:$('#voice-clone-progress-log'),
-  dataDlg:$('#data-dialog'), dataVer:$('#data-version'),
-  dataPath:$('#data-path'), dataLog:$('#data-log-path'),
-  dataOpen:$('#open-data-dir-btn'), dataOpenLog:$('#open-log-dir-btn'),
-  dataOpenMain:$('#open-data-dir-main-btn'),
-  dataClose:$('#close-data-btn'),
   statTotal:$('#stat-total'), statPeriod:$('#stat-period'),
   statPeriodLabel:$('#stat-period-label'),
 };
@@ -147,12 +137,6 @@ function initResize(){
 /* ── Dialog close ── */
 function initDialogClose(){document.querySelectorAll('dialog.dlg').forEach(dlg=>{dlg.addEventListener('click',e=>{if(e.target===dlg)closeDlg(dlg)})})}
 
-/* ── Format bubble text ── */
-function formatBubbleText(raw){
-  if(!raw)return'';const lines=raw.split(/\r?\n/).filter(l=>l.trim());
-  const showNum=lines.length>=3;
-  return lines.map((line,i)=>{const num=showNum?`${i+1}、`:'';const f=line.replace(/https?:\/\/[^\s,，。；;）)]+/g,url=>`…${url.slice(-8)}`);return num+esc(f)}).join('\n');
-}
 const platformLabel={videoChannel:'视频号',douyin:'抖音'};
 const shortUrl=(url)=>`…${url.replace(/[^\s,，。；;）)]+$/,'').slice(-8)}`;
 function fmtDuration(sec){
@@ -468,9 +452,27 @@ function showVoicePopup(anchor){
   closeAllPopups();
   const popup=document.createElement('div');popup.className='chip-popup';
   const voices=S.voices||[];
-  if(!voices.length){toast('请先在字幕与音色中克隆音色','info');return;}
-  popup.innerHTML=`<ul class="style-list">${voices.map(v=>`<li class="style-item${v.id===S.activeVoiceId?' active':''}" data-voice-id="${esc(v.id)}">${esc(v.name)}</li>`).join('')}</ul>`;
+  if(!voices.length){toast('暂无可用音色','info');return;}
+  const azure=voices.filter(v=>v.source==='azure'),clone=voices.filter(v=>v.source!=='azure');
+  const activeId=S.activeVoiceId;
+  const activeSource=activeId?voices.find(v=>v.id===activeId)?.source:null;
+  const renderSection=(label,items)=>{
+    if(!items.length)return '';
+    const open=activeSource===(items[0].source||'')?' open':'';
+    const collapsed=open?'':' style="display:none"';
+    return `<div class="style-section" data-section="${esc(items[0].source||'')}"><span class="style-section-arrow${open}" data-arrow="1">▶</span>${esc(label)}</div><div class="style-section-items"${collapsed}>${items.map(v=>`<li class="style-item${v.id===activeId?' active':''}" data-voice-id="${esc(v.id)}">${esc(v.name)}</li>`).join('')}</div>`;
+  };
+  popup.innerHTML=`<ul class="style-list">${renderSection('内置音色（Azure TTS）',azure)}${renderSection('克隆音色',clone)}</ul>`;
   positionPopup(popup,anchor);activePopup=popup;
+  popup.querySelectorAll('.style-section').forEach(section=>{
+    section.addEventListener('click',(e)=>{
+      e.stopPropagation();
+      const items=section.nextElementSibling;
+      if(!items||!items.classList.contains('style-section-items'))return;
+      const arrow=section.querySelector('[data-arrow]');
+      if(items.style.display==='none'){items.style.display='';arrow.classList.add('open');}else{items.style.display='none';arrow.classList.remove('open');}
+    });
+  });
   popup.querySelectorAll('.style-item').forEach(item=>{
     item.addEventListener('click',async()=>{
       const vid=item.dataset.voiceId;
@@ -622,9 +624,7 @@ async function loadApiUsage() {
   } catch {}
 }
 
-/* ── Render: VC/Data/Status ── */
-function renderVC(){const v=S.vc;if(el.vcStep)el.vcStep.textContent=v.step||'等待';if(el.vcPct)el.vcPct.textContent=`${v.pct||0}%`;if(el.vcBar)el.vcBar.style.width=`${v.pct||0}%`;if(el.vcLog)el.vcLog.textContent=v.logs.length?v.logs.join('\n'):'暂无日志';if(el.vcRun)el.vcRun.disabled=!!v.running}
-function renderData(){const d=S.dataInfo;if(!d)return;if(el.dataVer)el.dataVer.textContent=d.version||'-';if(el.dataPath)el.dataPath.textContent=d.dataDir||d.userData||'-';if(el.dataLog)el.dataLog.textContent=d.logDir||'-'}
+/* ── Render: Status ── */
 function renderStatus(){
   if(!el.status)return;
   if(S.currentFeat==='style-ref'){
@@ -657,7 +657,7 @@ function renderStatus(){
 }
 function renderBtns(){if(el.badge&&S.app)el.badge.textContent=`v${S.app.version}`;toggleSendBtn()}
 function toggleSendBtn(){if(!el.runBtn||!el.input)return;const has=el.input.value.trim().length>0;el.runBtn.classList.toggle('show',has);el.optBtn?.classList.toggle('show',has)}
-function renderAll(opts={}){renderStatus();renderChips();renderVC();renderData();fillForm();renderBtns();renderChat(opts);renderStats();injectIcons()}
+function renderAll(opts={}){renderStatus();renderChips();fillForm();renderBtns();renderChat(opts);renderStats();injectIcons()}
 
 /* ── State ── */
 function reconcile(){const ids=new Set((S.history||[]).map(r=>r.id));S.pending=S.pending.filter(b=>!ids.has(b.runId))}
@@ -682,6 +682,10 @@ async function loadUISettings(){
     if(typeof ui.sidebarOpen==='boolean') S.sidebarOpen=ui.sidebarOpen;
     if(ui.statPeriod) S.statPeriod=ui.statPeriod;
   }catch{}
+  // 默认音色：无保存值则使用内置晓晓
+  if(!S.editDefaults.voice) S.editDefaults.voice='晓晓（女·温柔）';
+  // 默认风格：无保存值则使用通用风格
+  if(!S.editDefaults.style) S.editDefaults.style='通用风格';
 }
 
 /* ── Preview ── */
@@ -855,8 +859,12 @@ function renderEditStartBtn() {
     btn.textContent = `开始选中 ${selected.length} 个`;
     btn.onclick = () => startSelectedTasks();
   }
-  else if (pending.length > 0) { btn.disabled = false; btn.textContent = `开始 ${pending.length} 个`; }
-  else { btn.disabled = true; btn.textContent = '开始剪辑'; }
+  else if (pending.length > 0) {
+    btn.disabled = false;
+    btn.textContent = `开始 ${pending.length} 个`;
+    btn.onclick = async () => { try { await window.antbot.editStartAll(); } catch (e) { toast(e.message, 'error'); } };
+  }
+  else { btn.disabled = true; btn.textContent = '开始剪辑'; btn.onclick = null; }
 
   // 批量操作按钮
   const batchBtn = document.getElementById('edit-batch-btn');
@@ -1178,28 +1186,62 @@ function showEditCardPopup(anchor, vid, type) {
   if (!video) return;
   const popup = document.createElement('div'); popup.className = 'chip-popup';
   const current = video[type] || '';
-  let options;
-  if (type === 'style') { options = S.styleRefs.filter(s => !s.learning && s.prompt).map(s => s.name); if (!options.length) options = ['暂无风格']; }
-  else if (type === 'voice') { const voices = S.voices || []; options = voices.length ? voices.map(v => v.name) : ['暂无音色']; }
-  else { options = ['开启', '关闭']; }
+  if (type === 'style') {
+    const options = S.styleRefs.filter(s => !s.learning && s.prompt).map(s => s.name); if (!options.length) options = ['暂无风格'];
+    popup.innerHTML = `<ul class="style-list">${options.map(o => `<li class="style-item${o === current ? ' active' : ''}" data-val="${esc(o)}">${esc(o)}</li>`).join('')}</ul>`;
+    positionPopup(popup, anchor); activePopup = popup;
+    popup.querySelectorAll('.style-item').forEach(item => item.addEventListener('click', async () => {
+      const val = item.dataset.val;
+      video[type] = val;
+      await window.antbot.editUpdateTask(vid, { style: val }).catch(() => {});
+      renderEditCards(); closeAllPopups();
+    }));
+    return;
+  }
+  if (type === 'voice') {
+    const voices = S.voices || [];
+    if (!voices.length) { toast('暂无可用音色', 'info'); return; }
+    const azure = voices.filter(v => v.source === 'azure');
+    const clone = voices.filter(v => v.source !== 'azure');
+    const activeName = current;
+    const activeSource = activeName ? voices.find(v => v.name === activeName)?.source : null;
+    const renderSection = (label, items) => {
+      if (!items.length) return '';
+      const open = activeSource === (items[0].source || '') ? ' open' : '';
+      const collapsed = open ? '' : ' style="display:none"';
+      return `<div class="style-section" data-section="${esc(items[0].source || '')}"><span class="style-section-arrow${open}" data-arrow="1">▶</span>${esc(label)}</div><div class="style-section-items"${collapsed}>${items.map(v => `<li class="style-item${v.name === activeName ? ' active' : ''}" data-val="${esc(v.name)}">${esc(v.name)}</li>`).join('')}</div>`;
+    };
+    popup.innerHTML = `<ul class="style-list">${renderSection('内置音色（Azure TTS）', azure)}${renderSection('克隆音色', clone)}</ul>`;
+    positionPopup(popup, anchor); activePopup = popup;
+    popup.querySelectorAll('.style-section').forEach(section => {
+      section.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const items = section.nextElementSibling;
+        if (!items || !items.classList.contains('style-section-items')) return;
+        const arrow = section.querySelector('[data-arrow]');
+        if (items.style.display === 'none') { items.style.display = ''; arrow.classList.add('open'); } else { items.style.display = 'none'; arrow.classList.remove('open'); }
+      });
+    });
+    popup.querySelectorAll('.style-item').forEach(item => item.addEventListener('click', async () => {
+      const val = item.dataset.val;
+      video[type] = val;
+      const voice = voices.find(v => v.name === val);
+      const updateData = {};
+      if (voice) {
+        updateData.voiceProfileId = voice.id;
+        updateData.voiceProfileName = voice.name;
+      }
+      await window.antbot.editUpdateTask(vid, updateData).catch(() => {});
+      renderEditCards(); closeAllPopups();
+    }));
+    return;
+  }
+  const options = ['开启', '关闭'];
   popup.innerHTML = `<ul class="style-list">${options.map(o => `<li class="style-item${o === current ? ' active' : ''}" data-val="${esc(o)}">${esc(o)}</li>`).join('')}</ul>`;
   positionPopup(popup, anchor); activePopup = popup;
   popup.querySelectorAll('.style-item').forEach(item => item.addEventListener('click', async () => {
     const val = item.dataset.val;
     video[type] = val;
-    // 同步更新到调度器
-    if (type === 'style' || type === 'voice') {
-      const updateData = {};
-      updateData[type] = val;
-      if (type === 'voice') {
-        const voice = (S.voices || []).find(v => v.name === val);
-        if (voice) {
-          updateData.voiceProfileId = voice.id;
-          updateData.voiceProfileName = voice.name;
-        }
-      }
-      await window.antbot.editUpdateTask(vid, updateData).catch(() => {});
-    }
     renderEditCards(); closeAllPopups();
   }));
 }
@@ -1207,40 +1249,73 @@ function showEditCardPopup(anchor, vid, type) {
 function showEditDefaultPopup(anchor, type) {
   closeAllPopups();
   const current = S.editDefaults[type] || '';
-  let options;
-  if (type === 'style') { options = S.styleRefs.filter(s => !s.learning && s.prompt).map(s => s.name); if (!options.length) options = ['暂无风格']; }
-  else if (type === 'voice') { const voices = S.voices || []; options = voices.length ? voices.map(v => v.name) : ['暂无音色']; }
-  else { options = ['开启', '关闭']; }
   const popup = document.createElement('div'); popup.className = 'chip-popup';
+  if (type === 'style') {
+    const options = S.styleRefs.filter(s => !s.learning && s.prompt).map(s => s.name); if (!options.length) options = ['暂无风格'];
+    popup.innerHTML = `<ul class="style-list">${options.map(o => `<li class="style-item${o === current ? ' active' : ''}" data-val="${esc(o)}">${esc(o)}</li>`).join('')}</ul>`;
+    positionPopup(popup, anchor); activePopup = popup;
+    popup.querySelectorAll('.style-item').forEach(item => item.addEventListener('click', () => {
+      const val = item.dataset.val;
+      S.editDefaults[type] = val;
+      S.selectedStyle = val;
+      renderChips();
+      S.editVideos.forEach(v => { if (v.status === 'pending' || v.status === 'failed' || v.status === 'cancelled') v[type] = val; });
+      const valEl = document.getElementById(`default-${type}-val`);
+      if (valEl) valEl.textContent = val || '默认';
+      renderEditCards(); closeAllPopups();
+      saveUI();
+      toast(`默认风格: ${val || '默认'}`, 'info');
+    }));
+    return;
+  }
+  if (type === 'voice') {
+    const voices = S.voices || [];
+    if (!voices.length) { toast('暂无可用音色', 'info'); return; }
+    const azure = voices.filter(v => v.source === 'azure');
+    const clone = voices.filter(v => v.source !== 'azure');
+    const activeName = current;
+    const activeSource = activeName ? voices.find(v => v.name === activeName)?.source : null;
+    const renderSection = (label, items) => {
+      if (!items.length) return '';
+      const open = activeSource === (items[0].source || '') ? ' open' : '';
+      const collapsed = open ? '' : ' style="display:none"';
+      return `<div class="style-section" data-section="${esc(items[0].source || '')}"><span class="style-section-arrow${open}" data-arrow="1">▶</span>${esc(label)}</div><div class="style-section-items"${collapsed}>${items.map(v => `<li class="style-item${v.name === activeName ? ' active' : ''}" data-val="${esc(v.name)}">${esc(v.name)}</li>`).join('')}</div>`;
+    };
+    popup.innerHTML = `<ul class="style-list">${renderSection('内置音色（Azure TTS）', azure)}${renderSection('克隆音色', clone)}</ul>`;
+    positionPopup(popup, anchor); activePopup = popup;
+    popup.querySelectorAll('.style-section').forEach(section => {
+      section.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const items = section.nextElementSibling;
+        if (!items || !items.classList.contains('style-section-items')) return;
+        const arrow = section.querySelector('[data-arrow]');
+        if (items.style.display === 'none') { items.style.display = ''; arrow.classList.add('open'); } else { items.style.display = 'none'; arrow.classList.remove('open'); }
+      });
+    });
+    popup.querySelectorAll('.style-item').forEach(item => item.addEventListener('click', () => {
+      const val = item.dataset.val;
+      S.editDefaults[type] = val;
+      S.editVideos.forEach(v => { if (v.status === 'pending' || v.status === 'failed' || v.status === 'cancelled') v[type] = val; });
+      const valEl = document.getElementById(`default-${type}-val`);
+      if (valEl) valEl.textContent = val || '默认';
+      renderEditCards(); closeAllPopups();
+      saveUI();
+      toast(`默认音色: ${val || '默认'}`, 'info');
+    }));
+    return;
+  }
+  const options = ['开启', '关闭'];
   popup.innerHTML = `<ul class="style-list">${options.map(o => `<li class="style-item${o === current ? ' active' : ''}" data-val="${esc(o)}">${esc(o)}</li>`).join('')}</ul>`;
   positionPopup(popup, anchor); activePopup = popup;
   popup.querySelectorAll('.style-item').forEach(item => item.addEventListener('click', () => {
     const val = item.dataset.val;
     S.editDefaults[type] = val;
-    if (type === 'style') {
-      S.selectedStyle = val;
-      renderChips();
-    }
     S.editVideos.forEach(v => { if (v.status === 'pending' || v.status === 'failed' || v.status === 'cancelled') v[type] = val; });
     const valEl = document.getElementById(`default-${type}-val`);
     if (valEl) valEl.textContent = val || '默认';
     renderEditCards(); closeAllPopups();
     toast(`默认${type === 'style' ? '风格' : type === 'voice' ? '音色' : '字幕'}: ${val || '默认'}`, 'info');
   }));
-}
-
-/* ── Context menu ── */
-function showContextMenu(x, y, videoId) {
-  const menu = document.getElementById('ctx-menu');
-  if (!menu) return;
-  menu.style.left = x + 'px';
-  menu.style.top = y + 'px';
-  menu.classList.remove('hidden');
-  menu.dataset.videoId = videoId;
-}
-function hideContextMenu() {
-  const menu = document.getElementById('ctx-menu');
-  if (menu) menu.classList.add('hidden');
 }
 
 /* ── Style reference ── */
@@ -1538,7 +1613,7 @@ async function checkVoicebox() {
 
 /* ── Actions ── */
 async function startTasks(forceItems){window.antbot.cancelTaskParse?.();const raw=el.input?.value?.trim();const pv=S.preview;if(!raw&&!(pv.items&&pv.items.length)){toast('请输入任务','error');return}if(!S.editDefaults?.style&&!S.selectedStyle){toast('建议先在底部菜单选择风格，否则剪辑将无风格指导','info')}try{let payload=raw;const useItems=forceItems||((pv.items&&pv.items.length&&!pv.empty)&&(pv.mode==='optimized'||pv.edited));if(useItems){payload=pv.items.map(t=>({id:t.id,rawLine:t.rawLine,taskName:t.taskName,isOriginal:!!t.isOriginal,videoUrl:t.videoUrl,timeRange:t.timeRange||'',platforms:t.platforms||[],publishCopy:t.publishCopy||'',publishTopics:t.publishTopics||[],campaignName:t.campaignName||'',publishAt:t.publishAt?new Date(t.publishAt):null}))}const r=await window.antbot.startTasks(payload);appendPending({runId:r.runId,inputText:raw||'',rules:useItems&&pv.items&&pv.items.length?pv.items:null});el.input.value='';autoInput();queuePreview();if(r.warnings?.length)toast(r.warnings[0],'info');toast(r.queued?`已排队 (${r.queuePosition})`:`已启动 ${r.taskCount} 条`,'success');renderChat({stick:true})}catch(e){toast(`失败: ${e.message}`,'error')}}
-async function stopTasks(){if(!window.confirm('确认停止所有任务？'))return;try{await window.antbot.stopTasks();toast('已停止','success');await refreshAppState().catch(()=>{})}catch(e){toast(`失败: ${e.message}`,'error')}}
+async function stopTasks(){const ok=await confirmDialog('确认停止所有任务？');if(!ok)return;try{await window.antbot.stopTasks();toast('已停止','success');await refreshAppState().catch(()=>{})}catch(e){toast(`失败: ${e.message}`,'error')}}
 async function saveSettings(){
   try{
     const form=readForm();
@@ -1546,8 +1621,6 @@ async function saveSettings(){
     loadApiUsage().catch(()=>{});
   }catch(e){console.error('[saveSettings]',e)}
 }
-async function runVC(){const f=el.vcForm;if(!f||!S.settings)return;const sp=f.samplePath?.value?.trim(),rt=f.referenceText?.value?.trim();if(!sp){toast('请选择样本','error');return}if(!rt){toast('请填写文本','error');return}S.vc={running:true,status:'running',step:'准备中',pct:5,logs:[]};renderVC();try{S.settings=await window.antbot.updateSettings({voiceClone:{...S.settings.voiceClone,samplePath:sp,referenceText:rt,profileName:f.profileName?.value?.trim(),language:f.language?.value||'zh'}});const vc=await window.antbot.runVoiceClone({samplePath:sp,referenceText:rt,profileName:f.profileName?.value?.trim(),language:f.language?.value||'zh'});S.settings.voiceClone={...S.settings.voiceClone,...vc};S.vc={running:false,status:'completed',step:'完成',pct:100,logs:[`完成: ${vc.voiceId}`]};toast(`克隆完成: ${vc.voiceId}`,'success');renderAll();await runStartup()}catch(e){S.vc={running:false,status:'failed',step:'失败',pct:0,logs:[e.message]};toast(`失败: ${e.message}`,'error')}renderVC()}
-async function loadData(){try{S.dataInfo=await window.antbot.getDataInfo();renderData()}catch{}}
 function findTask(tid){for(const r of S.history||[])for(const i of r.items||[])if(String(i.taskId)===String(tid))return i;return null}
 
 /* ── Voice list (cloned voices) ── */
@@ -1568,21 +1641,33 @@ function renderVoiceList() {
   const list = document.getElementById('voice-list');
   if (!list) return;
   if (!S.voices.length) {
-    list.innerHTML = '<div class="sv-note">暂无已克隆音色</div>';
+    list.innerHTML = '<div class="sv-note">暂无可用音色</div>';
     return;
   }
-  list.innerHTML = S.voices.map(v => `
+  const azureVoices = S.voices.filter(v => v.source === 'azure');
+  const cloneVoices = S.voices.filter(v => v.source !== 'azure');
+  const renderItem = (v) => `
     <div class="voice-item" data-voice-id="${esc(v.id)}">
       <div class="voice-item-info">
         <div class="voice-item-name">${esc(v.name)}</div>
         <div class="voice-item-id">${esc(v.id)}</div>
       </div>
       <div class="voice-item-actions">
-        <button class="btn btn-sm btn-ghost" data-voice-rename="${esc(v.id)}" type="button">重命名</button>
-        <button class="btn btn-sm btn-ghost" data-voice-delete="${esc(v.id)}" type="button" style="color:var(--destructive)">删除</button>
+        ${v.source === 'azure'
+          ? '<span class="sv-tag">内置</span>'
+          : `<button class="btn btn-sm btn-ghost" data-voice-rename="${esc(v.id)}" type="button">重命名</button>
+             <button class="btn btn-sm btn-ghost" data-voice-delete="${esc(v.id)}" type="button" style="color:var(--destructive)">删除</button>`}
       </div>
     </div>
-  `).join('');
+  `;
+  const sections = [];
+  if (azureVoices.length) {
+    sections.push(`<div class="sv-section-title">内置音色（Azure TTS，无需克隆模型）</div>${azureVoices.map(renderItem).join('')}`);
+  }
+  if (cloneVoices.length) {
+    sections.push(`<div class="sv-section-title">克隆音色</div>${cloneVoices.map(renderItem).join('')}`);
+  }
+  list.innerHTML = sections.join('');
   // Rename handlers - inline edit
   list.querySelectorAll('[data-voice-rename]').forEach(btn => {
     btn.addEventListener('click', (e) => {
@@ -1780,14 +1865,14 @@ function bindSubtitleVoiceEvents() {
     const anim = document.getElementById('voice-clone-anim');
     const animText = document.getElementById('voice-anim-text');
     if (anim) anim.classList.remove('hidden');
+    let unsub = null;
     try {
-      const unsub = window.antbot.onVoiceCloneProgress((p) => {
+      unsub = window.antbot.onVoiceCloneProgress((p) => {
         if (animText && (p?.step || p?.message)) animText.textContent = p.message || p.step || '';
       });
       const result = await window.antbot.runVoiceClone({ samplePath, referenceText: refText, profileName, language: 'zh' });
-      unsub?.();
       if (result?.voiceId) {
-        S.voices.push({ id: result.voiceId, name: profileName });
+        S.voices.push({ id: result.voiceId, name: profileName, source: 'clone' });
         await window.antbot.saveVoices(S.voices);
         renderVoiceList();
         toast(`\u514B\u9686\u5B8C\u6210: ${profileName}`, 'success');
@@ -1804,6 +1889,8 @@ function bindSubtitleVoiceEvents() {
       }
     } catch (e) {
       toast(e.message, 'error');
+    } finally {
+      unsub?.();
     }
     if (anim) anim.classList.add('hidden');
     if (btn) { btn.disabled = false; btn.textContent = '\u5F00\u59CB\u514B\u9686'; updateCloneBtn(); }
@@ -1847,9 +1934,6 @@ function bind(){
     });
   }
   el.editAddBtn?.addEventListener('click',async()=>{try{const files=await window.antbot.pickVideoFiles();if(files&&files.length)addEditVideos(files)}catch(e){toast(e.message,'error')}});
-  el.editStartBtn?.addEventListener('click', async () => {
-    await window.antbot.editStartAll();
-  });
   document.getElementById('edit-batch-btn')?.addEventListener('click', () => showBatchActions());
 
   // Edit tab switching
@@ -1868,8 +1952,6 @@ function bind(){
   document.querySelectorAll('[data-edit-default]').forEach(btn=>{
     btn.addEventListener('click',()=>showEditDefaultPopup(btn,btn.dataset.editDefault));
   });
-  // Context menu - 右键菜单已禁用
-  document.addEventListener('click',()=>hideContextMenu());
   // Stat period
   document.querySelectorAll('.stat-sw').forEach(btn=>{btn.addEventListener('click',()=>{document.querySelectorAll('.stat-sw').forEach(b=>b.classList.remove('active'));btn.classList.add('active');S.statPeriod=btn.dataset.period;saveUI();renderStats()})});
   // Platform buttons
@@ -1923,14 +2005,6 @@ function bind(){
     }
   });
   // 模型选择变化 → 保存（change 冒泡到 view-settings）
-  // Voice clone
-  el.vcRun?.addEventListener('click',()=>void runVC());el.vcClose?.addEventListener('click',()=>closeDlg(el.vcDlg));
-  el.vcPick?.addEventListener('click',async()=>{try{const f=await window.antbot.pickAudioFile();if(f&&el.vcForm)el.vcForm.samplePath.value=f}catch(e){toast(e.message,'error')}});
-  // Data
-  el.dataOpen?.addEventListener('click',async()=>{try{const r=await window.antbot.openDataDir();toast(`已打开: ${r.path}`,'info')}catch(e){toast(e.message,'error')}});
-  el.dataOpenLog?.addEventListener('click',async()=>{try{await window.antbot.openExternal(S.dataInfo?.logDir||'')}catch(e){toast(e.message,'error')}});
-  el.dataOpenMain?.addEventListener('click',async()=>{try{const r=await window.antbot.openDataDir();toast(`已打开: ${r.path}`,'info')}catch(e){toast(e.message,'error')}});
-  el.dataClose?.addEventListener('click',()=>closeDlg(el.dataDlg));
   publishPage.bind();
   downloadPage.bind();
   // Task input
@@ -1947,13 +2021,6 @@ function bind(){
   });
   // Chat actions
   el.stream?.addEventListener('click',e=>{
-    const rawBtn=e.target.closest('[data-msg-raw]');
-    if(rawBtn){
-      const group=rawBtn.closest('.msg-user');
-      const rawBox=group?.querySelector('.msg-raw');
-      if(rawBox){const shown=rawBox.classList.toggle('show');rawBtn.textContent=shown?'隐藏原文':'原文'}
-      return;
-    }
     const copyBtn=e.target.closest('[data-msg-copy]');
     if(copyBtn){
       navigator.clipboard.writeText(copyBtn.dataset.copy||'').then(()=>{copyBtn.textContent='已复制';setTimeout(()=>copyBtn.textContent='复制',1500)});
@@ -1965,7 +2032,6 @@ function bind(){
     if(detailToggle){detailToggle.closest('.task-detail')?.classList.toggle('open');return}
     const stopBtn=e.target.closest('[data-stop]');
     const skipBtn=e.target.closest('[data-skip]');
-    const retryBtn=e.target.closest('[data-retry]');
     const retryTaskBtn=e.target.closest('[data-retry-task]');
     const openOutputBtn=e.target.closest('[data-open-output]');
     if(stopBtn){
@@ -1982,11 +2048,6 @@ function bind(){
       });
     }
     if(skipBtn){void window.antbot.stopTask(skipBtn.dataset.skip).then(()=>toast('已跳过','success')).catch(err=>toast(err.message,'error'))}
-    if(retryBtn){
-      const taskId=retryBtn.dataset.retry;
-      const task=S.progress?.tasks?.find(t=>t.id===taskId);
-      if(task){void window.antbot.resumeTask({taskId,rawLine:task.rawLine||''}).then(()=>toast('已重试','success')).catch(err=>toast(err.message,'error'))}
-    }
     if(retryTaskBtn){
       const taskId=retryTaskBtn.dataset.retryTask;
       const task=S.progress?.tasks?.find(t=>t.id===taskId)||S.history?.flatMap(h=>h.items||[]).find(t=>t.id===taskId);
@@ -2098,17 +2159,12 @@ function bind(){
   el.scroll?.addEventListener('scroll',()=>{if(!el.scroll||el.scroll.scrollTop>80||S.chatCount>=S.history.length)return;const ph=el.scroll.scrollHeight,pt=el.scroll.scrollTop;S.chatCount=Math.min(S.chatCount+20,S.history.length);renderChat();requestAnimationFrame(()=>{el.scroll.scrollTop=el.scroll.scrollHeight-ph+pt})});
   // IPC
   window.antbot.onProgress(p=>{const pin=el.scroll&&(el.scroll.scrollHeight-el.scroll.scrollTop-el.scroll.clientHeight<80);const oldTasks=S.progress?.tasks||[];S.progress=p||S.progress;if(p?.tasks){const cancelIds=new Set(oldTasks.filter(t=>t.status==='cancelling').map(t=>t.id));p.tasks.forEach(t=>{if(cancelIds.has(t.id)&&t.status!=='stopped'&&t.status!=='failed'&&t.status!=='completed')t.status='cancelling'})}renderChat({stick:pin});renderBtns();renderStats();renderStatus()});
-  window.antbot.onLog(p=>{if(p?.message?.startsWith('[语音克隆]')){S.vc.logs.push(p.message.replace('[语音克隆] ',''));S.vc.logs=S.vc.logs.slice(-16);renderVC()}});
   window.antbot.onToast?.((msg, type) => { if (msg) toast(msg, type || 'info'); });
   window.antbot.onVoiceCloneProgress(p=>{
-    S.vc={...S.vc,running:p?.status==='running',status:p?.status||S.vc.status,step:p?.step||S.vc.step,pct:typeof p?.percent==='number'?p.percent:S.vc.pct};
-    if(p?.message){S.vc.logs.push(p.message);S.vc.logs=S.vc.logs.slice(-16)}
-    renderVC();
     // Update animation text
     const animText=document.getElementById('voice-anim-text')||document.querySelector('.voice-anim-text');
     if(animText&&(p?.step||p?.message)) animText.textContent=p.message||p.step||'';
   });
-  window.antbot.onStartupStatus(p=>{S.startup=p});
   window.antbot.onHistoryChanged(h=>{const pin=el.scroll&&(el.scroll.scrollHeight-el.scroll.scrollTop-el.scroll.clientHeight<80);S.history=h||[];reconcile();renderChat({stick:pin});renderStats();window.antbot.getPersistedTasks().then(t=>{S.persistedTasks=t||[]}).catch(()=>{})});
   window.antbot.onAppState(p=>{const pin=el.scroll&&(el.scroll.scrollHeight-el.scroll.scrollTop-el.scroll.clientHeight<80);applySnap(p||{});renderAll({stick:pin})});
   window.antbot.onDepProgress(p=>{toast(p?.message||'',p?.status==='failed'?'error':'info')});
@@ -2471,7 +2527,6 @@ async function init(){
     const initState=await window.antbot.getInitialState();
     applySnap(initState);renderAll({stick:true});queuePreview();
     await runStartup();
-    await loadData();
     await loadModels();
     loadEditTasks();
 

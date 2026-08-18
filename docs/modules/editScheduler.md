@@ -20,13 +20,19 @@ pending → preparing → ready → composing → completed
 
 - **准备阶段**（preparing）：最多 2 个并发，调用 `smartEditor.prepareEditVideo()`
 - **合成阶段**（composing）：最多 1 个，调用 `smartEditor.composeEditVideo()`
-- 同一轮 `_tick` 内先处理合成（Phase 2 `_runCompose`）再处理准备（Phase 1），合成期间准备不会并行执行
-- `ready` 状态的任务自动排队等合成
+- `_tick` 内合成与准备均为**后台点火（不 `await`）**：合成（Phase 2）与准备（Phase 1）真正并行——合成进行期间新任务可继续准备，ready 任务排队等合成
+- `ready` 状态的任务自动排队等合成（每轮至多启动 1 个，串行保证合成互不重叠）
 - `paused` 任务不参与调度，等用户手动继续
+
+## 任务级配置
+
+- `subtitle`（'开启'/'关闭'）在合成时生效：`t.subtitle === '关闭'` 时跳过字幕烧录
+- `apiConfig` 不写入 `edit-tasks.json`（避免 API Key 明文落盘）；重启恢复时从全局设置重新填充
+- 输出文件名时间戳含秒级精度，避免同分钟内同名视频互相覆盖
 
 ## 调度驱动
 
-- 所有调度触发点（`startTask`/`startAll`/`retryTask`/任务结束）统一走 `_tick()`：以 `_running` 标志防重入，准备（`_runPrepare`）与合成（`_runCompose`）均为后台点火（不 `await`）
+- 所有调度触发点（`startTask`/`startAll`/`retryTask`/任务结束）统一走 `_tick()`：以 `_running` 标志防重入，准备（`_runPrepare`）与合成（`_runCompose`）均为后台点火（不 `await`），合成完成时通过 `.finally` 再次触发 `_tick()` 接力下一个 ready 任务
 - 有任一活跃任务（pending/preparing/ready/composing）时持续 `setTimeout(_tick, 500)` 轮询，全部结束后进入 `_maybeShutdownVoicebox()`（60 秒延迟关后端释放内存）
 
 ## 失败处理
@@ -50,7 +56,7 @@ pending → preparing → ready → composing → completed
 
 ## 持久化
 
-任务状态保存到 `~/AntBot/edit-tasks.json`。重启恢复时：
+任务状态保存到 `~/AntBot/edit-tasks.json`（不含 `apiConfig`，密钥不落盘）。重启恢复时：
 - `preparing` / `composing` → 清理任务缓存，重置为 `pending`
 - `ready` → 仅当 SRT 仍存在且位于 `~/AntBot/clip-cache/<task-id>/` 时保留
 - `completed` / `failed` / `cancelled` → 保留任务记录，删除残留任务缓存
