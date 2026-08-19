@@ -66,7 +66,7 @@ composeEditVideo (smartEditor.js)     →  { outputPath }
 
 - **Module docs:** Read `docs/modules/*.md` before modifying any service module. Update the doc after changing module behavior.
 - **远程页面热更新:** 修改远程控制页面（remote-ui、Hub 页面）前必须先读 `docs/remote-hot-update.md`，了解热更新机制、GitHub 仓库、版本号更新流程和 checklist。
-- **打包准则:** 每次打包或打包测试前必须先读 `docs/packaging.md`（版本号 +0.0.1 递增、产物类型与移动位置、打包记录表）
+- **打包准则:** 每次打包或打包测试前必须先读 `docs/packaging.md`（版本号 9 进制递增规则：patch/minor 到 9 进位，禁止 `npm version patch`，产物类型与移动位置、打包记录表）
 - **发布准则:** 发布 App、浏览器插件、远程页面更新前必须先读 `docs/release-guidelines.md`，遵守版本号规范、打包要求和发布流程。
 - **No gradients:** CSS uses solid colors only. Theme color `var(--primary)` only on key interactive elements.
 - **Design system:** All UI changes MUST follow the design system defined below. Read the "Design System" section before modifying any CSS or adding new components.

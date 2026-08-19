@@ -295,7 +295,7 @@ function taskCard(t,live=false){
   if(platforms.length)meta.push(`<span class="task-meta-item task-meta-platform">${esc(platforms.map(p=>platformLabel[p]||p).join('、'))}</span>`);
   if(isOriginal)meta.push('<span class="task-meta-item task-meta-original">原创</span>');
   if(campaignName)meta.push(`<span class="task-meta-item task-meta-campaign"><b>${esc(campaignName)}</b></span>`);
-  if(publishAt){const d=new Date(publishAt);if(!isNaN(d)){const pad=n=>String(n).padStart(2,'0');const isExpired=d.getTime()<Date.now();if(isExpired&&st!=='running'&&st!=='queued'){meta.push(`<span class="task-meta-item danger">定时已过期 ${d.getMonth()+1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}</span>`)}else{meta.push(`<span class="task-meta-item task-meta-time">定时 ${d.getMonth()+1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}</span>`)}}}
+  if(publishAt){const d=new Date(publishAt);if(!isNaN(d)){const pad=n=>String(n).padStart(2,'0');const isExpired=d.getTime()<Date.now();if(isExpired&&!isCompleted&&st!=='running'&&st!=='queued'){meta.push(`<span class="task-meta-item danger">定时已过期 ${d.getMonth()+1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}</span>`)}else{meta.push(`<span class="task-meta-item task-meta-time">定时 ${d.getMonth()+1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}</span>`)}}}
   const metaHtml=meta.length?`<div class="task-meta">${meta.join('')}</div>`:'';
 
   /* 执行配置展开区：耗时 + 旁白/字幕/音色/风格 */

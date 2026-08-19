@@ -8,6 +8,20 @@
 
 所有组件统一使用 **语义化版本号** `major.minor.patch`（如 `1.0.2`）。
 
+### 9 进制版本规则（App 版本递增约定）
+
+**patch 与 minor 最大到 9，到 9 后进位**，不允许出现 `0.7.10`、`0.9.10` 这类超过 9 的版本号：
+
+| 当前版本 | 下一个版本 | 说明 |
+|---------|-----------|------|
+| `0.7.9` → | `0.8.0` | patch 到 9 → minor +1，patch 归 0 |
+| `0.9.9` → | `1.0.0` | minor 到 9 → major +1，minor/patch 归 0 |
+| `0.8.5` → | `0.8.6` | patch < 9 → 正常 +1 |
+
+⚠️ 禁止 `npm version patch` 自动递增（会产生 `0.7.10` 这类违规版本）。必须手动指定目标版本号。
+
+> 说明：底层版本比较始终用数字语义比较（`versionUtils.compareSemver` 按 major/minor/patch 数值比较），所以 `0.7.10 > 0.7.9` 技术上也能正确识别更新；9 进制规则是为了保持版本号可读性和后续自动化工具的一致性。
+
 ### App 版本号（单一来源）
 
 App 版本号**唯一来源**是 `package.json` → `version`，构建时固化到二进制中。
@@ -43,8 +57,8 @@ App 版本号**唯一来源**是 `package.json` → `version`，构建时固化�
 **产物规则以 `docs/packaging.md` 为准**（mac 只打 `.app` 移动到项目根目录，win 只打 exe；不需要 dmg/zip）：
 
 ```bash
-# 1. 升版本号（唯一需要改的地方，+0.0.1）
-npm version 0.7.3 --no-git-tag-version
+# 1. 升版本号（手动指定目标版本，按 9 进制规则，禁止 npm version patch）
+npm version 0.8.0 --no-git-tag-version   # 示例：0.7.9 → 0.8.0（patch 到 9 进位）
 
 # 2. 构建（build:mac 内部自动完成签名 + 复制到根目录）
 npm run build:mac
