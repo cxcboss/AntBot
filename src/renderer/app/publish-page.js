@@ -439,21 +439,50 @@ export function createPublishPage({ state: S, esc }) {
     mainBtn?.addEventListener('click', () => { void startPublish(); });
 
     /* 桥接服务 */
+    let bridgePort = 18321;
     const refreshBridge = async () => {
       try {
         const r = await window.antbot.publishBridgeStatus();
-        serviceRunning = r?.status === 'ready' || r?.status === 'busy' || !!r?.extensionConnected;
+        bridgePort = Number(r?.port) || Number(r?.baseUrl?.match(/:(\d+)/)?.[1]) || bridgePort;
+        const isBridgeUp = r?.ok !== false && (r?.status === 'ready' || r?.status === 'busy' || !!r?.extensionConnected || r?.status !== 'offline');
+        const extConnected = !!r?.extensionConnected;
+        serviceRunning = r?.status === 'ready' || r?.status === 'busy' || extConnected;
         const el = bridgeStatus;
         if (el) {
-          el.className = `publish-bridge-status ${serviceRunning ? 'ready' : 'offline'}`;
-          el.querySelector('span:last-child').textContent = r?.extensionConnected ? '浏览器已连接' : '未连接';
+          if (!isBridgeUp) {
+            el.className = 'publish-bridge-status offline';
+            el.querySelector('span:last-child').textContent = '服务未启动';
+          } else if (extConnected) {
+            el.className = 'publish-bridge-status ready';
+            el.querySelector('span:last-child').textContent = `浏览器已连接 :${bridgePort}`;
+          } else {
+            el.className = 'publish-bridge-status offline';
+            el.querySelector('span:last-child').textContent = `服务已启动 :${bridgePort} · 浏览器未连接`;
+          }
         }
-        bridgeToggleBtn.textContent = serviceRunning ? '停止服务' : '启动服务';
+        if (bridgeToggleBtn) bridgeToggleBtn.textContent = serviceRunning ? '停止服务' : '启动服务';
+        // 自动显示/隐藏"打开浏览器"按钮
+        const openBtn = document.getElementById('publish-bridge-open-btn');
+        if (openBtn) openBtn.classList.toggle('hidden', extConnected || !isBridgeUp);
       } catch {
         serviceRunning = false;
-        bridgeToggleBtn.textContent = '启动服务';
+        if (bridgeToggleBtn) bridgeToggleBtn.textContent = '启动服务';
+        const el = bridgeStatus;
+        if (el) {
+          el.className = 'publish-bridge-status offline';
+          el.querySelector('span:last-child').textContent = '服务未启动';
+        }
       }
     };
+    let bridgePollTimer = null;
+    const startBridgePoll = () => {
+      if (bridgePollTimer) return;
+      bridgePollTimer = setInterval(refreshBridge, 5000);
+    };
+    const stopBridgePoll = () => { if (bridgePollTimer) { clearInterval(bridgePollTimer); bridgePollTimer = null; } };
+    // 暴露给外部清理
+    publishView?.addEventListener('view:leave', stopBridgePoll);
+
     bridgeToggleBtn?.addEventListener('click', async () => {
       bridgeToggleBtn.disabled = true; bridgeToggleBtn.textContent = '处理中...';
       try {
@@ -463,13 +492,26 @@ export function createPublishPage({ state: S, esc }) {
       bridgeToggleBtn.disabled = false;
       refreshBridge();
     });
+    document.getElementById('publish-bridge-open-btn')?.addEventListener('click', async () => {
+      const btn = document.getElementById('publish-bridge-open-btn');
+      if (!btn) return;
+      btn.disabled = true; btn.textContent = '打开中...';
+      try {
+        // 默认打开视频号发布页（可在后台轮询到后自动连接）
+        await window.antbot.publishBridgeOpenBrowser('weixin');
+        // 轮询等待连接 5s
+        for (let i=0;i<5;i++){ await new Promise(r=>setTimeout(r,1000)); await refreshBridge(); }
+      } catch (e) { console.error(e); }
+      btn.disabled = false; btn.textContent = '打开浏览器';
+    });
 
     /* 初始化 */
     (async () => {
       await loadTasks();
       await loadPublishHistory();
       render();
-      refreshBridge();
+      await refreshBridge();
+      startBridgePoll();
       window.antbot.onPublishProgress?.((p) => {
         const msg = document.getElementById('publish-result');
         if (msg && p?.message) msg.textContent = p.message;

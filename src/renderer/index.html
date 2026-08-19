@@ -31,6 +31,7 @@
         <button class="sb-btn sb-feat" data-feat="edit" type="button" title="剪辑"><span class="icon" data-icon="scissors"></span><span class="sb-label">剪辑</span></button>
         <button class="sb-btn sb-feat" data-feat="publish" type="button" title="发布"><span class="icon" data-icon="send"></span><span class="sb-label">发布</span></button>
         <button class="sb-btn sb-feat" data-feat="download" type="button" title="下载"><span class="icon" data-icon="download"></span><span class="sb-label">下载</span></button>
+        <button class="sb-btn sb-feat" data-feat="monitor" type="button" title="监控"><span class="icon" data-icon="eye"></span><span class="sb-label">监控</span></button>
         <button class="sb-btn sb-feat" data-feat="remote" type="button" title="远程"><span class="icon" data-icon="globe"></span><span class="sb-label">远程</span></button>
         <button class="sb-btn sb-feat" data-feat="style-ref" type="button" title="风格参考"><span class="icon" data-icon="sparkle"></span><span class="sb-label">风格参考</span></button>
         <button class="sb-btn sb-feat" data-feat="subtitle-voice" type="button" title="字幕与音色"><span class="icon" data-icon="mic"></span><span class="sb-label">字幕与音色</span></button>
@@ -172,6 +173,7 @@
               <div class="publish-bar-left">
                 <button class="btn btn-ghost" id="publish-pick-videos-btn" type="button"><span class="icon" data-icon="plus"></span>添加</button>
                 <button class="btn btn-ghost" id="publish-bridge-toggle-btn" type="button">启动服务</button>
+                <button class="btn btn-ghost hidden" id="publish-bridge-open-btn" type="button">打开浏览器</button>
               </div>
               <div class="publish-bar-center">
                 <span id="publish-result" class="publish-result"></span>
@@ -217,6 +219,25 @@
             <!-- 底部输入框 -->
             <div class="dl-composer">
               <textarea id="dl-input" rows="1" placeholder="粘贴视频链接，多个用逗号或换行隔开"></textarea>
+            </div>
+          </div>
+        </div>
+        <!-- 监控页 -->
+        <div class="feat-view" id="view-monitor">
+          <div class="monitor-layout">
+            <div class="monitor-header">
+              <h3 class="sv-title monitor-title-heading">YouTube 博主监控</h3>
+              <p class="sv-desc">自动检测博主新视频并下载发布，独立配置不影响全局</p>
+              <div class="monitor-header-actions">
+                <button class="btn btn-primary btn-sm" id="monitor-add-btn" type="button"><span class="icon" data-icon="plus"></span>添加监控</button>
+                <button class="btn btn-ghost btn-sm" id="monitor-check-all-btn" type="button">全部检查</button>
+              </div>
+            </div>
+            <div class="monitor-list" id="monitor-list"></div>
+            <div class="monitor-empty" id="monitor-empty">
+              <div class="edit-empty-icon"><span class="icon" data-icon="eye"></span></div>
+              <p>暂无监控，添加一位 YouTube 博主开始自动搬运</p>
+              <p class="monitor-empty-hint">支持 YouTube 频道/用户主页，例如 https://www.youtube.com/@xxx/videos</p>
             </div>
           </div>
         </div>
@@ -285,8 +306,7 @@
             </div>
             <div class="edit-bar">
               <div class="edit-bar-left">
-                <button class="btn btn-ghost" id="style-add-video-btn" type="button"><span class="icon" data-icon="plus"></span>添加视频</button>
-                <button class="btn btn-ghost" id="style-add-text-btn" type="button"><span class="icon" data-icon="plus"></span>添加文本</button>
+                <button class="btn btn-ghost" id="style-add-text-btn" type="button"><span class="icon" data-icon="plus"></span>添加风格</button>
               </div>
             </div>
           </div>
@@ -586,6 +606,29 @@
     </main>
   </div>
 
+  <!-- 监控配置弹窗 -->
+  <dialog id="monitor-dialog" class="dlg monitor-dialog"><div class="dlg-box">
+    <div class="dlg-head"><h3 id="monitor-dialog-title">添加监控</h3><button type="button" aria-label="关闭" class="dlg-close" id="monitor-cancel-btn"><span class="icon" data-icon="x"></span></button></div>
+    <div class="dlg-body">
+      <div class="dlg-grid">
+        <label class="full">博主名称<input class="input" id="monitor-name" type="text" placeholder="例如：游戏解说 - 某博主" /></label>
+        <label class="full">频道/主页链接<input class="input" id="monitor-url" type="url" placeholder="https://www.youtube.com/@xxx/videos" /></label>
+        <label>监控频率<select id="monitor-freq" class="select"><option value="60">每小时</option><option value="30">每 30 分钟</option><option value="120">每 2 小时</option><option value="360">每 6 小时</option><option value="1440">每天</option></select></label>
+        <label>发布平台<select id="monitor-platforms" class="select"><option value="">跟随全局</option><option value="videoChannel">仅视频号</option><option value="douyin">仅抖音</option><option value="both">视频号 + 抖音</option></select></label>
+        <label>话题（空格分隔）<input class="input" id="monitor-topics" type="text" placeholder="#游戏 #解说" /></label>
+        <label>活动名<input class="input" id="monitor-campaign" type="text" placeholder="留空=不参加" /></label>
+        <label>风格<select id="monitor-style" class="select"><option value="">跟随全局</option></select></label>
+        <label>音色<select id="monitor-voice" class="select"><option value="">跟随全局</option></select></label>
+        <label>原创<select id="monitor-original" class="select"><option value="">跟随全局</option><option value="true">是</option><option value="false">否</option></select></label>
+      </div>
+      <div class="dlg-actions">
+        <button type="button" id="monitor-save-btn" class="btn btn-primary">保存</button>
+        <button type="button" class="btn btn-ghost" data-monitor-cancel>取消</button>
+      </div>
+      <p class="monitor-note">仅对该博主生效，不影响全局设置。首次添加仅记录已有视频，下次发现新视频时自动下载发布。</p>
+    </div>
+  </div></dialog>
+
   <!-- 添加文本风格弹窗 -->
   <dialog id="style-text-dialog" class="dlg"><div class="dlg-box">
     <div class="dlg-head"><h3>添加文本风格</h3><button type="button" aria-label="关闭" class="dlg-close" id="close-style-text-btn"><span class="icon" data-icon="x"></span></button></div>
@@ -600,20 +643,7 @@
     </div>
   </div></dialog>
 
-  <!-- 添加视频风格弹窗 -->
-  <dialog id="style-video-dialog" class="dlg"><div class="dlg-box">
-    <div class="dlg-head"><h3>添加视频风格</h3><button type="button" aria-label="关闭" class="dlg-close" id="close-style-video-btn"><span class="icon" data-icon="x"></span></button></div>
-    <div class="dlg-body">
-      <div class="dlg-grid">
-        <label class="full">风格名称<input id="style-video-name" type="text" placeholder="例如：电影感风格" /></label>
-        <label class="full">已选视频<div id="style-video-files" class="info-path">未选择</div></label>
-      </div>
-      <div class="dlg-actions">
-        <button type="button" id="style-video-pick-btn" class="btn btn-ghost"><span class="icon" data-icon="folder"></span>选择视频</button>
-        <button type="button" id="style-video-start-btn" class="btn btn-primary"><span class="icon" data-icon="play"></span>开始学习</button>
-      </div>
-    </div>
-  </div></dialog>
+
 
   <div class="toasts" id="toast-container"></div>
   <script type="module" src="./app.js"></script>

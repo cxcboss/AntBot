@@ -23,18 +23,26 @@ function register({ ipcMain, store, mainWindowRef, appLog }) {
   });
 
   ipcMain.handle('publish:bridge-status', async () => {
-    const { createBrowserPublishBridge } = require('../services/browserPublishBridge');
+    const { resolveBridgeBaseUrl, createBrowserPublishBridge } = require('../services/browserPublishBridge');
     const settings = await store.getSettings();
     const config = settings.publish?.browserExtension || {};
-    const baseUrl = config.baseUrl || 'http://127.0.0.1:18321';
+    const preferred = config.baseUrl || 'http://127.0.0.1:18321';
     try {
+      const baseUrl = await resolveBridgeBaseUrl(preferred);
       const result = await createBrowserPublishBridge({ baseUrl }).getStatus();
-      return result;
+      return { ...result, baseUrl };
     }
     catch (error) {
       appLog('error', `[publish] 状态检测失败: ${error.message}`);
       return { ok: false, status: 'offline', message: error.message };
     }
+  });
+
+  ipcMain.handle('publish:bridge-open-browser', async (_event, platform) => {
+    const { openBrowserForPlatform } = require('../services/browserLauncher');
+    const p = platform === 'douyin' ? 'douyin' : 'weixin';
+    const r = await openBrowserForPlatform(p, { allowSpawn: true });
+    return r;
   });
 
   ipcMain.handle('publish:bridge-start', async () => {
@@ -59,7 +67,7 @@ function register({ ipcMain, store, mainWindowRef, appLog }) {
 
   ipcMain.handle('publish:start', async (_event, payload) => {
     appLog('info', '[publish] 开始发布视频');
-    const { createBrowserPublishBridge } = require('../services/browserPublishBridge');
+    const { resolveBridgeBaseUrl, createBrowserPublishBridge } = require('../services/browserPublishBridge');
     const settings = await store.getSettings();
     const config = settings.publish?.browserExtension || {};
     const videos = Array.isArray(payload?.videos) ? payload.videos : [];
@@ -83,9 +91,10 @@ function register({ ipcMain, store, mainWindowRef, appLog }) {
       return { ...v, settings: { ...vs, scheduledPublish: scheduled, exactTime: true } };
     });
     if (notices.length) appLog('info', `[publish] 定时降级: ${notices.join('; ')}`);
-    appLog('info', `[publish] 视频数量: ${videos.length}, 平台: ${platform}, baseUrl: ${config.baseUrl}`);
+    const baseUrl = await resolveBridgeBaseUrl(config.baseUrl || 'http://127.0.0.1:18321');
+    appLog('info', `[publish] 视频数量: ${videos.length}, 平台: ${platform}, baseUrl: ${baseUrl}`);
     try {
-      const result = await createBrowserPublishBridge({ baseUrl: config.baseUrl, timeoutMs: config.timeoutMs }).publish({
+      const result = await createBrowserPublishBridge({ baseUrl, timeoutMs: config.timeoutMs }).publish({
         videos: normalizedVideos,
         settings: payload.settings || {},
         videoPath: payload.videoPath || path.dirname(videos[0].path || ''),

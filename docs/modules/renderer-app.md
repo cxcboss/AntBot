@@ -15,6 +15,7 @@
 | `app/download-page.js` | ~325 | 下载页：yt-dlp 管理、YouTube 登录、下载任务 |
 | `app/update-page.js` | ~280 | 更新页：App/插件/远程页面更新检查与安装 |
 | `app/remote-page.js` | ~148 | 远程页：Cloudflare 隧道、QR 码、凭证管理 |
+| `app/monitor-page.js` | ~300 | 监控页：YouTube 博主监控、独立覆盖配置、立即检查 |
 
 ## 关键状态
 
@@ -43,6 +44,7 @@ S = {
 | 剪辑 | view-edit | app.js（核心） |
 | 发布 | view-publish | app/publish-page.js |
 | 下载 | view-download | app/download-page.js |
+| 监控 | view-monitor | app/monitor-page.js |
 | 远程 | view-remote | app/remote-page.js |
 | 更新 | view-update | app/update-page.js |
 | 风格参考 | view-style-ref | app.js（核心） |

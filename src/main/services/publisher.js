@@ -1,7 +1,7 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const dayjs = require('dayjs');
-const { createBrowserPublishBridge } = require('./browserPublishBridge');
+const { createBrowserPublishBridge, resolveBridgeBaseUrl } = require('./browserPublishBridge');
 
 const PLATFORM_CONFIG = {
   videoChannel: {
@@ -73,6 +73,83 @@ async function ensureOutputVideoExists(outputPath) {
   }
 }
 
+async function ensureBridgeReady({ baseUrl, log, platformHint = 'weixin', timeoutMs = 35000 }) {
+  const { bridgeServiceManager } = require('./bridgeServiceManager');
+  const { openBrowserForPlatform } = require('./browserLauncher');
+  // 动态解析真实可用地址（支持端口漂移）
+  let resolvedBaseUrl = baseUrl;
+  try {
+    resolvedBaseUrl = await resolveBridgeBaseUrl(baseUrl);
+  } catch {}
+  let bridge = createBrowserPublishBridge({ baseUrl: resolvedBaseUrl, timeoutMs: 5 * 60 * 1000 });
+  // 先尝试 3 次快速探测（指数退避）
+  for (let i = 0; i < 3; i++) {
+    try {
+      const st = await bridge.getStatus();
+      if (st && (st.status === 'ready' || st.status === 'busy')) {
+        if (st.extensionConnected) return { bridge, baseUrl: resolvedBaseUrl, status: st };
+        break; // 服务在线但插件未连接，进入拉起浏览器流程
+      }
+    } catch (e) {
+      if (i === 2) log(`桥接探测失败: ${e.message}`);
+    }
+    await new Promise((r) => setTimeout(r, 500 * (i + 1)));
+  }
+  // 服务未就绪，尝试启动
+  try {
+    log('桥接服务未就绪，尝试自动启动...');
+    const started = await bridgeServiceManager.start();
+    if (started) {
+      resolvedBaseUrl = bridgeServiceManager.getBaseUrl();
+      bridge = createBrowserPublishBridge({ baseUrl: resolvedBaseUrl, timeoutMs: 5 * 60 * 1000 });
+      // 等待就绪
+      for (let i = 0; i < 10; i++) {
+        try {
+          const st = await bridge.getStatus();
+          if (st && (st.status === 'ready' || st.status === 'busy')) break;
+        } catch {}
+        await new Promise((r) => setTimeout(r, 500));
+      }
+      log(`桥接服务已启动: ${resolvedBaseUrl}`);
+    }
+  } catch (e) {
+    log(`自动启动桥接失败: ${e.message}`);
+  }
+
+  // 检查插件连接，若未连接则尝试拉起浏览器（允许弹新窗口）
+  let status;
+  try {
+    status = await bridge.getStatus();
+  } catch (e) {
+    throw new Error(`桥接服务未运行: ${e.message}，请在发布页面启动服务后重试`);
+  }
+  if (!status.extensionConnected) {
+    log('浏览器插件未连接，尝试自动打开浏览器...');
+    try {
+      const platform = platformHint === 'douyin' ? 'douyin' : 'weixin';
+      const opened = await openBrowserForPlatform(platform, { allowSpawn: true });
+      if (opened.ok) log(`已打开浏览器: ${opened.url}，等待插件连接...`);
+      else log(`自动打开浏览器失败: ${opened.error}`);
+    } catch (e) {
+      log(`打开浏览器异常: ${e.message}`);
+    }
+    // 轮询等待插件连接 30s
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      await new Promise((r) => setTimeout(r, 1000));
+      try {
+        const s = await bridge.getStatus();
+        if (s.extensionConnected) {
+          log('浏览器插件已连接');
+          return { bridge, baseUrl: resolvedBaseUrl, status: s };
+        }
+      } catch {}
+    }
+    throw new Error('浏览器插件未连接，请确认 Chrome 已打开、插件已加载并保持启用（已尝试自动打开浏览器，若仍未连接请手动打开）');
+  }
+  return { bridge, baseUrl: resolvedBaseUrl, status };
+}
+
 async function publishVideo(taskContext) {
   const {
     task,
@@ -90,17 +167,15 @@ async function publishVideo(taskContext) {
   log(`桥接配置: enabled=${extensionConfig?.enabled}, baseUrl=${extensionConfig?.baseUrl}`);
 
   if (extensionConfig?.enabled) {
-    const bridge = createBrowserPublishBridge({
+    const hintPlatform = platforms[0] === 'douyin' ? 'douyin' : 'weixin';
+    const { bridge } = await ensureBridgeReady({
       baseUrl: extensionConfig.baseUrl,
-      timeoutMs: extensionConfig.timeoutMs || 5 * 60 * 1000
+      log,
+      platformHint: hintPlatform,
     });
     const bridgeStatus = await bridge.getStatus();
-      log(`桥接状态: ${bridgeStatus.status}, 插件连接: ${bridgeStatus.extensionConnected ? '是' : '否'}`);
-      // H1: 插件未连接时快速失败，避免 60s 登录检测 + 90s 发布等待后才报超时
-      if (!bridgeStatus.extensionConnected) {
-        throw new Error('浏览器插件未连接，请确认 Chrome 已打开、插件已加载并保持启用');
-      }
-      if (bridgeStatus.status === 'ready' || bridgeStatus.status === 'busy') {
+    log(`桥接状态: ${bridgeStatus.status}, 插件连接: ${bridgeStatus.extensionConnected ? '是' : '否'}, 端口: ${bridgeStatus.port || ''}`);
+    if (bridgeStatus.status === 'ready' || bridgeStatus.status === 'busy') {
         // 发布前检测平台登录状态
         for (const platform of platforms) {
           const platformLabel = platform === 'videoChannel' ? '视频号' : '抖音';
@@ -168,5 +243,6 @@ async function publishVideo(taskContext) {
 
 module.exports = {
   publishVideo,
-  resolveTaskPlatforms
+  resolveTaskPlatforms,
+  ensureBridgeReady,
 };

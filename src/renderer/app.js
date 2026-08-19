@@ -3,6 +3,7 @@ import { createDownloadPage } from './app/download-page.js';
 import { createPublishPage } from './app/publish-page.js';
 import { createRemotePage } from './app/remote-page.js';
 import { createUpdatePage } from './app/update-page.js';
+import { createMonitorPage } from './app/monitor-page.js';
 
 /* ── DOM ── */
 const $ = (s) => document.querySelector(s);
@@ -71,6 +72,7 @@ const downloadPage = createDownloadPage({ state: S, toast, esc, injectIcons });
 const publishPage = createPublishPage({ state: S, esc });
 const remotePage = createRemotePage({ toast, injectIcons });
 const updatePage = createUpdatePage({ toast });
+const monitorPage = createMonitorPage({ state: S, esc, toast, injectIcons });
 const initDownloadPage = downloadPage.init;
 const initRemotePage = remotePage.init;
 const initUpdatePage = updatePage.init;
@@ -102,11 +104,12 @@ function switchFeature(feat){
   const btn=$(`.sb-feat[data-feat="${feat}"]`);
   if(view)view.classList.add('active');
   if(btn)btn.classList.add('active');
-  const titles={main:'主控',edit:'剪辑',publish:'发布',download:'下载',remote:'远程','style-ref':'风格参考','subtitle-voice':'字幕与音色',update:'更新',settings:'设置'};
+  const titles={main:'主控',edit:'剪辑',publish:'发布',download:'下载',monitor:'监控',remote:'远程','style-ref':'风格参考','subtitle-voice':'字幕与音色',update:'更新',settings:'设置'};
   if(el.pageTitle)el.pageTitle.textContent=titles[feat]||feat;
   renderStatus();
   if(feat==='subtitle-voice') loadPresetVoices();
   if(feat==='download') initDownloadPage();
+  if(feat==='monitor') monitorPage.bind();
   if(feat==='remote') initRemotePage();
   if(feat==='update') initUpdatePage();
   if(feat==='settings') { fillForm(); checkDeps(); loadModels(); checkVoicebox(); loadApiUsage(); injectIcons(); }
@@ -338,8 +341,11 @@ function renderChat(opts={}){
     push(r.startedAt||r.endedAt,r.id,false,false,txt?`<div class="msg-user">${makeMessageHtml(txt,null)}</div>`:'','',`<div class="task-stack">${dedupeHistoryItems(r.items).map(i=>taskCard(i)).join('')}</div>`);
   }
   // 持久化的主控任务（重新发布状态，重启后保留）
-  const historyIds=new Set((S.history||[]).flatMap(r=>(r.items||[]).map(i=>i.taskId)));
-  const persisted=(S.persistedTasks||[]).filter(t=>!historyIds.has(t.taskId)&&(t.status==='warning'||t.status==='completed'));
+  const historyIds=new Set((S.history||[]).flatMap(r=>(r.items||[]).map(i=>String(i.taskId||i.id||''))));
+  const persisted=(S.persistedTasks||[]).filter(t=>{
+    const tid=String(t.id||t.taskId||'');
+    return tid&&!historyIds.has(tid)&&(t.status==='warning'||t.status==='completed');
+  });
   if(persisted.length){
     const byRun={};
     for(const t of persisted){const key=t.batchRunId||'persisted';if(!byRun[key])byRun[key]={tasks:[],at:t.submittedAt||t.updatedAt,inputText:t.inputText||''};byRun[key].tasks.push(t);}
@@ -1422,11 +1428,7 @@ function showStyleTextDialog() {
   const dlg = document.getElementById('style-text-dialog');
   if (dlg) { document.getElementById('style-text-name').value = ''; document.getElementById('style-text-prompt').value = ''; dlg.showModal(); }
 }
-function showStyleVideoDialog() {
-  const dlg = document.getElementById('style-video-dialog');
-  S._styleVideoFiles = [];
-  if (dlg) { document.getElementById('style-video-name').value = ''; document.getElementById('style-video-files').textContent = '未选择'; dlg.showModal(); }
-}
+
 
 function bindStyleRefEvents() {
   // Style card expand/collapse
@@ -1462,8 +1464,6 @@ function bindStyleRefEvents() {
   });
   // Add text button
   document.getElementById('style-add-text-btn')?.addEventListener('click', showStyleTextDialog);
-  // Add video button
-  document.getElementById('style-add-video-btn')?.addEventListener('click', showStyleVideoDialog);
   // Text dialog save
   document.getElementById('style-text-save-btn')?.addEventListener('click', () => {
     const name = document.getElementById('style-text-name')?.value?.trim();
@@ -1474,49 +1474,6 @@ function bindStyleRefEvents() {
     toast(`已添加: ${name}`, 'success');
   });
   document.getElementById('close-style-text-btn')?.addEventListener('click', () => document.getElementById('style-text-dialog')?.close());
-  // Video dialog pick
-  document.getElementById('style-video-pick-btn')?.addEventListener('click', async () => {
-    try {
-      const files = await window.antbot.pickVideoFiles();
-      if (files && files.length) {
-        S._styleVideoFiles = files;
-        document.getElementById('style-video-files').textContent = files.map(f => f.split(/[/\\]/).pop()).join(', ');
-      }
-    } catch (e) { toast(e.message, 'error'); }
-  });
-  // Video dialog start - actual learning
-  document.getElementById('style-video-start-btn')?.addEventListener('click', async () => {
-    const name = document.getElementById('style-video-name')?.value?.trim();
-    if (!name) { toast('请输入风格名称', 'error'); return; }
-    if (!S._styleVideoFiles?.length) { toast('请先选择视频', 'error'); return; }
-    document.getElementById('style-video-dialog')?.close();
-    // Add a learning card
-    const id = `sty-${++styleIdSeq}`;
-    S.styleRefs.push({ id, name, prompt: '', type: 'video', videoPaths: S._styleVideoFiles, learning: true });
-    renderStyleCards();
-    // Start learning for each video
-    const texts = [];
-    for (const vp of S._styleVideoFiles) {
-      try {
-        const r = await window.antbot.styleLearnFromVideo({ videoPath: vp, name });
-        if (r.ok && r.text) texts.push(r.text);
-      } catch (e) { toast(`学习失败: ${e.message}`, 'error'); }
-    }
-    // Update style ref with result
-    const ref = S.styleRefs.find(s => s.id === id);
-    if (ref) {
-      ref.learning = false;
-      ref.prompt = texts.join('\n\n');
-      if (!ref.prompt) { removeStyleRef(id); toast('学习失败，未识别到文字', 'error'); }
-      else {
-        toast(`学习完成: ${name}`, 'success');
-        // Persist the completed style
-        window.antbot.saveOneStyle(ref).catch(() => {});
-      }
-    }
-    renderStyleCards();
-  });
-  document.getElementById('close-style-video-btn')?.addEventListener('click', () => document.getElementById('style-video-dialog')?.close());
 }
 
 /* ── Model management ── */
@@ -1930,6 +1887,11 @@ function bind(){
   window.addEventListener('resize',syncSidebar);
   // Feature switching
   document.querySelectorAll('.sb-feat').forEach(btn=>{btn.addEventListener('click',()=>switchFeature(btn.dataset.feat))});
+  // Fallback: 直接绑定监控添加按钮（防模块绑定失败）
+  document.getElementById('monitor-add-btn')?.addEventListener('click',()=>{
+    const dlg=document.getElementById('monitor-dialog');
+    if(dlg && !dlg.open){try{dlg.showModal()}catch(e){toast('弹窗错误: '+e.message,'error')}}
+  });
   // Sidebar tab switching (功能/历史)
   document.querySelectorAll('.sb-tab').forEach(tab=>{tab.addEventListener('click',()=>{
     document.querySelectorAll('.sb-tab').forEach(t=>t.classList.remove('active'));tab.classList.add('active');

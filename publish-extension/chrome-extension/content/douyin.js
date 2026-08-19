@@ -1,4 +1,21 @@
-const LOCAL_SERVER_BASE = 'http://localhost:18321';
+const BRIDGE_PORTS = [18321,18322,18323,18324,18325,18326,18327,18328,18329,18330,18331];
+let cachedBridgeBase = null;
+let cachedBridgeAt = 0;
+async function resolveBridgeBase() {
+  if (cachedBridgeBase && Date.now() - cachedBridgeAt < 5000) return cachedBridgeBase;
+  for (const port of BRIDGE_PORTS) {
+    for (const host of ['127.0.0.1','localhost']) {
+      try {
+        const c = new AbortController(); const t=setTimeout(()=>c.abort(), 700);
+        const r = await fetch(`http://${host}:${port}/api/bridge/status`, { signal: c.signal });
+        clearTimeout(t);
+        if (r.ok) { const j=await r.json().catch(()=>({})); if (j && j.ok) { cachedBridgeBase=`http://${host}:${port}`; cachedBridgeAt=Date.now(); return cachedBridgeBase; } }
+      } catch {}
+    }
+  }
+  return cachedBridgeBase || 'http://127.0.0.1:18321';
+}
+async function getLocalServerBase() { return resolveBridgeBase(); }
 /**
  * 抖音发布助手 - Content Script
  * 负责在抖音创作者平台 (creator.douyin.com) 自动发布视频：
@@ -35,10 +52,14 @@ class DouyinPublisher {
     });
 
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      if (message.action === 'startPublish') {
-        this.aborted = false;
-        this.startAbortCheck();
-        this.publishSingleVideo(message.videos[0], message.settings, message.videoPath, message.videoIndex, message.totalVideos)
+       // 避免 iframe 重复响应：仅主 frame 处理
+       if (sender.frameId !== 0 && sender.frameId !== undefined) return;
+       if (message.action === 'startPublish') {
+         // 同步缓存 baseUrl
+         if (message.bridgeBaseUrl) { cachedBridgeBase = message.bridgeBaseUrl; cachedBridgeAt = Date.now(); }
+         this.aborted = false;
+         this.startAbortCheck();
+         this.publishSingleVideo(message.videos[0], message.settings, message.videoPath, message.videoIndex, message.totalVideos)
           .then(() => {
             this.stopAbortCheck();
             if (this.aborted) return;
@@ -284,17 +305,18 @@ class DouyinPublisher {
     return null;
   }
 
-  async getVideoFile(videoPath, videoName, directPath = '') {
-    const fullPath = directPath || (videoPath.endsWith('/') ? `${videoPath}${videoName}` : `${videoPath}/${videoName}`);
-    try {
-      const response = await fetch(`${LOCAL_SERVER_BASE}/api/video/file?path=${encodeURIComponent(fullPath)}`);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      return await response.blob();
-    } catch (error) {
-      console.error('[抖音发布助手] 获取视频文件失败:', error);
-      return null;
-    }
-  }
+   async getVideoFile(videoPath, videoName, directPath = '') {
+     const fullPath = directPath || (videoPath.endsWith('/') ? `${videoPath}${videoName}` : `${videoPath}/${videoName}`);
+     try {
+       const base = await getLocalServerBase();
+       const response = await fetch(`${base}/api/video/file?path=${encodeURIComponent(fullPath)}`);
+       if (!response.ok) throw new Error(`HTTP ${response.status}`);
+       return await response.blob();
+     } catch (error) {
+       console.error('[抖音发布助手] 获取视频文件失败:', error);
+       return null;
+     }
+   }
 
   // ===== AI 内容生成 =====
 

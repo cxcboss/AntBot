@@ -23,6 +23,7 @@ IPC handler 的注册中心。核心逻辑委托给 `ipc/` 子模块，本文件
 | `ipc/remote.js` | ~169 | `remote:*`, `open-dir`, `open-plugin-dir` | 远程控制服务器、Cloudflare 隧道、凭证管理 |
 | `ipc/edit.js` | ~150 | `edit:*`, `history:get` | 剪辑调度器（EditScheduler 实例化、任务 CRUD） |
 | `ipc/download.js` | ~111 | `download:*` | 下载管理器（DownloadManager 实例化、yt-dlp） |
+| `ipc/monitor.js` | ~40 | `monitor:*` | YouTube 博主监控 CRUD、立即检查、启停 |
 | `ipc/updates.js` | ~53 | `update:*`, `app:quit` | App/插件更新、退出 |
 
 ## 核心设计
@@ -36,6 +37,7 @@ IPC handler 的注册中心。核心逻辑委托给 `ipc/` 子模块，本文件
 
 - `editScheduler` 由 `ipc/edit.js` 创建，返回给 `ipc.js` 用于 cleanup
 - `downloadManager` 由 `ipc/download.js` 创建，返回给 `ipc.js` 用于 cleanup
+- `monitorService` 由 `ipc/monitor.js` 注册并在 App 启动时加载 `~/AntBot/monitors.json`；退出时清理定时器
 - `cleanup()` 在 App 退出时调用：关闭 managed children、shutdown editScheduler、cleanup downloadManager
 
 ## 对接

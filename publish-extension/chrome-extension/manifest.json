@@ -8,17 +8,20 @@
     "storage",
     "scripting",
     "tabs",
+    "cookies",
     "nativeMessaging",
     "webRequest",
     "debugger",
     "sidePanel",
-    "alarms"
+    "alarms",
+    "offscreen"
   ],
   "host_permissions": [
     "https://creator.douyin.com/*",
     "https://channels.weixin.qq.com/*",
     "https://open.weixin.qq.com/*",
-    "http://localhost:18321/*",
+    "http://localhost:*/*",
+    "http://127.0.0.1:*/*",
     "https://api.xiaomi.com/*",
     "https://api.xiaomimimo.com/*",
     "https://api.openai.com/*",

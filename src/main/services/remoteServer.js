@@ -154,12 +154,17 @@ async function getVoiceboxStatus() {
 
 async function getServicesStatus() {
   const tunnel = (() => { try { return require('./tunnelManager').getStatus(); } catch { return { running: false }; } })();
+  let bridgePort = 18321;
+  try {
+    const { readStoredPort } = require('./bridgeServiceManager');
+    bridgePort = readStoredPort() || 18321;
+  } catch {}
   const [api, bridge, voicebox, remote] = await Promise.all([
-    checkPortOpen(18930), checkPortOpen(18321), getVoiceboxStatus(), checkPortOpen(_remotePort),
+    checkPortOpen(18930), checkPortOpen(bridgePort), getVoiceboxStatus(), checkPortOpen(_remotePort),
   ]);
   return {
     api: { name: '本地 API', port: 18930, running: api },
-    bridge: { name: '桥接服务', port: 18321, running: bridge },
+    bridge: { name: '桥接服务', port: bridgePort, running: bridge },
     voicebox: { name: '配音引擎', port: 17493, running: voicebox.running },
     remote: { name: '远程服务', port: _remotePort, running: remote },
     tunnel: { name: '隧道', port: null, running: Boolean(tunnel.running), url: tunnel.url || null },
@@ -554,10 +559,49 @@ function startRemoteServer({ store, taskRunner, mainWindowRef, appLog }) {
       // GET /remote/voices — 读取音色列表
       if (method === 'GET' && pathname === '/remote/voices') {
         try {
-          const dataDir = path.join(os.homedir(), 'AntBot');
-          const raw = await fs.readFile(path.join(dataDir, 'voices.json'), 'utf-8');
-          return sendJson(res, 200, { ok: true, voices: JSON.parse(raw) });
-        } catch { return sendJson(res, 200, { ok: true, voices: [] }); }
+          const settings = _store ? await _store.getSettings() : null;
+          const dataDir = settings?.dataDir || path.join(os.homedir(), 'AntBot');
+          let cloneVoices = [];
+          try {
+            const raw = await fs.readFile(path.join(dataDir, 'voices.json'), 'utf-8');
+            const parsed = JSON.parse(raw);
+            cloneVoices = Array.isArray(parsed) ? parsed : [];
+          } catch {}
+
+          // 与 App 端一致：voicebox 在线时只展示后端真实存在的克隆档案。
+          let profileTimer = null;
+          try {
+            const controller = new AbortController();
+            profileTimer = setTimeout(() => controller.abort(), 3000);
+            const response = await fetch('http://127.0.0.1:17493/profiles', { signal: controller.signal });
+            clearTimeout(profileTimer);
+            profileTimer = null;
+            if (response.ok) {
+              const profiles = await response.json();
+              const ids = new Set((Array.isArray(profiles) ? profiles : []).map(profile => profile.id));
+              cloneVoices = cloneVoices.filter(voice => ids.has(voice.id));
+            }
+          } catch {
+            if (profileTimer) clearTimeout(profileTimer);
+          }
+
+          // App 的 voices:list 会合并内置 Azure 音色；远程页也必须使用同一份完整列表。
+          const { getAzureVoices } = require('./azureTts');
+          const voices = [
+            ...getAzureVoices(),
+            ...cloneVoices
+              .filter(v => v && v.id && v.name)
+              .map(v => ({ id: v.id, name: v.name, source: 'clone' }))
+          ];
+          return sendJson(res, 200, { ok: true, voices });
+        } catch {
+          try {
+            const { getAzureVoices } = require('./azureTts');
+            return sendJson(res, 200, { ok: true, voices: getAzureVoices() });
+          } catch {
+            return sendJson(res, 200, { ok: true, voices: [] });
+          }
+        }
       }
 
       // GET /remote/styles — 读取风格列表
@@ -601,6 +645,42 @@ function startRemoteServer({ store, taskRunner, mainWindowRef, appLog }) {
           const bridge = createBrowserPublishBridge({ baseUrl: config.baseUrl, timeoutMs: 30000 });
           const result = await bridge.selectAccount({ platform, accountIndex });
           return sendJson(res, 200, { ok: true, ...result });
+        } catch (error) {
+          return sendJson(res, 200, { ok: false, error: error.message });
+        }
+      }
+
+      // POST /remote/platform-logout — 退出平台登录（清 cookies + 通知插件）
+      if (method === 'POST' && pathname === '/remote/platform-logout') {
+        const body = await readBody(req, res);
+        const platform = body?.platform || 'weixin';
+        try {
+          // 清理本地 cookies 文件（YouTube/Douyin）
+          const targetPlatform = platform === 'weixin' ? 'videoChannel' : platform;
+          try {
+            const cookiesDir = path.join(os.homedir(), 'AntBot', 'cookies');
+            const files = await fs.readdir(cookiesDir).catch(() => []);
+            for (const f of files) {
+              if ((targetPlatform === 'douyin' && f.includes('douyin')) || (platform === 'youtube' && f.includes('youtube')) || f.includes(platform)) {
+                await fs.unlink(path.join(cookiesDir, f)).catch(() => {});
+              }
+            }
+            // 兼容旧路径
+            const legacy = path.join(os.homedir(), 'AntBot', 'cookies', `${platform}.txt`);
+            await fs.unlink(legacy).catch(() => {});
+          } catch {}
+          // 尝试通过桥接让浏览器清除 cookies（若插件在线）
+          try {
+            const { createBrowserPublishBridge } = require('./browserPublishBridge');
+            const settings = await _store.getSettings();
+            const config = settings.publish?.browserExtension || {};
+            if (config.enabled) {
+              const bridge = createBrowserPublishBridge({ baseUrl: config.baseUrl, timeoutMs: 15000 });
+              // 发送 logout 指令，插件侧会用 chrome.cookies 清理
+              await bridge.invoke('platform.logout', { platform }).catch(() => {});
+            }
+          } catch {}
+          return sendJson(res, 200, { ok: true });
         } catch (error) {
           return sendJson(res, 200, { ok: false, error: error.message });
         }

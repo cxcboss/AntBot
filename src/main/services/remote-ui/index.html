@@ -408,6 +408,21 @@ input[type=number]::-webkit-inner-spin-button{opacity:1}
   .status-grid{grid-template-columns:repeat(2,1fr)}
 }
 
+/* ── 平台卡片 / 状态页 优化 ── */
+.platform-card{transition:border-color var(--transition-fast),box-shadow var(--transition-fast)}
+.platform-card:hover{border-color:var(--muted-foreground);box-shadow:var(--shadow-xs)}
+.platform-card-header{margin-bottom:var(--space-2)}
+.status-item{transition:border-color var(--transition-fast)}
+.status-item:hover{border-color:var(--muted-foreground)}
+.card{transition:border-color var(--transition-fast)}
+.card:hover{border-color:color-mix(in srgb,var(--border) 60%,var(--muted-foreground))}
+
+/* 芯片弹窗在移动端底部输入条适配 */
+@media(max-width:767px){
+  .chip-popup{max-width:calc(100vw - 16px);left:8px!important;right:8px!important;width:auto}
+  .input-bar{padding-bottom:calc(var(--space-3) + env(safe-area-inset-bottom))}
+}
+
 /* ── 响应式：桌面（≥768px） ── */
 @media(min-width:768px){
   .header{height:var(--header-h);padding:0 var(--space-4)}
@@ -425,7 +440,7 @@ input[type=number]::-webkit-inner-spin-button{opacity:1}
 <div id="app"></div>
 <script>
 const HUB_URL='https://hub.onebugmanai.online';
-const APP_VERSION='1.9.1';
+const APP_VERSION='1.9.3';
 let API=window.location.origin;
 let token=localStorage.getItem('antbot-token');
 let tasks=[];
@@ -679,43 +694,47 @@ function renderAppShell(){
         <button class="nav-item" data-page="login">${ICON_LOCK}<span>平台登录</span></button>
         <button class="nav-item" data-page="status">${ICON_STAT}<span>状态</span></button>
       </nav>
-      <div class="sidebar-version" id="sidebar-version">v1.9.0</div>
+      <div class="sidebar-version" id="sidebar-version">v${APP_VERSION}</div>
     </aside>
     <div class="content">
       <div class="page active" id="page-main">
         <div class="chat" id="chat"><div class="chat-stream" id="chat-stream"><div class="empty" id="empty-state"><div class="empty-icon">📋</div><div>粘贴视频链接开始下载</div></div></div></div>
       </div>
       <div class="page" id="page-subtitle">
-        <div class="form-group"><label class="form-label">字幕颜色</label>
-          <div class="palette-preview" id="color-preview" data-for="color"></div>
-          <div class="palette-swatches" id="color-swatches"></div>
-          <div class="palette-row">
-            <input type="color" id="color-native" value="#FFA100"/>
-            <span class="palette-hex" id="color-hex">#FFA100</span>
-            <span class="palette-tip">点击右侧色块可自定义</span>
+        <div class="section-title">字幕设置</div>
+        <div class="card" style="padding:var(--space-4);margin-bottom:var(--space-3)">
+          <div class="form-group">
+            <label class="form-label">文字颜色</label>
+            <div class="palette-preview" id="color-preview" data-for="color" style="height:36px;border-radius:var(--radius);border:1px solid var(--border);margin-bottom:var(--space-3)"></div>
+            <div class="palette-row">
+              <input type="color" id="color-native" value="#FFA100" style="width:56px;height:36px;border-radius:var(--radius);border:1px solid var(--border);padding:2px;background:var(--card)"/>
+              <div style="flex:1">
+                <div class="palette-hex" id="color-hex" style="font-family:var(--font-mono);font-size:13px;font-weight:600">#FFA100</div>
+                <div style="font-size:11px;color:var(--muted-foreground)">点击色块自定义颜色</div>
+              </div>
+              <button class="btn btn-ghost btn-sm" type="button" onclick="document.getElementById('color-native').click()">选择</button>
+            </div>
           </div>
-          <details class="palette-advanced">
-            <summary>高级：HSL 调节</summary>
-            <div class="slider-row"><span class="slider-label">色相</span><input type="range" id="color-h" min="0" max="360" value="30" class="slider-h"><span class="slider-val" id="color-h-val">30°</span></div>
-            <div class="slider-row"><span class="slider-label">饱和</span><input type="range" id="color-s" min="0" max="100" value="100" class="slider-s"><span class="slider-val" id="color-s-val">100%</span></div>
-            <div class="slider-row"><span class="slider-label">亮度</span><input type="range" id="color-l" min="0" max="100" value="50" class="slider-l"><span class="slider-val" id="color-l-val">50%</span></div>
-          </details>
-        </div>
-        <div class="form-group"><label class="form-label">描边颜色</label>
-          <div class="palette-preview" id="stroke-preview" data-for="stroke"></div>
-          <div class="palette-swatches" id="stroke-swatches"></div>
-          <div class="palette-row">
-            <input type="color" id="stroke-native" value="#000000"/>
-            <span class="palette-hex" id="stroke-hex">#000000</span>
+          <div class="form-group" style="margin-bottom:0">
+            <label class="form-label">描边颜色</label>
+            <div class="palette-preview" id="stroke-preview" data-for="stroke" style="height:36px;border-radius:var(--radius);border:1px solid var(--border);margin-bottom:var(--space-3)"></div>
+            <div class="palette-row">
+              <input type="color" id="stroke-native" value="#000000" style="width:56px;height:36px;border-radius:var(--radius);border:1px solid var(--border);padding:2px;background:var(--card)"/>
+              <div style="flex:1">
+                <div class="palette-hex" id="stroke-hex" style="font-family:var(--font-mono);font-size:13px;font-weight:600">#000000</div>
+                <div style="font-size:11px;color:var(--muted-foreground)">点击色块自定义颜色</div>
+              </div>
+              <button class="btn btn-ghost btn-sm" type="button" onclick="document.getElementById('stroke-native').click()">选择</button>
+            </div>
           </div>
-          <details class="palette-advanced">
-            <summary>高级：HSL 调节</summary>
-            <div class="slider-row"><span class="slider-label">色相</span><input type="range" id="stroke-h" min="0" max="360" value="0" class="slider-h"><span class="slider-val" id="stroke-h-val">0°</span></div>
-            <div class="slider-row"><span class="slider-label">饱和</span><input type="range" id="stroke-s" min="0" max="100" value="0" class="slider-s"><span class="slider-val" id="stroke-s-val">0%</span></div>
-            <div class="slider-row"><span class="slider-label">亮度</span><input type="range" id="stroke-l" min="0" max="100" value="0" class="slider-l"><span class="slider-val" id="stroke-l-val">0%</span></div>
-          </details>
         </div>
-        <div class="form-group"><label class="form-label">字幕位置 (0-100)</label><input class="form-input" id="sub-position" type="number" min="0" max="100" value="12"></div>
+        <div class="card" style="padding:var(--space-4);margin-bottom:var(--space-3)">
+          <div class="form-group" style="margin-bottom:0">
+            <label class="form-label">字幕位置 (0-100) — 数值越大越靠上</label>
+            <input class="form-input" id="sub-position" type="number" min="0" max="100" value="12">
+            <div style="font-size:11px;color:var(--muted-foreground);margin-top:6px">建议 10-15 居底部，30-50 居中</div>
+          </div>
+        </div>
         <button class="btn btn-primary btn-block" id="sub-save-btn" type="button">保存设置</button>
       </div>
       <div class="page" id="page-remote">
@@ -727,12 +746,18 @@ function renderAppShell(){
         <div class="section-title">平台登录</div>
         <div class="platform-card" id="login-douyin">
           <div class="platform-card-header"><span class="platform-name">抖音</span><span class="badge badge-checking" id="login-status-douyin">未检测</span></div>
-          <button class="btn btn-sm btn-primary login-check-btn" data-platform="douyin" type="button" style="width:100%">检测登录</button>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-sm btn-primary login-check-btn" data-platform="douyin" type="button" style="flex:1">检测登录</button>
+            <button class="btn btn-sm btn-ghost login-logout-btn" data-platform="douyin" type="button">退出登录</button>
+          </div>
           <div class="platform-qr" id="login-qr-douyin"></div>
         </div>
         <div class="platform-card" id="login-weixin">
           <div class="platform-card-header"><span class="platform-name">视频号</span><span class="badge badge-checking" id="login-status-weixin">未检测</span></div>
-          <button class="btn btn-sm btn-primary login-check-btn" data-platform="weixin" type="button" style="width:100%">检测登录</button>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-sm btn-primary login-check-btn" data-platform="weixin" type="button" style="flex:1">检测登录</button>
+            <button class="btn btn-sm btn-ghost login-logout-btn" data-platform="weixin" type="button">退出登录</button>
+          </div>
           <div class="platform-qr" id="login-qr-weixin"></div>
         </div>
         <div class="login-tip" id="login-tip" style="display:none">请使用对应平台 APP 扫描二维码登录，登录成功后状态会自动更新</div>
@@ -851,6 +876,9 @@ function bindEvents(){
   document.querySelectorAll('.login-check-btn').forEach(btn=>{
     btn.addEventListener('click',()=>checkPlatformLogin(btn.dataset.platform));
   });
+  document.querySelectorAll('.login-logout-btn').forEach(btn=>{
+    btn.addEventListener('click',()=>logoutPlatform(btn.dataset.platform, btn));
+  });
   document.getElementById('qr-overlay')?.addEventListener('click',e=>{if(e.target.id==='qr-overlay')hideQrOverlay();});
   document.getElementById('qr-close-btn')?.addEventListener('click',hideQrOverlay);
   document.getElementById('qr-save-btn')?.addEventListener('click',()=>{const img=document.getElementById('qr-overlay-img');if(img?.src)saveQrImage(img.src);});
@@ -899,20 +927,48 @@ function renderChips(s){
 
 // ── Chip 弹窗（与 App 对齐：音色分类折叠 / 风格列表 / 更多开关 / 滑块） ──
 let activeChipPopup=null;
-function closeChipPopup(){if(activeChipPopup){activeChipPopup.remove();activeChipPopup=null}}
+let activeChipAnchor=null;
+let activeChipDismiss=null;
+function closeChipPopup(){
+  if(activeChipDismiss){document.removeEventListener('mousedown',activeChipDismiss);activeChipDismiss=null}
+  if(activeChipPopup){activeChipPopup.remove();activeChipPopup=null;activeChipAnchor=null}
+}
 function positionChipPopup(popup,anchor){
   document.body.appendChild(popup);
+  activeChipPopup=popup;activeChipAnchor=anchor;
+  repositionChipPopup();
+  activeChipDismiss=e=>{if(!e.target.closest('.chip-popup')&&!e.target.closest('.chip'))closeChipPopup()};
+  setTimeout(()=>{if(activeChipDismiss)document.addEventListener('mousedown',activeChipDismiss)},0);
+}
+function repositionChipPopup(){
+  const popup=activeChipPopup,anchor=activeChipAnchor;
+  if(!popup||!anchor) return;
   const rect=anchor.getBoundingClientRect();
+  const vw=window.innerWidth,vh=window.innerHeight;
+  // 先限制最大高度为可视区上方/下方可用空间
+  const spaceAbove=rect.top-12;
+  const spaceBelow=vh-rect.bottom-12;
+  const preferAbove=spaceAbove>120;
+  const available=preferAbove?spaceAbove:spaceBelow;
+  const maxH=Math.min(320,Math.max(96,available-8));
+  popup.style.maxHeight=maxH+'px';
+  popup.style.overflowY='auto';
+  // 测量真实宽高（受 maxHeight 限制后）
   const pw=popup.offsetWidth,ph=popup.offsetHeight;
   let left=rect.left+rect.width/2-pw/2;
-  let top=rect.top-ph-8;
-  if(left<8)left=8;if(left+pw>window.innerWidth-8)left=window.innerWidth-pw-8;
-  if(top<8)top=rect.bottom+8;
+  let top;
+  if(preferAbove){
+    top=rect.top-ph-8;
+    if(top<8) top=8;
+  }else{
+    top=rect.bottom+8;
+    if(top+ph>vh-8) top=Math.max(8,vh-ph-8);
+  }
+  if(left<8)left=8;if(left+pw>vw-8)left=vw-pw-8;
   popup.style.left=left+'px';popup.style.top=top+'px';
-  activeChipPopup=popup;
-  setTimeout(()=>document.addEventListener('mousedown',dismissOnce),0);
-  function dismissOnce(e){if(!e.target.closest('.chip-popup')&&!e.target.closest('.chip')){closeChipPopup();document.removeEventListener('mousedown',dismissOnce)}}
 }
+window.addEventListener('resize',()=>{if(activeChipPopup)repositionChipPopup()});
+window.addEventListener('scroll',()=>{if(activeChipPopup)repositionChipPopup()},true);
 
 function showChipPopup(type,anchor){
   closeChipPopup();
@@ -930,16 +986,18 @@ function showChipPopup(type,anchor){
         if(!items.length)return '';
         const open=activeSource===src?' open':'';
         const collapsed=open?'':' style="display:none"';
-        return '<div class="style-section" data-section="'+src+'"><span class="style-section-arrow'+open+'">▶</span>'+esc(label)+'</div><div class="style-section-items"'+collapsed+'>'+items.map(v=>'<div class="style-item'+(v.name===cur?' active':'')+'" data-vname="'+esc(v.name)+'" data-vid="'+esc(v.id||'')+'">'+esc(v.name)+'</div>').join('')+'</div>';
+        return '<div class="style-section" data-section="'+src+'"><span class="style-section-arrow'+open+'" data-arrow>▶</span>'+esc(label)+'</div><div class="style-section-items"'+collapsed+'>'+items.map(v=>'<div class="style-item'+(v.name===cur?' active':'')+'" data-vname="'+esc(v.name)+'" data-vid="'+esc(v.id||'')+'">'+esc(v.name)+'</div>').join('')+'</div>';
       };
       popup.innerHTML='<div class="style-list">'+renderSection('内置音色（Azure TTS）',azure,'azure')+renderSection('克隆音色',clone,'clone')+'</div>';
+      if(activeChipPopup===popup)repositionChipPopup();
       popup.querySelectorAll('.style-section').forEach(section=>{
         section.addEventListener('click',(e)=>{
           e.stopPropagation();
           const items=section.nextElementSibling;
           if(!items||!items.classList.contains('style-section-items'))return;
           const arrow=section.querySelector('[data-arrow]');
-          if(items.style.display==='none'){items.style.display='';arrow.classList.add('open');}else{items.style.display='none';arrow.classList.remove('open');}
+           if(items.style.display==='none'){items.style.display='';arrow.classList.add('open');}else{items.style.display='none';arrow.classList.remove('open');}
+          if(activeChipPopup===popup)repositionChipPopup();
         });
       });
       popup.querySelectorAll('.style-item').forEach(item=>{
@@ -967,6 +1025,7 @@ function showChipPopup(type,anchor){
       if(!styles.length){popup.innerHTML='<div class="dialog-empty">暂无风格，请先在App中学习</div>';return;}
       const cur=currentSettings?.editDefaults?.style||'';
       popup.innerHTML='<ul class="style-list">'+styles.map(s=>'<li class="style-item'+(s.name===cur?' active':'')+'" data-val="'+esc(s.name)+'">'+esc(s.name)+'</li>').join('')+'</ul>';
+      if(activeChipPopup===popup)repositionChipPopup();
       popup.querySelectorAll('.style-item').forEach(item=>{
         item.addEventListener('click',async()=>{
           const val=item.dataset.val;
@@ -1163,44 +1222,50 @@ async function selectWeixinAccount(index){
   }
 }
 
-function hslToHex(h,s,l){s/=100;l/=100;const a=s*Math.min(l,1-l);const f=n=>{const k=(n+h/30)%12;const c=l-a*Math.max(Math.min(k-3,9-k,1),-1);return Math.round(255*c).toString(16).padStart(2,'0')};return '#'+f(0)+f(8)+f(4)}
-function hexToHsl(hex){hex=hex.replace('#','');if(hex.length===3)hex=hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];const r=parseInt(hex.substring(0,2),16)/255,g=parseInt(hex.substring(2,4),16)/255,b=parseInt(hex.substring(4,6),16)/255;const mx=Math.max(r,g,b),mn=Math.min(r,g,b);let h=0,s=0,l=(mx+mn)/2;if(mx!==mn){const d=mx-mn;s=l>.5?d/(2-mx-mn):d/(mx+mn);if(mx===r)h=((g-b)/d+(g<b?6:0))/6;else if(mx===g)h=((b-r)/d+2)/6;else h=((r-g)/d+4)/6}return{h:Math.round(h*360),s:Math.round(s*100),l:Math.round(l*100)}}
-const PALETTE_COLORS=['#FFA100','#FF3B30','#FF9500','#FFCC00','#34C759','#00C7BE','#32ADE6','#007AFF','#5856D6','#AF52DE','#FF2D55','#8E8E93','#3A3A3C','#FFFFFF','#000000'];
+async function logoutPlatform(platform, btn){
+  const statusEl=document.getElementById('login-status-'+platform);
+  const qrEl=document.getElementById('login-qr-'+platform);
+  const tipEl=document.getElementById('login-tip');
+  if(!confirm('确定退出 '+ (platform==='weixin'?'视频号':'抖音') +' 登录？退出后需重新扫码')) return;
+  if(btn){btn.disabled=true;btn.textContent='退出中...';}
+  if(statusEl){statusEl.textContent='退出中...';statusEl.className='badge badge-checking';}
+  try{
+    const r=await api('POST','/remote/platform-logout',{platform});
+    if(r?.ok===false){showToast(r.error||'退出失败');}
+    else {showToast('已退出，可重新扫码登录');}
+    // 清空二维码区，重置状态
+    if(qrEl) qrEl.innerHTML='<div class="qr-tip">已退出登录，点击“检测登录”重新扫码</div>';
+    if(statusEl){statusEl.textContent='未登录';statusEl.className='badge badge-fail';}
+    if(tipEl) tipEl.style.display='none';
+  }catch(e){
+    showToast('退出失败: '+e.message);
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent='退出登录';}
+    if(statusEl && statusEl.textContent==='退出中...'){statusEl.textContent='未检测';statusEl.className='badge badge-checking';}
+  }
+}
+
 function getColorHex(p){
   const native=document.getElementById(p+'-native');
-  if(native&&native.value)return native.value;
-  const h=parseInt(document.getElementById(p+'-h')?.value||0),s=parseInt(document.getElementById(p+'-s')?.value||0),l=parseInt(document.getElementById(p+'-l')?.value||50);return hslToHex(h,s,l)
+  if(native&&native.value) return native.value;
+  return '#000000';
 }
 function setColorFromHex(p,hex){
-  if(!hex)hex='#000000';
-  const native=document.getElementById(p+'-native');if(native)native.value=hex;
-  const hexEl=document.getElementById(p+'-hex');if(hexEl)hexEl.textContent=hex;
-  const c=hexToHsl(hex);['h','s','l'].forEach(t=>{const el=document.getElementById(p+'-'+t);if(el){el.value=c[t];const v=document.getElementById(p+'-'+t+'-val');if(v)v.textContent=c[t]+(t==='h'?'°':'%')}});
+  if(!hex) hex='#000000';
+  if(!/^#[0-9A-Fa-f]{6}$/.test(hex)){
+    // 转 3 位 hex
+    if(/^#[0-9A-Fa-f]{3}$/.test(hex)) hex='#'+hex[1]+hex[1]+hex[2]+hex[2]+hex[3]+hex[3];
+    else hex='#000000';
+  }
+  const native=document.getElementById(p+'-native'); if(native) native.value=hex;
+  const hexEl=document.getElementById(p+'-hex'); if(hexEl) hexEl.textContent=hex.toUpperCase();
   updatePreview(p);
-  const sw=document.querySelectorAll('#'+p+'-swatches .swatch');
-  sw.forEach(s=>s.classList.toggle('active',(s.dataset.color||'').toLowerCase()===hex.toLowerCase()));
 }
-function updatePreview(p){const hex=getColorHex(p);const el=document.getElementById(p+'-preview');if(el)el.style.background=hex}
+function updatePreview(p){ const hex=getColorHex(p); const el=document.getElementById(p+'-preview'); if(el) el.style.background=hex; }
 function setupColorPicker(p,def){
   setColorFromHex(p,def);
-  const sw=document.getElementById(p+'-swatches');
-  if(sw){
-    sw.innerHTML=PALETTE_COLORS.map(c=>'<button class="swatch" type="button" data-color="'+c+'" style="background:'+c+'" title="'+c+'"></button>').join('');
-    sw.querySelectorAll('.swatch').forEach(b=>{
-      b.addEventListener('click',()=>{setColorFromHex(p,b.dataset.color);showToast(b.dataset.color)});
-    });
-  }
   const native=document.getElementById(p+'-native');
-  if(native)native.addEventListener('input',()=>{setColorFromHex(p,native.value)});
-  ['h','s','l'].forEach(t=>{const el=document.getElementById(p+'-'+t);if(el)el.addEventListener('input',()=>{
-    const v=document.getElementById(p+'-'+t+'-val');if(v)v.textContent=el.value+(t==='h'?'°':'%');
-    const hex=hslToHex(parseInt(document.getElementById(p+'-h')?.value||0),parseInt(document.getElementById(p+'-s')?.value||0),parseInt(document.getElementById(p+'-l')?.value||50));
-    const native=document.getElementById(p+'-native');if(native)native.value=hex;
-    const hexEl=document.getElementById(p+'-hex');if(hexEl)hexEl.textContent=hex;
-    updatePreview(p);
-    const sw=document.querySelectorAll('#'+p+'-swatches .swatch');
-    sw.forEach(s=>s.classList.toggle('active',(s.dataset.color||'').toLowerCase()===hex.toLowerCase()));
-  })});
+  if(native) native.addEventListener('input',()=>{ setColorFromHex(p,native.value); });
 }
 
 async function loadSystemStatus(){
@@ -1343,6 +1408,61 @@ function rulesFromItem(t){
   };
 }
 
+// 同一任务可能同时来自实时状态、持久化状态和历史记录；不同版本的数据字段也不完全一致。
+function taskIdentityParts(item){
+  const snap=item&&item.taskSnapshot||{};
+  return [item&&item.taskId,snap.id,snap.taskId,item&&item.id]
+    .map(v=>String(v==null?'':v).trim()).filter(Boolean);
+}
+
+function taskIdentity(item){
+  return taskIdentityParts(item)[0]||'';
+}
+
+function taskItemAttempt(item){
+  const values=[item&&item.attempt,item&&item.retryCount,item&&item.taskSnapshot&&item.taskSnapshot.retryCount];
+  for(const value of values){
+    const n=Number(value);
+    if(Number.isFinite(n)&&n>0)return n;
+  }
+  return 0;
+}
+
+function taskItemTime(item){
+  const value=item&&(item.finishedAt||item.updatedAt||item.endedAt||item.createdAt);
+  const time=Date.parse(value||'');
+  return Number.isFinite(time)?time:0;
+}
+
+function shouldKeepTaskItem(candidate,current){
+  const attempt=taskItemAttempt(candidate),previousAttempt=taskItemAttempt(current);
+  if(attempt!==previousAttempt)return attempt>previousAttempt;
+  const time=taskItemTime(candidate),previousTime=taskItemTime(current);
+  if(time!==previousTime)return time>=previousTime;
+  return Boolean(candidate&&candidate.outputPath)||!Boolean(current&&current.outputPath);
+}
+
+function dedupeTaskItems(items){
+  const result=[];
+  const indexes=new Map();
+  (Array.isArray(items)?items:[]).forEach(item=>{
+    const key=taskIdentity(item);
+    if(!key){result.push(item);return;}
+    const index=indexes.get(key);
+    if(index===undefined){indexes.set(key,result.length);result.push(item);return;}
+    if(shouldKeepTaskItem(item,result[index]))result[index]=item;
+  });
+  return result;
+}
+
+function taskIdsOverlap(item,ids){
+  return taskIdentityParts(item).some(id=>ids.has(id));
+}
+
+function isTerminalTaskStatus(status){
+  return ['completed','warning','failed','stopped','cancelled','canceled'].includes(String(status||''));
+}
+
 function formatMsgText(raw){
   if(!raw)return'';
   const lines=String(raw).split(/\r?\n/).filter(l=>l.trim());
@@ -1456,22 +1576,46 @@ function renderTimeline(){
   const el=document.getElementById('chat-stream'),empty=document.getElementById('empty-state');
   if(!el)return;
 
+  const liveItems=dedupeTaskItems(tasks);
+
+  // 历史按时间倒序处理，同一任务跨 run 重复时保留最新的一份。
+  const historySeenIds=new Set();
+  const historyGroups=historyRecords
+    .map(r=>({txt:r.inputText||'',items:dedupeTaskItems(r.items||[]),at:r.startedAt||r.endedAt||''}))
+    .map(g=>({
+      ...g,
+      items:g.items.filter(item=>{
+        const ids=taskIdentityParts(item);
+        if(!ids.length)return true;
+        if(ids.some(id=>historySeenIds.has(id)))return false;
+        ids.forEach(id=>historySeenIds.add(id));
+        return true;
+      })
+    }))
+    .filter(g=>g.items.length||g.txt);
+
+  // 终态任务以历史记录为准（历史包含完整规则和最终 attempt），避免实时状态再渲染一张。
+  const visibleLiveItems=liveItems.filter(item=>{
+    return !(isTerminalTaskStatus(item.status)&&taskIdsOverlap(item,historySeenIds));
+  });
+  const visibleLiveIds=new Set(visibleLiveItems.flatMap(taskIdentityParts));
+
   // live 任务按 batchRunId 分组（与 App 对齐）
-  const liveIds=new Set(tasks.map(t=>t.id));
   const liveGroups=new Map();
-  tasks.forEach(t=>{
-    const g=String(t.batchRunId||t.id);
+  visibleLiveItems.forEach(t=>{
+    const g=String(t.batchRunId||taskIdentity(t)||t.id);
     if(!liveGroups.has(g))liveGroups.set(g,{tasks:[],at:t.enqueuedAt||t.updatedAt||new Date().toISOString(),rules:null});
     liveGroups.get(g).tasks.push(t);
   });
   liveGroups.forEach(g=>{g.tasks.sort((a,b)=>(a.index||a.queueIndex||0)-(b.index||b.queueIndex||0));});
 
-  // 历史按 runRecord 分组（保留消息文本 + 规则）
-  const historyGroups=historyRecords
-    .map(r=>({txt:r.inputText||'',items:(r.items||[]).filter(i=>!liveIds.has(i.id||i.taskId)),at:r.startedAt||r.endedAt||''}))
-    .filter(g=>g.items.length||g.txt);
+  // 运行中的实时卡片优先；只有实时状态仍在展示时，才从历史组中移除同一任务。
+  const visibleHistoryGroups=historyGroups.map(g=>({
+    ...g,
+    items:g.items.filter(item=>!taskIdsOverlap(item,visibleLiveIds))
+  })).filter(g=>g.items.length||g.txt);
 
-  if(!liveGroups.size&&!historyGroups.length){if(empty)empty.style.display='';return}
+  if(!liveGroups.size&&!visibleHistoryGroups.length){if(empty)empty.style.display='';return}
   if(empty)empty.style.display='none';
 
   const parts=[];let day='';
@@ -1483,9 +1627,9 @@ function renderTimeline(){
       tasksHtml+'</div>');
   };
 
-  historyGroups.forEach(g=>{
+  visibleHistoryGroups.forEach(g=>{
     const rulesItems=g.items.map(rulesFromItem).filter(x=>x.platforms.length||x.isOriginal||x.campaignName||x.publishAt);
-    group(g.at,g.txt,rulesItems.length?{items:g.items}:null,'<div class="task-stack">'+g.items.map(i=>taskCard({...i,id:i.taskId||i.id,history:true},false)).join('')+'</div>');
+    group(g.at,g.txt,rulesItems.length?{items:g.items}:null,'<div class="task-stack">'+g.items.map(i=>taskCard({...i,id:taskIdentity(i)||i.id||i.taskId,history:true},false)).join('')+'</div>');
   });
 
   liveGroups.forEach(g=>{

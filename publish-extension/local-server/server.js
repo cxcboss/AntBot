@@ -33,25 +33,41 @@ function bridgeCommandView(commandId) {
   };
 }
 
-app.use(cors());
+app.use(cors({
+  origin: [/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/, /^http:\/\/\[::1\](:\d+)?$/],
+  credentials: false,
+}));
 app.use(express.json({ limit: '1mb' }));
 
 // ── 本地服务安全：仅限本机访问（防止 Windows 防火墙弹窗 + 局域网任意访问）──
+// 使用 remoteAddress 而非 Host 头（Host 可伪造），兼容 IPv4/IPv6 本机
 app.use((req, res, next) => {
-  const host = String(req.headers.host || '');
-  const isLocal = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(host);
-  if (!isLocal) {
-    return res.status(403).json({ error: '仅允许本机访问' });
+  const remote = String(req.socket.remoteAddress || '');
+  const isLoopback = remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1' || remote.endsWith('127.0.0.1');
+  if (!isLoopback) {
+    // 兼容 Host 头兜底（某些代理场景 remoteAddress 可能为 ::ffff），同时防局域网
+    const host = String(req.headers.host || '');
+    const isLocalHost = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(host);
+    if (!isLocalHost) {
+      return res.status(403).json({ error: '仅允许本机访问' });
+    }
   }
   next();
 });
 
 // 路径归一化校验：拒绝包含路径穿越（..）的路径，防任意文件读取
+// 支持 Windows 盘符与编码穿越，解码后校验
 function normalizeRequestedPath(rawPath) {
   if (typeof rawPath !== 'string' || !rawPath) return '';
-  const resolved = path.normalize(rawPath);
+  let decoded = rawPath;
+  try { decoded = decodeURIComponent(rawPath); } catch {}
+  // 统一分隔符，拒绝空字节
+  if (decoded.includes('\0')) return '';
+  const resolved = path.normalize(decoded);
   const parts = resolved.split(/[\\/]/).filter(Boolean);
   if (parts.includes('..')) return '';
+  // 拒绝 UNC 与 Windows 保留名 traversals 的编码变体
+  if (/^\\\\/.test(decoded) || /%2e%2e/i.test(rawPath)) return '';
   return resolved;
 }
 
@@ -62,11 +78,14 @@ app.get('/api/bridge/status', (req, res) => {
     ok: true,
     name: '搬运蚁发布助手',
     protocolVersion: 1,
+    port: PORT,
     status: snapshot.pending.length ? 'busy' : 'ready',
     extensionConnected: bridgeQueue.isExtensionConnected(),
     queued: snapshot.queued.length,
     pending: snapshot.pending.length,
-    lastCommand: snapshot.history[0] || null
+    lastCommand: snapshot.history[0] || null,
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
   });
 });
 
@@ -592,8 +611,15 @@ app.get('/api/video/file', (req, res) => {
 
   if (range) {
     const parts = range.replace(/bytes=/, '').split('-');
-    const start = parseInt(parts[0], 10);
-    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+    let start = parseInt(parts[0], 10);
+    let end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+    // 校验 Range 合法性
+    if (Number.isNaN(start) || start < 0) start = 0;
+    if (Number.isNaN(end) || end >= fileSize) end = fileSize - 1;
+    if (start > end) {
+      res.writeHead(416, { 'Content-Range': `bytes */${fileSize}` });
+      return res.end();
+    }
     const chunksize = (end - start) + 1;
     const file = fs.createReadStream(filePath, { start, end });
 
@@ -666,7 +692,19 @@ app.get('/api/directories', (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  const snapshot = bridgeQueue.snapshot();
+  res.json({
+    status: 'ok',
+    port: PORT,
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    bridge: {
+      status: snapshot.pending.length ? 'busy' : 'ready',
+      extensionConnected: bridgeQueue.isExtensionConnected(),
+      queued: snapshot.queued.length,
+      pending: snapshot.pending.length,
+    },
+  });
 });
 
 // 检查更新 - 用 GitHub Releases API

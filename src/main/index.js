@@ -197,6 +197,25 @@ async function bootstrap() {
   systemControl = new SystemControlService();
   systemControl.applySettings(await store.getSettings());
 
+  // 配置桥接与浏览器启动器日志
+  try {
+    const { bridgeServiceManager, setLogger: setBridgeLogger } = require('./services/bridgeServiceManager');
+    const { setLogger: setLauncherLogger } = require('./services/browserLauncher');
+    const bridgeLog = (level, msg) => {
+      try {
+        const logLine = `[${new Date().toISOString()}] [${level}] ${msg}\n`;
+        const logDir = path.join(os.homedir(), 'AntBot', 'logs');
+        const files = fs.readdirSync(logDir).filter(f => f.startsWith('app-') && f.endsWith('.log'));
+        if (files.length) {
+          const latest = files.sort().pop();
+          fs.appendFileSync(path.join(logDir, latest), logLine);
+        }
+      } catch {}
+    };
+    setBridgeLogger(bridgeLog);
+    setLauncherLogger(bridgeLog);
+  } catch {}
+
   const taskRunner = new TaskRunner({
     store,
     onProgress: (payload) => {

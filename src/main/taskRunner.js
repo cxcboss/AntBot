@@ -683,6 +683,35 @@ class TaskRunner {
     };
   }
 
+  dedupeRunItems(items = []) {
+    const result = [];
+    const indexes = new Map();
+    for (const item of Array.isArray(items) ? items : []) {
+      const key = String(item?.taskId || item?.taskSnapshot?.id || item?.taskSnapshot?.taskId || item?.id || '').trim();
+      if (!key) {
+        result.push(item);
+        continue;
+      }
+
+      const existingIndex = indexes.get(key);
+      if (existingIndex === undefined) {
+        indexes.set(key, result.length);
+        result.push(item);
+        continue;
+      }
+
+      const previous = result[existingIndex];
+      const attempt = Number(item?.attempt || item?.retryCount || 0);
+      const previousAttempt = Number(previous?.attempt || previous?.retryCount || 0);
+      const timestamp = Date.parse(item?.finishedAt || item?.updatedAt || item?.endedAt || '') || 0;
+      const previousTimestamp = Date.parse(previous?.finishedAt || previous?.updatedAt || previous?.endedAt || '') || 0;
+      if (attempt > previousAttempt || (attempt === previousAttempt && timestamp >= previousTimestamp)) {
+        result[existingIndex] = item;
+      }
+    }
+    return result;
+  }
+
   async fileExists(filePath) {
     if (!filePath) {
       return false;
@@ -705,6 +734,7 @@ class TaskRunner {
       const idx = tasks.findIndex(t => t.id === row.id);
       const entry = {
         id: row.id,
+        taskId: row.id,
         taskName: row.taskName,
         rawLine: row.rawLine,
         inputText: row.inputText,
@@ -931,7 +961,7 @@ class TaskRunner {
         const voiceoverEnabled = settings?.style?.voiceoverEnabled !== false;
         const execSnapshot = {
           styleName: task._styleName || '',
-          voiceName: settings?.voiceClone?.profileName || settings?.voiceClone?.voiceId || '',
+          voiceName: task._voiceProfileName || task._voiceId || settings?.voiceClone?.profileName || settings?.voiceClone?.voiceId || '',
           voiceover: voiceoverEnabled,
           subtitle: voiceoverEnabled && settings?.style?.subtitleEnabled !== false,
         };
@@ -1086,7 +1116,13 @@ class TaskRunner {
           }
 
           // 3b. composeEditVideo: 合成视频 (配音+字幕+音频混合)
-          const voiceClone = settings?.voiceClone || {};
+          // 监控任务可携带独立音色/风格覆盖
+          const baseVoiceClone = settings?.voiceClone || {};
+          const voiceClone = task._voiceId || task._voiceProfileName ? {
+            voiceId: task._voiceId || baseVoiceClone.voiceId || '',
+            profileName: task._voiceProfileName || baseVoiceClone.profileName || '',
+          } : baseVoiceClone;
+          if (task._monitorName) this.log(task.id, `监控任务使用独立配置: 风格=${task._styleName||'默认'} 音色=${voiceClone.profileName||voiceClone.voiceId||'默认'}`);
           const subtitleStyle = {
             textColor: settings?.style?.subtitleTextColor || '#0D9488',
             strokeColor: settings?.style?.subtitleStrokeColor || '#000000',
@@ -1300,6 +1336,8 @@ class TaskRunner {
       this.currentJob = null;
 
       try {
+        // 重试会为同一任务追加多条 attempt；历史只保留最终一条，避免远程端重连后重复渲染。
+        runRecord.items = this.dedupeRunItems(runRecord.items);
         await this.store.appendHistoryForUser(job.userId, runRecord);
         if (publishedRecords.length) {
           await this.store.appendPublishedRecordsForUser(job.userId, publishedRecords);

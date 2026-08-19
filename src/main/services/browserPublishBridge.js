@@ -1,4 +1,21 @@
 const http = require('node:http');
+const os = require('node:os');
+const path = require('node:path');
+const fs = require('node:fs');
+
+const DEFAULT_PORT = 18321;
+const PORT_RANGE = 11; // 18321-18331
+const PORT_FILE = path.join(os.homedir(), 'AntBot', 'bridge-port.json');
+
+function readStoredPort() {
+  try {
+    if (!fs.existsSync(PORT_FILE)) return null;
+    const data = JSON.parse(fs.readFileSync(PORT_FILE, 'utf8'));
+    const p = Number(data.port);
+    if (p >= 1024 && p <= 65535) return p;
+  } catch {}
+  return null;
+}
 
 function requestJson(baseUrl, method, pathname, body, timeoutMs = 15000) {
   const target = new URL(pathname, baseUrl);
@@ -25,15 +42,83 @@ function requestJson(baseUrl, method, pathname, body, timeoutMs = 15000) {
         resolve(data);
       });
     });
-    req.on('timeout', () => req.destroy(new Error('桥接服务请求超时')));
+    req.on('timeout', () => {
+      req.destroy(new Error('桥接服务请求超时'));
+    });
     req.on('error', reject);
     if (payload) req.write(payload);
     req.end();
   });
 }
 
+function probePort(port, timeoutMs = 1200) {
+  return new Promise((resolve) => {
+    const req = http.get(`http://127.0.0.1:${port}/api/bridge/status`, { timeout: timeoutMs }, (res) => {
+      let raw = '';
+      res.on('data', (c) => { raw += c; });
+      res.on('end', () => {
+        try {
+          const data = raw ? JSON.parse(raw) : {};
+          if (data && data.ok === true) resolve({ port, ok: true, data });
+          else resolve({ port, ok: false });
+        } catch { resolve({ port, ok: false }); }
+      });
+    });
+    req.on('timeout', () => { req.destroy(); resolve({ port, ok: false }); });
+    req.on('error', () => resolve({ port, ok: false }));
+  });
+}
+
+async function findActiveBridgeBaseUrl(timeoutMs = 1200) {
+  const stored = readStoredPort();
+  const ports = [];
+  if (stored) ports.push(stored);
+  for (let i = 0; i < PORT_RANGE; i++) {
+    const p = DEFAULT_PORT + i;
+    if (!ports.includes(p)) ports.push(p);
+  }
+  for (const port of ports) {
+    const result = await probePort(port, timeoutMs);
+    if (result.ok) return `http://127.0.0.1:${port}`;
+  }
+  return null;
+}
+
+async function resolveBridgeBaseUrl(preferredBaseUrl) {
+  // 优先使用传入的 baseUrl（用户配置），若健康则直接用
+  if (preferredBaseUrl) {
+    const normalized = String(preferredBaseUrl).replace(/\/$/, '');
+    try {
+      const url = new URL('/api/bridge/status', normalized);
+      const port = Number(url.port) || 80;
+      if (port >= 1024) {
+        const r = await probePort(port, 1000);
+        if (r.ok) return normalized;
+      } else {
+        // 无端口的 URL（如 http://localhost:18321），直接试
+        await requestJson(normalized, 'GET', '/api/bridge/status', undefined, 1200);
+        return normalized;
+      }
+    } catch {}
+  }
+  // 扫描可用端口
+  const found = await findActiveBridgeBaseUrl(1200);
+  if (found) return found;
+  // 兜底返回传入值或默认
+  return preferredBaseUrl ? String(preferredBaseUrl).replace(/\/$/, '') : `http://127.0.0.1:${DEFAULT_PORT}`;
+}
+
 // 插件可返回的终态（终态之外的任何状态都视为"仍在执行"）
 const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled', 'login-required']);
+
+function calcInactivityTimeout(videos) {
+  try {
+    const totalSize = (Array.isArray(videos) ? videos : []).reduce((s, v) => s + Number(v.size || 0), 0);
+    // 基础 90s，大文件增加：每 50MB +30s，上限 300s
+    const extra = Math.floor(totalSize / (50 * 1024 * 1024)) * 30000;
+    return Math.min(300000, Math.max(90000, 90000 + extra));
+  } catch { return 180000; }
+}
 
 function createBrowserPublishBridge({ baseUrl = 'http://127.0.0.1:18321', pollIntervalMs = 700, timeoutMs = 30 * 60 * 1000 } = {}) {
   const normalizedBaseUrl = String(baseUrl).replace(/\/$/, '');
@@ -79,11 +164,25 @@ function createBrowserPublishBridge({ baseUrl = 'http://127.0.0.1:18321', pollIn
     const startedAt = Date.now();
     let cursor = 0;
     let lastActivityAt = Date.now();
-    const INACTIVITY_TIMEOUT = 90_000;      // 90 秒无事件 → 超时
+    const INACTIVITY_TIMEOUT = calcInactivityTimeout(videos); // 动态：90s-300s
     const HARD_TIMEOUT = Math.max(60_000, timeoutMs || 10 * 60_000); // M1: 用调用方配置的超时上限（下限 1 分钟）
 
+    let pollDelay = pollIntervalMs;
     while (Date.now() - startedAt < HARD_TIMEOUT) {
-      const result = await call('GET', `/api/bridge/commands/${encodeURIComponent(id)}`);
+      let result;
+      try {
+        result = await call('GET', `/api/bridge/commands/${encodeURIComponent(id)}`);
+      } catch (e) {
+        // 网络抖动重试：等待后继续，不立即失败
+        if (Date.now() - lastActivityAt > INACTIVITY_TIMEOUT) {
+          await call('POST', `/api/bridge/commands/${encodeURIComponent(id)}/cancel`, { reason: 'AntBot 等待插件结果超时' }).catch(() => {});
+          throw new Error('浏览器插件发布超时（无响应）');
+        }
+        await new Promise(resolve => setTimeout(resolve, pollDelay));
+        pollDelay = Math.min(1500, pollDelay + 100);
+        continue;
+      }
+      pollDelay = pollIntervalMs;
       let gotNewEvent = false;
       for (const event of result.events || []) {
         if (event.sequence > cursor) {
@@ -118,7 +217,7 @@ function createBrowserPublishBridge({ baseUrl = 'http://127.0.0.1:18321', pollIn
         throw new Error('浏览器插件发布超时（无响应）');
       }
 
-      await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+      await new Promise(resolve => setTimeout(resolve, pollDelay));
     }
 
     await call('POST', `/api/bridge/commands/${encodeURIComponent(id)}/cancel`, { reason: 'AntBot 等待插件结果超时' }).catch(() => {});
@@ -182,7 +281,20 @@ function createBrowserPublishBridge({ baseUrl = 'http://127.0.0.1:18321', pollIn
     throw new Error('选择账号超时');
   };
 
-  return { call, getStatus, getCapabilities, invoke, publish, checkLogin, selectAccount };
+  return { call, getStatus, getCapabilities, invoke, publish, checkLogin, selectAccount, baseUrl: normalizedBaseUrl };
 }
 
-module.exports = { createBrowserPublishBridge, requestJson };
+async function createResolvedBridge({ baseUrl, pollIntervalMs, timeoutMs } = {}) {
+  const resolvedBaseUrl = await resolveBridgeBaseUrl(baseUrl);
+  return createBrowserPublishBridge({ baseUrl: resolvedBaseUrl, pollIntervalMs, timeoutMs });
+}
+
+module.exports = {
+  createBrowserPublishBridge,
+  createResolvedBridge,
+  resolveBridgeBaseUrl,
+  findActiveBridgeBaseUrl,
+  requestJson,
+  probePort,
+  TERMINAL_STATUSES,
+};

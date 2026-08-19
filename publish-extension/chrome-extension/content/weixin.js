@@ -1,4 +1,21 @@
-const LOCAL_SERVER_BASE = 'http://localhost:18321';
+const BRIDGE_PORTS_WX = [18321,18322,18323,18324,18325,18326,18327,18328,18329,18330,18331];
+let cachedBridgeBaseWX = null;
+let cachedBridgeAtWX = 0;
+async function resolveBridgeBaseWX() {
+  if (cachedBridgeBaseWX && Date.now() - cachedBridgeAtWX < 5000) return cachedBridgeBaseWX;
+  for (const port of BRIDGE_PORTS_WX) {
+    for (const host of ['127.0.0.1','localhost']) {
+      try {
+        const c = new AbortController(); const t=setTimeout(()=>c.abort(), 700);
+        const r = await fetch(`http://${host}:${port}/api/bridge/status`, { signal: c.signal });
+        clearTimeout(t);
+        if (r.ok) { const j=await r.json().catch(()=>({})); if (j && j.ok) { cachedBridgeBaseWX=`http://${host}:${port}`; cachedBridgeAtWX=Date.now(); return cachedBridgeBaseWX; } }
+      } catch {}
+    }
+  }
+  return cachedBridgeBaseWX || 'http://127.0.0.1:18321';
+}
+async function getLocalServerBaseWX() { return resolveBridgeBaseWX(); }
 /**
  * 【搬运蚁发布助手】
  * 此类用于自动化视频号发布流程
@@ -86,7 +103,9 @@ class WeixinPublisher {
     });
 
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      if (sender.frameId !== 0 && sender.frameId !== undefined) return;
       if (message.action === 'startPublish') {
+        if (message.bridgeBaseUrl) { cachedBridgeBaseWX = message.bridgeBaseUrl; cachedBridgeAtWX = Date.now(); }
         this.aborted = false;
         this.startAbortCheck();
         this.handlePublish(message, sendResponse);
@@ -698,7 +717,8 @@ class WeixinPublisher {
       : `${videoPath}/${videoName}`);
     
     try {
-      const response = await fetch(`${LOCAL_SERVER_BASE}/api/video/file?path=${encodeURIComponent(fullPath)}`);
+      const base = await getLocalServerBaseWX();
+      const response = await fetch(`${base}/api/video/file?path=${encodeURIComponent(fullPath)}`);
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }

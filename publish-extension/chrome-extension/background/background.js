@@ -11,22 +11,61 @@ let _doneLock = false;
 let _finishCalled = false;
 const SKIP_KEY = '_vpe_skip_names';
 const ABORT_KEY = '_vpe_abort';
-const BRIDGE_BASE_URL = 'http://localhost:18321';
+const BRIDGE_PORTS = [18321,18322,18323,18324,18325,18326,18327,18328,18329,18330,18331];
+let cachedBridgeBaseUrl = 'http://127.0.0.1:18321';
+let cachedBridgeAt = 0;
 let bridgePollTimer = null;
 // 登录检测状态缓存，避免轮询时重复创建 tab
 let loginCheckTabs = { douyin: null, weixin: null };
 let bridgeBusy = false;
+let bridgeBusyTimer = null;
 let debuggerTargets = new Map();
 
+async function resolveBridgeBaseUrl(force = false) {
+  if (!force && cachedBridgeBaseUrl && Date.now() - cachedBridgeAt < 5000) return cachedBridgeBaseUrl;
+  for (const port of BRIDGE_PORTS) {
+    for (const host of ['127.0.0.1', 'localhost']) {
+      try {
+        const controller = new AbortController();
+        const t = setTimeout(() => controller.abort(), 900);
+        const r = await fetch(`http://${host}:${port}/api/bridge/status`, { signal: controller.signal });
+        clearTimeout(t);
+        if (r.ok) {
+          const j = await r.json().catch(() => ({}));
+          if (j && j.ok) {
+            cachedBridgeBaseUrl = `http://${host}:${port}`;
+            cachedBridgeAt = Date.now();
+            return cachedBridgeBaseUrl;
+          }
+        }
+      } catch {}
+    }
+  }
+  return cachedBridgeBaseUrl;
+}
+
 async function bridgeRequest(path, options = {}) {
-  const response = await fetch(`${BRIDGE_BASE_URL}${path}`, {
-    ...options,
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }
-  });
-  if (response.status === 204) return null;
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok || data.ok === false) throw new Error(data.message || data.error || `桥接请求失败：${response.status}`);
-  return data;
+  const base = await resolveBridgeBaseUrl();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  try {
+    const response = await fetch(`${base}${path}`, {
+      ...options,
+      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+      signal: controller.signal,
+    });
+    if (response.status === 204) return null;
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.ok === false) throw new Error(data.message || data.error || `桥接请求失败：${response.status}`);
+    // 成功后更新缓存
+    cachedBridgeAt = Date.now();
+    return data;
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error('桥接请求超时');
+    throw e;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function bridgeEvent(commandId, event) {
@@ -265,6 +304,32 @@ async function handleBridgeCommand(command) {
     await bridgeResult(command.id, { success: true, ...result });
     return;
   }
+  if (action === 'platform.logout') {
+    const platform = payload.platform || 'douyin';
+    try {
+      const domains = platform === 'weixin'
+        ? ['channels.weixin.qq.com', '.qq.com', 'open.weixin.qq.com']
+        : platform === 'douyin' ? ['creator.douyin.com', '.douyin.com', '.bytedance.com'] : [];
+      for (const domain of domains) {
+        try {
+          const cookies = await chrome.cookies.getAll({ domain });
+          for (const c of cookies) {
+            const url = (c.secure ? 'https://' : 'http://') + c.domain.replace(/^\./,'') + c.path;
+            await chrome.cookies.remove({ url, name: c.name }).catch(()=>{});
+          }
+        } catch {}
+      }
+      // 关闭可能残留的登录检测 tab
+      for (const k of Object.keys(loginCheckTabs)) {
+        const tabId = loginCheckTabs[k];
+        if (tabId) { chrome.tabs.remove(tabId).catch(()=>{}); loginCheckTabs[k]=null; }
+      }
+      await bridgeResult(command.id, { success: true, loggedOut: true });
+    } catch (e) {
+      await bridgeResult(command.id, { success: false, error: e.message });
+    }
+    return;
+  }
   const result = await executeBrowserCommand(action, payload);
   await bridgeResult(command.id, { success: true, data: result });
 }
@@ -272,6 +337,8 @@ async function handleBridgeCommand(command) {
 async function pollBridgeCommands() {
   if (bridgeBusy) return;
   bridgeBusy = true;
+  // 10s 超时自解锁，防止 fetch 超时后 bridgeBusy 永久锁死
+  bridgeBusyTimer = setTimeout(() => { bridgeBusy = false; }, 10000);
   try {
     const response = await bridgeRequest('/api/bridge/commands/next');
     if (response?.command) {
@@ -286,9 +353,15 @@ async function pollBridgeCommands() {
         await bridgeResult(command.id, { success: false, status: 'failed', error: error.message });
       }
     }
-  } catch (_) {
-    // The desktop app may not have started its bridge server yet.
+  } catch (e) {
+    // 仅在非超时情况下静默，超时需要打日志便于排查
+    if (e && !/桥接请求超时/.test(e.message)) {
+      // The desktop app may not have started its bridge server yet.
+    } else if (e) {
+      console.warn('[BG] 桥接轮询超时:', e.message);
+    }
   } finally {
+    clearTimeout(bridgeBusyTimer);
     bridgeBusy = false;
   }
 }
@@ -342,6 +415,26 @@ function startKeepAlive() {
   });
 }
 
+// 1b. Offscreen 保活（更稳）：若支持则创建离屏文档，20s 心跳
+async function startOffscreenKeepAlive() {
+  try {
+    if (!chrome.offscreen) return;
+    const has = await chrome.offscreen.hasDocument?.();
+    if (!has) {
+      await chrome.offscreen.createDocument({
+        url: 'offscreen.html',
+        reasons: ['AUDIO_PLAYBACK'],
+        justification: 'Keep service worker alive for bridge polling'
+      });
+    }
+  } catch (e) {
+    console.log('[BG] Offscreen 创建失败:', e.message);
+  }
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (msg?.action === 'offscreenHeartbeat') return false;
+  });
+}
+
 // 2. Alarms 兜底：万一 Worker 还是被杀了，1 分钟内恢复轮询
 function startAlarmFallback() {
   chrome.alarms.create('bridge-poll', { periodInMinutes: 1 });
@@ -352,8 +445,8 @@ function startAlarmFallback() {
         console.log('[BG] Alarm: restarting bridge polling');
         startBridgePolling();
       }
-      // 确保至少有一次轮询
-      pollBridgeCommands().catch(() => {});
+      // 强制刷新端口缓存后重试
+      resolveBridgeBaseUrl(true).then(() => pollBridgeCommands().catch(() => {}));
     }
   });
 }
@@ -912,10 +1005,32 @@ function calculateScheduledTime(videoIndex, firstVideoScheduled = false) {
 }
 
 async function savePublishRecord(record) {
-  try { await fetch('http://localhost:18321/api/publish-record', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(record) }); } catch (_) {}
+  try {
+    const base = await resolveBridgeBaseUrl();
+    await fetch(`${base}/api/publish-record`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(record) });
+  } catch (_) {}
+}
+
+// 持久化 publishState 到 sessionStorage（SW 重启恢复）
+async function persistPublishState() {
+  try { await chrome.storage.session.set({ _persistPublishState: { ...publishState, timeoutTimer: null, nextVideoTimer: null } }); } catch {}
+}
+async function restorePublishState() {
+  try {
+    const data = await chrome.storage.session.get('_persistPublishState');
+    const s = data._persistPublishState;
+    if (s && s.isPublishing) {
+      // 恢复关键字段，不恢复定时器
+      publishState = { ...publishState, ...s, timeoutTimer: null, nextVideoTimer: null };
+      console.log('[BG] 已恢复未完成的发布任务');
+    }
+  } catch {}
 }
 
 console.log('[BG] Service Worker started');
 startKeepAlive();
-startBridgePolling();
-startAlarmFallback();
+startOffscreenKeepAlive();
+restorePublishState().then(() => {
+  startBridgePolling();
+  startAlarmFallback();
+});

@@ -455,6 +455,7 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
   const { register: registerUpdates } = require('./ipc/updates');
   const { register: registerModels } = require('./ipc/models');
   const { register: registerLibrary } = require('./ipc/library');
+  const { register: registerMonitor } = require('./ipc/monitor');
 
   registerVoicebox({ ipcMain, store, mainWindowRef, appLog });
   const downloadManager = registerDownload({ ipcMain, store, mainWindowRef, appLog });
@@ -464,6 +465,9 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
   registerUpdates({ ipcMain, appLog });
   registerModels({ ipcMain, store, mainWindowRef });
   registerLibrary({ ipcMain, store, mainWindowRef, appLog });
+  const monitorService = registerMonitor({ ipcMain, store, taskRunner, mainWindowRef, appLog });
+  // 初始化监控服务
+  try { monitorService.init().catch(e=>appLog('error', `[monitor] init failed: ${e.message}`)); } catch {}
 
   // 启动 HTTP API 服务
   {
@@ -481,6 +485,7 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
       } catch {}
       try { await editScheduler.shutdown(); } catch {}
       try { await downloadManager.cleanup(); } catch {}
+      try { const ms = require('./services/monitorService'); ms.dispose(); } catch {}
     }
   };
 }
