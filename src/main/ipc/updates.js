@@ -16,6 +16,15 @@ function register({ ipcMain, appLog }) {
     } catch (e) { return { ok: false, error: e.message }; }
   });
 
+  ipcMain.handle('update:download-win', async (_event, downloadUrl) => {
+    try {
+      const win = _event.sender;
+      return await updater.downloadWinUpdate(downloadUrl, (progress) => {
+        if (!win.isDestroyed()) win.send('update:progress', { key: 'app', ...progress });
+      });
+    } catch (e) { return { ok: false, error: e.message }; }
+  });
+
   ipcMain.handle('update:install-app', async (_event, zipPath, newVersion) => {
     try { return await updater.installAppUpdate(zipPath, newVersion); } catch (e) { return { ok: false, error: e.message }; }
   });

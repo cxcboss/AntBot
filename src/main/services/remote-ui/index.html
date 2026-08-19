@@ -134,9 +134,6 @@ input[type=number]::-webkit-inner-spin-button{opacity:1}
 .dialog-item.active{background:var(--accent);color:var(--accent-foreground)}
 .dialog-item .check{margin-left:auto;opacity:0;color:var(--accent-foreground)}
 .dialog-item.active .check{opacity:1}
-.dialog-slider{padding:var(--space-2) 0}
-.dialog-slider label{display:block;font-size:12px;color:var(--muted-foreground);margin-bottom:var(--space-2)}
-.dialog-slider .sv{font-size:13px;color:var(--foreground);text-align:center;margin-top:var(--space-2);font-weight:500}
 .dialog-close{background:none;border:none;color:var(--muted-foreground);cursor:pointer;font-size:16px;padding:4px;border-radius:var(--radius);line-height:1}
 .dialog-close:hover{background:var(--muted);color:var(--foreground)}
 .dialog-empty{padding:var(--space-4);text-align:center;font-size:12px;color:var(--muted-foreground)}
@@ -182,7 +179,7 @@ input[type=number]::-webkit-inner-spin-button{opacity:1}
 @keyframes spin{to{transform:rotate(360deg)}}
 
 /* ── 主控：时间线（与 App 对齐） ── */
-.chat{flex:1;overflow-y:auto;padding:0 var(--space-4);scroll-behavior:smooth}
+.chat{flex:1;overflow-y:auto;padding:0 var(--space-4)}
 .chat-stream{display:flex;flex-direction:column;max-width:640px;margin:0 auto;min-height:100%}
 .chat-day{display:flex;align-items:center;gap:12px;padding:20px 0 0;font-size:11px;color:var(--muted-foreground)}
 .chat-day::before,.chat-day::after{content:'';flex:1;height:1px;background:var(--border)}
@@ -239,22 +236,31 @@ input[type=number]::-webkit-inner-spin-button{opacity:1}
 .task-meta-original{color:var(--foreground)}
 .task-meta-campaign{background:var(--accent);color:var(--accent-foreground)}
 .task-meta-campaign b{font-weight:600}
+.task-meta-time{color:var(--muted-foreground)}
 .task-meta-item.danger{background:color-mix(in srgb,var(--destructive) 12%,transparent);color:var(--destructive)}
 .task-detail-toggle{display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 8px;border-radius:var(--radius-sm);font-size:11px;color:var(--muted-foreground);background:none;border:none;transition:background var(--transition-fast),color var(--transition-fast)}
 .task-detail-toggle:hover{background:var(--muted);color:var(--foreground)}
+.task-detail-toggle .td-chevron{font-size:10px;display:inline-block;transition:transform var(--transition-normal)}
+.task-detail.open .task-detail-toggle .td-chevron{transform:rotate(90deg)}
 .task-detail-body{display:none;margin-top:4px;padding:8px 10px;background:var(--secondary);border-radius:var(--radius);font-size:12px}
 .task-detail.open .task-detail-body{display:block}
 .task-detail-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:4px 12px}
 .task-detail-item{display:flex;gap:6px;color:var(--muted-foreground)}
 .task-detail-item b{font-weight:500;color:var(--foreground);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .task-bar{height:3px;background:var(--muted);border-radius:var(--radius-full);overflow:hidden}
-.task-bar-fill{height:100%;width:0;background:var(--primary);opacity:.5;transition:width var(--transition-normal);border-radius:var(--radius-full)}
-.task.running .task-bar-fill{opacity:1}
-.task.failed .task-bar-fill{background:var(--destructive)}
+.task-bar-in{height:100%;width:0;background:var(--primary);opacity:.5;transition:width var(--transition-normal);border-radius:var(--radius-full)}
+.task.running .task-bar-in{opacity:1}
+.task.failed .task-bar-in{background:var(--destructive)}
+.task.preparing .task-bar-in,.task.composing .task-bar-in,.task.running .task-bar-in{animation:task-shimmer 2s ease-in-out infinite}
+@keyframes task-shimmer{0%,100%{opacity:1}50%{opacity:.55}}
 .task-actions{display:flex;gap:6px;justify-content:flex-end}
 .task-btn{padding:4px 10px;border-radius:var(--radius);font-size:11px;font-weight:500;border:1px solid var(--border);background:var(--card);color:var(--foreground);transition:background var(--transition-fast),border-color var(--transition-fast)}
 .task-btn:hover{border-color:var(--muted-foreground);background:var(--muted)}
+.task-btn:disabled{opacity:.5;cursor:not-allowed}
+.task-btn.skip:hover{border-color:var(--muted-foreground)}
 .task-btn.cancel:hover{border-color:var(--destructive);color:var(--destructive);background:var(--destructive-bg)}
+.task-cancelling{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;color:var(--warning);animation:cancelBlink 1.2s ease-in-out infinite;z-index:2}
+@keyframes cancelBlink{0%,100%{opacity:1}50%{opacity:.3}}
 
 /* 空状态 */
 .empty{text-align:center;padding:var(--space-10) var(--space-4);color:var(--muted-foreground);font-size:13px;margin:auto}
@@ -285,9 +291,34 @@ input[type=number]::-webkit-inner-spin-button{opacity:1}
 .pv-warn{color:var(--warning);font-size:11px}
 .pv-acts{display:flex;justify-content:flex-end;padding-top:6px;border-top:1px solid var(--border);margin-top:2px}
 .chips{display:flex;gap:var(--space-2);margin-top:var(--space-2);flex-wrap:wrap;max-width:640px;margin-left:auto;margin-right:auto}
-.chip{font-size:11px;padding:3px 10px;border-radius:var(--radius-full);background:var(--muted);color:var(--muted-foreground);border:none;cursor:pointer;transition:background var(--transition-fast),color var(--transition-fast);font-weight:500}
-.chip:hover{background:var(--accent);color:var(--accent-foreground)}
+.chip{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 8px;border-radius:var(--radius);font-size:11px;font-weight:400;border:0;background:transparent;color:var(--muted-foreground);cursor:pointer;transition:background var(--transition-fast),color var(--transition-fast)}
+.chip:hover{background:var(--muted);color:var(--muted-foreground)}
+.chip .vl{font-weight:500;color:var(--muted-foreground);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:110px}
 .chip-spacer{flex:1}
+
+/* ── Chip 弹窗（与 App 对齐） ── */
+.chip-popup{position:fixed;background:var(--popover);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px 14px;box-shadow:var(--shadow-lg);z-index:10000;min-width:180px;max-width:260px;max-height:320px;overflow-y:auto;animation:popup-in var(--transition-fast) ease}
+@keyframes popup-in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+.chip-popup input[type="range"]{width:100%;height:18px;accent-color:var(--primary);cursor:pointer;-webkit-appearance:none;appearance:none;background:transparent}
+.chip-popup input[type="range"]::-webkit-slider-runnable-track{background:var(--muted);height:4px;border-radius:2px}
+.chip-popup input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:14px;height:14px;border-radius:50%;background:var(--primary);margin-top:-5px;cursor:pointer}
+.chip-popup .slider-row{display:flex;align-items:center;gap:6px;padding:3px 0}
+.chip-popup .slider-label{font-size:11px;color:var(--muted-foreground);min-width:24px}
+.chip-popup .slider-value{font-size:13px;font-weight:600;color:var(--foreground);text-align:center;padding-top:3px}
+.chip-popup .toggle-row{display:flex;align-items:center;justify-content:space-between;padding:5px 0;font-size:12px}
+.chip-popup .toggle-switch{position:relative;width:32px;height:18px;border-radius:9px;background:var(--muted);cursor:pointer;transition:background var(--transition-fast)}
+.chip-popup .toggle-switch.on{background:var(--primary)}
+.chip-popup .toggle-switch::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--background);transition:transform var(--transition-fast)}
+.chip-popup .toggle-switch.on::after{transform:translateX(14px)}
+.chip-popup .style-list{list-style:none;padding:0;margin:0}
+.chip-popup .style-item{padding:6px 8px;border-radius:var(--radius);font-size:12px;cursor:pointer;transition:background var(--transition-fast);color:var(--muted-foreground)}
+.chip-popup .style-item:hover{background:var(--muted);color:var(--foreground)}
+.chip-popup .style-item.active{background:var(--accent);color:var(--accent-foreground);font-weight:500}
+.chip-popup .style-section{display:flex;align-items:center;gap:4px;padding:4px 8px 3px;margin-top:6px;border-top:1px solid var(--border);font-size:10px;font-weight:500;color:var(--muted-foreground);cursor:pointer;-webkit-user-select:none;user-select:none;transition:color var(--transition-fast)}
+.chip-popup .style-section:first-of-type{margin-top:0;border-top:none}
+.chip-popup .style-section:hover{color:var(--foreground)}
+.chip-popup .style-section-arrow{font-size:8px;transition:transform var(--transition-fast);display:inline-block}
+.chip-popup .style-section-arrow.open{transform:rotate(90deg)}
 
 /* ── 登录页 ── */
 .login-wrap{display:flex;align-items:center;justify-content:center;height:100vh;padding:var(--space-6);background:var(--background);position:relative;overflow:hidden}
@@ -369,9 +400,6 @@ input[type=number]::-webkit-inner-spin-button{opacity:1}
 .status-dot{width:8px;height:8px;border-radius:var(--radius-full);flex-shrink:0}
 .status-dot.ok{background:var(--success)}
 .status-dot.fail{background:var(--destructive)}
-.status-bar{width:64px;height:6px;border-radius:var(--radius-full);background:var(--muted);overflow:hidden;flex-shrink:0}
-.status-bar-fill{height:100%;border-radius:var(--radius-full);background:var(--success);transition:width var(--transition-normal)}
-.status-bar-fill.over{background:var(--destructive)}
 .status-queue-row{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-3);padding:var(--space-3)}
 .status-queue-item{text-align:center}
 .status-queue-num{font-size:20px;font-weight:700;color:var(--foreground)}
@@ -397,7 +425,7 @@ input[type=number]::-webkit-inner-spin-button{opacity:1}
 <div id="app"></div>
 <script>
 const HUB_URL='https://hub.onebugmanai.online';
-const APP_VERSION='1.8.0';
+const APP_VERSION='1.9.0';
 let API=window.location.origin;
 let token=localStorage.getItem('antbot-token');
 let tasks=[];
@@ -651,7 +679,7 @@ function renderAppShell(){
         <button class="nav-item" data-page="login">${ICON_LOCK}<span>平台登录</span></button>
         <button class="nav-item" data-page="status">${ICON_STAT}<span>状态</span></button>
       </nav>
-      <div class="sidebar-version" id="sidebar-version">v1.8.0</div>
+      <div class="sidebar-version" id="sidebar-version">v1.9.0</div>
     </aside>
     <div class="content">
       <div class="page active" id="page-main">
@@ -713,8 +741,6 @@ function renderAppShell(){
         <div class="status-toolbar"><span class="status-time" id="status-time"></span><button class="btn btn-sm btn-ghost" id="status-refresh-btn" type="button">刷新</button></div>
         <div class="section-title">服务状态</div>
         <div class="status-grid" id="status-services"></div>
-        <div class="section-title">资源</div>
-        <div class="status-grid" id="status-resources"></div>
         <div class="section-title">任务队列</div>
         <div class="card status-card" id="status-queue"><div class="dialog-empty">加载中...</div></div>
         <div class="section-title" id="usage-title" style="display:none">今日 API 用量</div>
@@ -798,8 +824,19 @@ function bindEvents(){
     if(detailToggle){detailToggle.closest('.task-detail')?.classList.toggle('open');return;}
     const actBtn=e.target.closest('[data-action]');
     if(!actBtn)return;
-    if(actBtn.dataset.action==='stop')api('POST','/remote/tasks/'+actBtn.dataset.id+'/stop').then(()=>showToast('已停止'));
-    if(actBtn.dataset.action==='retry')api('POST','/remote/tasks/'+actBtn.dataset.id+'/retry').then(()=>showToast('已重试'));
+    const actId=actBtn.dataset.id;
+    const actLabel=(label)=>{actBtn.disabled=true;actBtn.textContent=label;};
+    if(actBtn.dataset.action==='stop'){actLabel('取消中');api('POST','/remote/tasks/'+actId+'/stop').then(r=>{if(r?.ok)showToast('已停止');else showToast(r?.error||'取消失败')}).catch(()=>{showToast('网络错误')}).finally(()=>{actBtn.disabled=false;actBtn.textContent='取消'})}
+    if(actBtn.dataset.action==='skip'){api('POST','/remote/tasks/'+actId+'/stop').then(r=>{if(r?.ok)showToast('已跳过');else showToast(r?.error||'跳过失败')}).catch(()=>{showToast('网络错误')})}
+    if(actBtn.dataset.action==='retry'){actLabel('重试中');api('POST','/remote/tasks/'+actId+'/retry').then(r=>{if(r?.ok)showToast('已重试');else showToast(r?.error||'重试失败')}).catch(()=>{showToast('网络错误')}).finally(()=>{actBtn.disabled=false;actBtn.textContent='重试'})}
+    if(actBtn.dataset.action==='republish'){
+      actLabel('发布中...');
+      api('POST','/remote/tasks/'+actId+'/republish').then(r=>{
+        if(r?.ok)showToast('已重新发布');
+        else if(r?.error==='FILE_DELETED')showToast('视频文件已被删除，无法重新发布');
+        else showToast(r?.error||'发布失败');
+      }).catch(()=>{showToast('网络错误')}).finally(()=>{actBtn.disabled=false;actBtn.textContent='重新发布'});
+    }
   });
   document.getElementById('sub-save-btn')?.addEventListener('click',async()=>{
     await api('POST','/remote/settings',{style:{subtitleTextColor:getColorHex('color'),subtitleStrokeColor:getColorHex('stroke'),subtitlePositionPercent:parseInt(document.getElementById('sub-position')?.value)||12}});
@@ -838,23 +875,7 @@ function switchPage(page){
   if(page==='status')loadSystemStatus();
 }
 
-// ── 对话框（风格/音色/重试） ──
-let activeDialog=null;
-function openDialog(title,contentHtml){
-  closeDialog();
-  const overlay=document.createElement('div');overlay.className='dialog-overlay show';
-  overlay.innerHTML='<div class="dialog"><div class="dialog-title"><span>'+esc(title)+'</span><button class="dialog-close" type="button">✕</button></div>'+contentHtml+'</div>';
-  overlay.addEventListener('click',e=>{if(e.target===overlay)closeDialog();});
-  overlay.querySelector('.dialog-close')?.addEventListener('click',closeDialog);
-  document.body.appendChild(overlay);
-  activeDialog=overlay;
-  return overlay;
-}
-function closeDialog(){
-  if(activeDialog){activeDialog.remove();activeDialog=null;}
-}
-document.addEventListener('keydown',e=>{if(e.key==='Escape')closeDialog();});
-
+// ── 音色/风格/更多/语速/重试 弹窗（与 App 对齐） ──
 async function loadSettings(){const d=await api('GET','/remote/settings');if(d){currentSettings=d;renderChips(d);}}
 let currentSettings=null;
 
@@ -863,74 +884,162 @@ function renderChips(s){
   // 音色优先读 voiceClone（App 端选音色写入的位置），兼容旧 editDefaults.voice
   const style=s?.editDefaults?.style||'未设置';
   const voice=s?.voiceClone?.profileName||s?.editDefaults?.voice||'未设置';
-  const retry=Math.max(0,Number(s?.retry?.failedTaskRetries??0));
-  c.innerHTML='<button class="chip" data-chip="style">'+esc(style)+'</button>'
-    +'<button class="chip" data-chip="voice">'+esc(voice)+'</button>'
+  const vs=Number(s?.style?.voiceSpeed??1.1);
+  const rt=Math.max(0,Number(s?.retry?.failedTaskRetries??0));
+  c.innerHTML='<button class="chip" data-act="voice"><span class="vl">'+esc(voice)+'</span></button>'
+    +'<button class="chip" data-act="style"><span class="vl">'+esc(style)+'</span></button>'
+    +'<button class="chip" data-act="more"><span class="vl">更多</span></button>'
     +'<span class="chip-spacer"></span>'
-    +'<button class="chip" data-chip="retry">重试'+retry+'次</button>';
-  c.querySelectorAll('[data-chip]').forEach(btn=>{
-    btn.addEventListener('click',e=>{e.stopPropagation();showChipDialog(btn.dataset.chip)});
+    +'<button class="chip" data-act="speed"><span class="vl">语速'+vs.toFixed(1)+'x</span></button>'
+    +'<button class="chip" data-act="retry"><span class="vl">重试'+rt+'次</span></button>';
+  c.querySelectorAll('[data-act]').forEach(btn=>{
+    btn.addEventListener('click',e=>{e.stopPropagation();showChipPopup(btn.dataset.act,btn)});
   });
 }
 
-function showChipDialog(type){
-  if(type==='style'){
-    const dlg=openDialog('选择风格','<div class="dialog-empty">加载中...</div>');
-    api('GET','/remote/styles').then(d=>{
-      const styles=d?.styles||[];
-      if(!styles.length){dlg.querySelector('.dialog-list,.dialog-empty').innerHTML='暂无风格，请先在App中学习';return;}
-      const cur=currentSettings?.editDefaults?.style||'';
-      const list=document.createElement('div');list.className='dialog-list';
-      list.innerHTML=styles.map(s=>'<button class="dialog-item'+(s.name===cur?' active':'')+'" data-val="'+esc(s.name)+'"><span>'+esc(s.name)+'</span><span class="check">✓</span></button>').join('');
-      const body=dlg.querySelector('.dialog');body.replaceChild(list,body.querySelector('.dialog-list,.dialog-empty'));
-      list.querySelectorAll('.dialog-item').forEach(btn=>{
-        btn.addEventListener('click',async()=>{
-          const val=btn.dataset.val;
-          await api('POST','/remote/settings',{editDefaults:{...currentSettings?.editDefaults,style:val}});
-          currentSettings.editDefaults={...currentSettings?.editDefaults,style:val};
-          renderChips(currentSettings);closeDialog();showToast('风格: '+val);
-        });
-      });
-    });
-    return;
-  }
+// ── Chip 弹窗（与 App 对齐：音色分类折叠 / 风格列表 / 更多开关 / 滑块） ──
+let activeChipPopup=null;
+function closeChipPopup(){if(activeChipPopup){activeChipPopup.remove();activeChipPopup=null}}
+function positionChipPopup(popup,anchor){
+  document.body.appendChild(popup);
+  const rect=anchor.getBoundingClientRect();
+  const pw=popup.offsetWidth,ph=popup.offsetHeight;
+  let left=rect.left+rect.width/2-pw/2;
+  let top=rect.top-ph-8;
+  if(left<8)left=8;if(left+pw>window.innerWidth-8)left=window.innerWidth-pw-8;
+  if(top<8)top=rect.bottom+8;
+  popup.style.left=left+'px';popup.style.top=top+'px';
+  activeChipPopup=popup;
+  setTimeout(()=>document.addEventListener('mousedown',dismissOnce),0);
+  function dismissOnce(e){if(!e.target.closest('.chip-popup')&&!e.target.closest('.chip')){closeChipPopup();document.removeEventListener('mousedown',dismissOnce)}}
+}
+
+function showChipPopup(type,anchor){
+  closeChipPopup();
   if(type==='voice'){
-    const dlg=openDialog('选择音色','<div class="dialog-empty">加载中...</div>');
+    const popup=document.createElement('div');popup.className='chip-popup';
+    popup.innerHTML='<div class="dialog-empty">加载中...</div>';
+    positionChipPopup(popup,anchor);
     api('GET','/remote/voices').then(d=>{
       const voices=d?.voices||[];
-      if(!voices.length){dlg.querySelector('.dialog-list,.dialog-empty').innerHTML='暂无音色，请先在App中克隆';return;}
+      if(!voices.length){popup.innerHTML='<div class="dialog-empty">暂无音色，请先在App中克隆</div>';return;}
       const cur=currentSettings?.voiceClone?.profileName||currentSettings?.editDefaults?.voice||'';
-      const list=document.createElement('div');list.className='dialog-list';
-      list.innerHTML=voices.map(v=>'<button class="dialog-item'+(v.name===cur?' active':'')+'" data-vname="'+esc(v.name)+'" data-vid="'+esc(v.id||'')+'"><span>'+esc(v.name)+'</span><span class="check">✓</span></button>').join('');
-      const body=dlg.querySelector('.dialog');body.replaceChild(list,body.querySelector('.dialog-list,.dialog-empty'));
-      list.querySelectorAll('.dialog-item').forEach(btn=>{
-        btn.addEventListener('click',async()=>{
-          const vname=btn.dataset.vname;
-          const vid=btn.dataset.vid;
-          // 同时写入 editDefaults（UI 显示）与 voiceClone（任务实际执行读音色档案）
+      const azure=voices.filter(v=>v.source==='azure'),clone=voices.filter(v=>v.source!=='azure');
+      const activeSource=azure.some(v=>v.name===cur)?'azure':(clone.some(v=>v.name===cur)?'clone':'');
+      const renderSection=(label,items,src)=>{
+        if(!items.length)return '';
+        const open=activeSource===src?' open':'';
+        const collapsed=open?'':' style="display:none"';
+        return '<div class="style-section" data-section="'+src+'"><span class="style-section-arrow'+open+'">▶</span>'+esc(label)+'</div><div class="style-section-items"'+collapsed+'>'+items.map(v=>'<div class="style-item'+(v.name===cur?' active':'')+'" data-vname="'+esc(v.name)+'" data-vid="'+esc(v.id||'')+'">'+esc(v.name)+'</div>').join('')+'</div>';
+      };
+      popup.innerHTML='<div class="style-list">'+renderSection('内置音色（Azure TTS）',azure,'azure')+renderSection('克隆音色',clone,'clone')+'</div>';
+      popup.querySelectorAll('.style-section').forEach(section=>{
+        section.addEventListener('click',(e)=>{
+          e.stopPropagation();
+          const items=section.nextElementSibling;
+          if(!items||!items.classList.contains('style-section-items'))return;
+          const arrow=section.querySelector('[data-arrow]');
+          if(items.style.display==='none'){items.style.display='';arrow.classList.add('open');}else{items.style.display='none';arrow.classList.remove('open');}
+        });
+      });
+      popup.querySelectorAll('.style-item').forEach(item=>{
+        item.addEventListener('click',async()=>{
+          const vname=item.dataset.vname;
+          const vid=item.dataset.vid;
           await api('POST','/remote/settings',{
             editDefaults:{...currentSettings?.editDefaults,voice:vname},
             voiceClone:{...(currentSettings?.voiceClone||{}),voiceId:vid,profileName:vname}
           });
           currentSettings.editDefaults={...currentSettings?.editDefaults,voice:vname};
           currentSettings.voiceClone={...(currentSettings?.voiceClone||{}),voiceId:vid,profileName:vname};
-          renderChips(currentSettings);closeDialog();showToast('音色: '+vname);
+          renderChips(currentSettings);closeChipPopup();showToast('音色: '+vname);
         });
       });
     });
     return;
   }
+  if(type==='style'){
+    const popup=document.createElement('div');popup.className='chip-popup';
+    popup.innerHTML='<div class="dialog-empty">加载中...</div>';
+    positionChipPopup(popup,anchor);
+    api('GET','/remote/styles').then(d=>{
+      const styles=d?.styles||[];
+      if(!styles.length){popup.innerHTML='<div class="dialog-empty">暂无风格，请先在App中学习</div>';return;}
+      const cur=currentSettings?.editDefaults?.style||'';
+      popup.innerHTML='<ul class="style-list">'+styles.map(s=>'<li class="style-item'+(s.name===cur?' active':'')+'" data-val="'+esc(s.name)+'">'+esc(s.name)+'</li>').join('')+'</ul>';
+      popup.querySelectorAll('.style-item').forEach(item=>{
+        item.addEventListener('click',async()=>{
+          const val=item.dataset.val;
+          await api('POST','/remote/settings',{editDefaults:{...currentSettings?.editDefaults,style:val}});
+          currentSettings.editDefaults={...currentSettings?.editDefaults,style:val};
+          renderChips(currentSettings);closeChipPopup();showToast('风格: '+val);
+        });
+      });
+    });
+    return;
+  }
+  if(type==='more'){
+    const popup=document.createElement('div');popup.className='chip-popup';
+    const vo=currentSettings?.style?.voiceoverEnabled!==false;
+    const sub=vo&&currentSettings?.style?.subtitleEnabled!==false;
+    const pub=currentSettings?.publish?.enabled!==false;
+    popup.innerHTML='<div class="toggle-row"><span>旁白</span><div class="toggle-switch '+(vo?'on':'')+'" data-toggle-setting="voiceover"></div></div><div class="toggle-row"><span>字幕</span><div class="toggle-switch '+(sub?'on':'')+'" data-toggle-setting="subtitle"'+(vo?'':' style="opacity:.4;pointer-events:none"')+'></div></div><div class="toggle-row"><span>自动发布</span><div class="toggle-switch '+(pub?'on':'')+'" data-toggle-setting="publish"></div></div>';
+    positionChipPopup(popup,anchor);
+    popup.querySelectorAll('.toggle-switch').forEach(sw=>{
+      sw.addEventListener('click',async()=>{
+        const k=sw.dataset.toggleSetting;
+        let patch;
+        if(k==='voiceover'){
+          const next=!(currentSettings?.style?.voiceoverEnabled!==false);
+          patch={style:{voiceoverEnabled:next,subtitleEnabled:next?(currentSettings?.style?.subtitleEnabled!==false):false}};
+        }else if(k==='subtitle'){
+          const next=!(currentSettings?.style?.subtitleEnabled!==false);
+          patch={style:{subtitleEnabled:next}};
+        }else{
+          const next=!(currentSettings?.publish?.enabled!==false);
+          patch={publish:{enabled:next}};
+        }
+        await api('POST','/remote/settings',patch);
+        currentSettings.style={...(currentSettings?.style||{}),...patch.style};
+        if(patch.publish)currentSettings.publish={...(currentSettings?.publish||{}),...patch.publish};
+        const vo2=currentSettings?.style?.voiceoverEnabled!==false;
+        const sub2=vo2&&currentSettings?.style?.subtitleEnabled!==false;
+        const pub2=currentSettings?.publish?.enabled!==false;
+        sw.classList.toggle('on',k==='voiceover'?vo2:k==='subtitle'?sub2:pub2);
+        if(k==='voiceover'){const subSw=popup.querySelector('[data-toggle-setting="subtitle"]');if(subSw){subSw.style.opacity=vo2?'1':'.4';subSw.style.pointerEvents=vo2?'auto':'none'}}
+      });
+    });
+    return;
+  }
+  if(type==='speed'){
+    const cur=Number(currentSettings?.style?.voiceSpeed??1.1);
+    const popup=document.createElement('div');popup.className='chip-popup';
+    popup.innerHTML='<div class="slider-row"><span class="slider-label">0.5x</span><input type="range" min="0.5" max="2" step="0.1" value="'+cur+'"><span class="slider-label">2x</span></div><div class="slider-value">'+cur.toFixed(1)+'x</div>';
+    positionChipPopup(popup,anchor);
+    const range=popup.querySelector('input[type=range]');
+    const val=popup.querySelector('.slider-value');
+    range.addEventListener('input',()=>{val.textContent=Number(range.value).toFixed(1)+'x'});
+    range.addEventListener('change',async()=>{
+      const v=Number(range.value);
+      await api('POST','/remote/settings',{style:{voiceSpeed:v}});
+      currentSettings.style={...(currentSettings?.style||{}),voiceSpeed:v};
+      renderChips(currentSettings);closeChipPopup();showToast('语速 '+v.toFixed(1)+'x');
+    });
+    return;
+  }
   if(type==='retry'){
     const cur=Math.max(0,Number(currentSettings?.retry?.failedTaskRetries??0));
-    const dlg=openDialog('失败重试','<div class="dialog-slider"><label>重试次数</label><input type="range" min="0" max="4" step="1" value="'+cur+'"><div class="sv">'+(cur===0?'不重试':cur+'次')+'</div></div>');
-    const range=dlg.querySelector('input[type=range]');
-    const val=dlg.querySelector('.sv');
+    const popup=document.createElement('div');popup.className='chip-popup';
+    popup.innerHTML='<div class="slider-row"><span class="slider-label">0</span><input type="range" min="0" max="4" step="1" value="'+cur+'"><span class="slider-label">4</span></div><div class="slider-value">'+(cur===0?'不重试':cur+'次')+'</div>';
+    positionChipPopup(popup,anchor);
+    const range=popup.querySelector('input[type=range]');
+    const val=popup.querySelector('.slider-value');
     range.addEventListener('input',()=>{const v=Number(range.value);val.textContent=v===0?'不重试':v+'次'});
     range.addEventListener('change',async()=>{
       const v=Number(range.value);
       await api('POST','/remote/settings',{retry:{failedTaskRetries:v}});
       currentSettings.retry={failedTaskRetries:v};
-      renderChips(currentSettings);closeDialog();showToast(v===0?'不重试':'重试 '+v+' 次');
+      renderChips(currentSettings);closeChipPopup();showToast(v===0?'不重试':'重试 '+v+' 次');
     });
     return;
   }
@@ -1105,17 +1214,6 @@ async function loadSystemStatus(){
       return '<div class="status-item"><span class="status-dot '+st+'"></span><div class="status-item-body"><div class="status-item-name">'+esc(s.name)+'</div>'+(s.url?'<div class="status-item-url">'+esc(s.url)+'</div>':'')+'</div><span class="badge '+(s.running?'badge-ok':'badge-fail')+'">'+(s.running?'运行中':'已停止')+'</span></div>';
     }).join('');
   }
-  const resources=document.getElementById('status-resources');
-  if(resources){
-    const dk=d.disk,mem=d.system?.memoryFreeGB;
-    let html='';
-    if(dk){
-      const pct=dk.totalGB>0?Math.round(dk.usedGB/dk.totalGB*100):0;
-      html+='<div class="status-item"><span class="status-dot '+(pct>90?'fail':'ok')+'"></span><div class="status-item-body"><div class="status-item-name">磁盘空间</div><div class="status-item-url">'+(dk.totalGB-dk.freeGB).toFixed(1)+' / '+dk.totalGB+' GB 已用</div></div><div class="status-bar"><div class="status-bar-fill '+(pct>90?'over':'')+'" style="width:'+pct+'%"></div></div></div>';
-    }
-    if(mem!==undefined)html+='<div class="status-item"><span class="status-dot ok"></span><div class="status-item-body"><div class="status-item-name">空闲内存</div><div class="status-item-url">'+mem+' GB</div></div></div>';
-    resources.innerHTML=html||'<div class="dialog-empty">暂无数据</div>';
-  }
   const queue=document.getElementById('status-queue');
   if(queue){
     const running=d.running,total=d.taskCount||0,active=(d.tasks||[]).filter(t=>t.status==='running'||t.status==='pending'||t.status==='preparing'||t.status==='ready').length;
@@ -1241,6 +1339,7 @@ function rulesFromItem(t){
     videoUrl:t.videoUrl||snap.videoUrl,
     _exec:t._exec||null,
     duration:t.duration||0,
+    retryCount:t.retryCount||snap.retryCount||0,
   };
 }
 
@@ -1289,7 +1388,10 @@ function taskCard(t,live){
   const idx=t.index||t.queueIndex||0;
   const r=rulesFromItem(t);
   const title=idx?('任务'+idx):(t.taskName&&t.taskName!=='普通'?t.taskName:(r.isOriginal?'原创':'任务'));
-  const badge=statusText(st);
+  const retrying=t.retryCount>0&&st==='running';
+  const badge=retrying?('重试中 ('+t.retryCount+')'):st==='cancelling'?'取消中':statusText(st);
+  const isCompleted=st==='completed'||st==='warning';
+  const isCancelling=st==='cancelling';
   const msg=t.message?('<div class="task-msg">'+esc(t.message)+'</div>'):'';
 
   // 元信息行（纯文字标签，无图标）
@@ -1298,9 +1400,10 @@ function taskCard(t,live){
   if(r.isOriginal)meta.push('<span class="task-meta-item task-meta-original">原创</span>');
   if(r.campaignName)meta.push('<span class="task-meta-item task-meta-campaign"><b>'+esc(r.campaignName)+'</b></span>');
   if(r.publishAt){const d=new Date(r.publishAt);if(!isNaN(d)){
-    const expired=d.getTime()<Date.now();
-    if(expired&&st!=='running'&&st!=='queued')meta.push('<span class="task-meta-item danger">定时已过期 '+esc(fmtPvTime(r.publishAt))+'</span>');
-    else meta.push('<span class="task-meta-item">定时 '+esc(fmtPvTime(r.publishAt))+'</span>');
+    const pad=n=>String(n).padStart(2,'0');
+    const isExpired=d.getTime()<Date.now();
+    if(isExpired&&!isCompleted&&st!=='running'&&st!=='queued')meta.push('<span class="task-meta-item danger">定时已过期 '+(d.getMonth()+1)+'/'+d.getDate()+' '+pad(d.getHours())+':'+pad(d.getMinutes())+'</span>');
+    else meta.push('<span class="task-meta-item task-meta-time">定时 '+(d.getMonth()+1)+'/'+d.getDate()+' '+pad(d.getHours())+':'+pad(d.getMinutes())+'</span>');
   }}
   const metaHtml=meta.length?('<div class="task-meta">'+meta.join('')+'</div>'):'';
 
@@ -1312,18 +1415,22 @@ function taskCard(t,live){
   if(exec.voiceName)detail.push('<span class="task-detail-item">音色 <b>'+esc(exec.voiceName)+'</b></span>');
   if(exec.voiceover!==undefined)detail.push('<span class="task-detail-item">旁白 <b>'+(exec.voiceover?'开':'关')+'</b></span>');
   if(exec.subtitle!==undefined)detail.push('<span class="task-detail-item">字幕 <b>'+(exec.subtitle?'开':'关')+'</b></span>');
-  const detailHtml=detail.length?('<div class="task-detail"><button type="button" class="task-detail-toggle" data-task-detail>执行详情</button><div class="task-detail-body"><div class="task-detail-grid">'+detail.join('')+'</div></div></div>'):'';
+  const detailHtml=detail.length?('<div class="task-detail"><button type="button" class="task-detail-toggle" data-task-detail>执行详情<span class="td-chevron">›</span></button><div class="task-detail-body"><div class="task-detail-grid">'+detail.join('')+'</div></div></div>'):'';
 
   const showProgress=live&&['running','preparing','pending','queued'].includes(st);
   const pct=t.history?(st==='failed'?100:0):pg;
-  const progressHtml=(showProgress||t.history&&st!=='running'&&st!=='pending'&&st!=='queued')?('<div class="task-bar"><div class="task-bar-fill" style="width:'+(t.history?(st==='failed'?'100':'0'):pct)+'%"></div></div>'):'';
+  const progressHtml=(showProgress||t.history&&st!=='running'&&st!=='pending'&&st!=='queued')?('<div class="task-bar"><div class="task-bar-in" style="width:'+(t.history?(st==='failed'?'100':'0'):pct)+'%"></div></div>'):'';
 
   const acts=[];
-  if(live&&st==='failed')acts.push('<button class="task-btn" data-action="retry" data-id="'+esc(t.id)+'">重试</button>');
-  if(live&&['pending','queued','running'].includes(st))acts.push('<button class="task-btn cancel" data-action="stop" data-id="'+esc(t.id)+'">停止</button>');
+  if(live&&['queued','pending'].includes(st))acts.push('<button class="task-btn skip" data-action="skip" data-id="'+esc(t.id)+'">跳过</button>');
+  if(live&&['running'].includes(st))acts.push('<button class="task-btn cancel" data-action="stop" data-id="'+esc(t.id)+'">取消</button>');
+  if(live&&['failed','stopped'].includes(st))acts.push('<button class="task-btn" data-action="retry" data-id="'+esc(t.id)+'">重试</button>');
+  if(isCompleted&&t.outputPath)acts.push('<button class="task-btn" data-action="republish" data-id="'+esc(t.id)+'">重新发布</button>');
   const actsHtml=acts.length?('<div class="task-actions">'+acts.join('')+'</div>'):'';
 
-  return '<div class="task '+esc(st)+'"><div class="task-inner"><div class="task-head"><div class="task-title">'+esc(title)+'</div><div class="task-badge">'+esc(badge)+'</div></div>'+metaHtml+detailHtml+progressHtml+msg+actsHtml+'</div></div>';
+  const inner='<div class="task-inner"><div class="task-head"><div class="task-title">'+esc(title)+'</div><div class="task-badge">'+esc(badge)+'</div></div>'+metaHtml+detailHtml+progressHtml+msg+actsHtml+'</div>';
+  const overlay=isCancelling?'<div class="task-cancelling">取消中...</div>':'';
+  return '<div class="task '+esc(st)+'">'+inner+overlay+'</div>';
 }
 
 function fmtGroupTime(at){

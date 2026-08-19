@@ -152,16 +152,85 @@ function setupUpdater(key, { checkFn, downloadFn, installFn, noRestart }) {
           const newBtn = dlBtn.cloneNode(true);
           dlBtn.parentNode.replaceChild(newBtn, dlBtn);
 
-          // Windows: 跳转浏览器下载
+          // Windows: 直接下载到下载目录（有直链时）+ 浏览器下载兜底
           if (result.openBrowser && result.releaseUrl) {
-            newBtn.textContent = '前往下载';
-            newBtn.addEventListener('click', async () => {
-              try {
-                await window.antbot.openExternal(result.releaseUrl);
-                log('已打开下载页面，请下载后手动安装', 'info');
-                toast('已打开浏览器，请下载新版本后手动安装', 'info');
-              } catch (e) { toast('打开浏览器失败: ' + e.message, 'error'); }
-            });
+            if (result.downloadUrl) {
+              newBtn.textContent = '下载到下载目录';
+              newBtn.addEventListener('click', async () => {
+                newBtn.disabled = true;
+                newBtn.textContent = '下载中...';
+                setProgress(0, '准备下载...');
+                log('开始下载...');
+
+                const cancelBtn = document.createElement('button');
+                cancelBtn.className = 'btn btn-ghost btn-sm';
+                cancelBtn.textContent = '取消';
+                cancelBtn.style.cssText = 'margin-left:8px';
+                newBtn.parentNode.appendChild(cancelBtn);
+
+                let cancelled = false;
+                cancelBtn.addEventListener('click', async () => {
+                  cancelled = true;
+                  await window.antbot.cancelDownload?.();
+                  cancelBtn.remove();
+                  hideProgress();
+                  newBtn.disabled = false;
+                  newBtn.textContent = '下载到下载目录';
+                  log('已取消下载');
+                  toast('已取消下载', 'info');
+                });
+
+                const removeListener = window.antbot.onUpdateProgress?.((p) => {
+                  if (p.key === 'app' && typeof p.percent === 'number') {
+                    let label = p.percent.toFixed(1) + '%';
+                    if (p.speedText) label = p.speedText + ' · ' + (p.downloadedText || '');
+                    if (p.totalText) label += ' / ' + p.totalText;
+                    setProgress(Math.min(99, p.percent), label);
+                  }
+                });
+
+                try {
+                  const r = await window.antbot.downloadWinUpdate(result.downloadUrl);
+                  if (removeListener) removeListener();
+                  cancelBtn?.remove();
+                  if (!r?.ok) throw new Error(r?.error || '下载失败');
+                  setProgress(100, '完成');
+                  log(`已下载到下载目录: ${r.savePath || r.assetName}`, 'success');
+                  toast('安装包已下载到下载目录', 'success');
+                  newBtn.disabled = false;
+                  newBtn.textContent = '已下载，点击重新下载';
+                } catch (e) {
+                  if (removeListener) removeListener();
+                  cancelBtn?.remove();
+                  if (cancelled) return;
+                  const bar = $t(`upd-${key}-bar`);
+                  if (bar) bar.style.background = 'var(--destructive)';
+                  setProgress(0, '失败');
+                  log('失败: ' + e.message, 'error');
+                  newBtn.disabled = false;
+                  newBtn.textContent = '重试';
+                }
+              });
+              // 浏览器下载兜底按钮
+              const browserBtn = document.createElement('button');
+              browserBtn.className = 'btn btn-ghost btn-sm';
+              browserBtn.textContent = '前往 GitHub';
+              browserBtn.style.cssText = 'margin-left:8px';
+              browserBtn.addEventListener('click', async () => {
+                try { await window.antbot.openExternal(result.releaseUrl); }
+                catch (e) { toast('打开浏览器失败: ' + e.message, 'error'); }
+              });
+              newBtn.parentNode.appendChild(browserBtn);
+            } else {
+              newBtn.textContent = '前往下载';
+              newBtn.addEventListener('click', async () => {
+                try {
+                  await window.antbot.openExternal(result.releaseUrl);
+                  log('已打开下载页面，请下载后手动安装', 'info');
+                  toast('已打开浏览器，请下载新版本后手动安装', 'info');
+                } catch (e) { toast('打开浏览器失败: ' + e.message, 'error'); }
+              });
+            }
           } else {
           newBtn.textContent = '下载并安装';
           newBtn.addEventListener('click', async () => {

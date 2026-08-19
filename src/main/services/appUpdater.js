@@ -180,12 +180,14 @@ function getCachedPath(url) {
 }
 
 // 原生 HTTP 下载（走系统代理，支持重定向和取消）
-function nodeDownload(url, destPath, onProgress, maxRedirects = 5, signal = null) {
+function nodeDownload(url, destPath, onProgress, maxRedirects = 5, signal = null, useCache = true) {
   return new Promise((resolve, reject) => {
-    const cached = getCachedPath(url);
-    if (cached) {
-      if (onProgress) onProgress({ percent: 100, speedText: '缓存', downloadedText: '已缓存' });
-      return resolve(cached);
+    if (useCache) {
+      const cached = getCachedPath(url);
+      if (cached) {
+        if (onProgress) onProgress({ percent: 100, speedText: '缓存', downloadedText: '已缓存' });
+        return resolve(cached);
+      }
     }
 
     const tmpPath = destPath + '.downloading';
@@ -251,7 +253,7 @@ function nodeDownload(url, destPath, onProgress, maxRedirects = 5, signal = null
               const stats = fsSync.statSync(tmpPath);
               if (stats.size < 1000) { fsSync.unlinkSync(tmpPath); return reject(new Error('下载的文件太小')); }
               fsSync.renameSync(tmpPath, destPath);
-              _downloadCache[url] = destPath;
+              if (useCache) _downloadCache[url] = destPath;
               if (onProgress) onProgress({ percent: 100, downloaded: stats.size, total: stats.size, speed: 0, speedText: '完成', downloadedText: formatBytes(stats.size), totalText: formatBytes(stats.size) });
               resolve(destPath);
             } catch (e) { fsSync.unlink(tmpPath, () => {}); reject(e); }
@@ -367,7 +369,7 @@ async function checkAppUpdate(force = false) {
       return { hasUpdate: false, currentVersion, latestVersion };
     }
 
-    // Windows: 跳转浏览器让用户手动下载安装
+    // Windows: 跳转浏览器让用户手动下载安装（同时提供直链下载到下载目录）
     if (process.platform === 'win32') {
       const winAsset = release.assets.find((a) =>
         String(a.name || '').includes('win') && String(a.name || '').endsWith('.exe')
@@ -381,7 +383,10 @@ async function checkAppUpdate(force = false) {
         latestVersion,
         changelog: release.body || '',
         openBrowser: true,
-        releaseUrl
+        releaseUrl,
+        downloadUrl: winAsset ? winAsset.browser_download_url : '',
+        fileSize: winAsset ? winAsset.size : 0,
+        assetName: winAsset ? winAsset.name : ''
       };
     }
 
@@ -544,6 +549,33 @@ async function installAppUpdate(zipPath, newVersion) {
   }
 }
 
+// ─── Windows 直链下载到下载目录 ───
+
+async function downloadWinUpdate(assetUrl, onProgress) {
+  if (!assetUrl) return { ok: false, error: '下载地址为空' };
+  if (_updating) return { ok: false, error: '更新进行中' };
+  _updating = true;
+
+  try {
+    _abortController = new AbortController();
+    const downloadsDir = app.getPath('downloads');
+    await fs.mkdir(downloadsDir, { recursive: true });
+    const assetName = path.basename(new URL(assetUrl).pathname) || 'AntBot-win-x64.exe';
+    const destPath = path.join(downloadsDir, assetName);
+
+    _log('info', `[更新] 开始下载 Windows 安装包到下载目录: ${destPath}`);
+    await nodeDownload(assetUrl, destPath, onProgress, 5, _abortController.signal, false);
+    _log('info', `[更新] Windows 安装包下载完成: ${destPath}`);
+
+    return { ok: true, savePath: destPath, assetName };
+  } catch (e) {
+    _log('error', `[更新] Windows 安装包下载失败: ${e.message}`);
+    return { ok: false, error: e.message };
+  } finally {
+    _updating = false;
+  }
+}
+
 // ─── 插件更新流程 ───
 
 async function downloadPluginUpdate(assetUrl, onProgress) {
@@ -658,6 +690,7 @@ module.exports = {
   checkAllUpdates,
   downloadAppUpdate,
   installAppUpdate,
+  downloadWinUpdate,
   downloadPluginUpdate,
   installPluginUpdate,
   getAppVersion,

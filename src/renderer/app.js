@@ -44,7 +44,7 @@ const statusMap={queued:'等待',pending:'等待',running:'执行中',cancelling
 const statusText=(s)=>statusMap[s]||s;
 
 /* ── Icons ── */
-function injectIcons(){document.querySelectorAll('[data-icon]').forEach(e=>{const n=e.dataset.icon;if(ICONS[n])e.innerHTML=ICONS[n];})}
+function injectIcons(scope){const base=scope||document;base.querySelectorAll('[data-icon]').forEach(e=>{const n=e.dataset.icon;if(ICONS[n])e.innerHTML=ICONS[n];})}
 function closeDlg(dlg){if(!dlg)return;dlg.classList.add('closing');setTimeout(()=>{dlg.close();dlg.classList.remove('closing');},180);}
 function confirmDialog(message,{danger=true,okText='确定'}={}){
   return new Promise(resolve=>{
@@ -322,16 +322,23 @@ function taskCard(t,live=false){
   const overlay=isCancelling?'<div class="task-cancelling">取消中...</div>':'';
   return`<div class="task ${esc(st)}">${inner}${overlay}</div>`;
 }
+/* 时间线增量渲染缓存：key=runId → {sig, html, el}，sig 不变时复用已有 DOM 节点 */
+const _chatCache = new Map();
+function chatGroupKey(g){return (g.persisted?'p:':g.live?'l:':'h:')+g.runId}
+function chatGroupSig(g){
+  const taskSig=g.tasks.map(t=>[t.id,t.status,t.progress,t.retryCount,t.message,t.taskName,t.outputPath,(t.platforms||[]).join(','),t.isOriginal?'1':'0',t.campaignName||'',t.publishAt||'',t.duration||0,t.startedAt||'',t.completedAt||'',t.index||0,t.queueIndex||0,t.attempt||1,JSON.stringify(t._exec||{})].join('¦')).join('§');
+  return `${g.at}|${g.msgHtml||''}|${g.rulesHtml||''}|${taskSig}`;
+}
 function renderChat(opts={}){
   if(!el.stream)return;const stick=opts.stick,lg=liveGroups();
   const groups=[];let day='';
   /* 时间线组：消息（平铺）+ 规则（折叠）+ 任务栈；全部收集后按时间升序（旧上、新下） */
-  const push=(at,runId,persisted,msgHtml,rulesHtml,tasksHtml)=>{
-    groups.push({at:at?new Date(at).getTime():0,runId:String(runId||''),persisted,msgHtml,rulesHtml,tasksHtml});
+  const push=(at,runId,persisted,live,msgHtml,rulesHtml,tasksHtml)=>{
+    groups.push({at:at?new Date(at).getTime():0,runId:String(runId||''),persisted,live,msgHtml,rulesHtml,tasksHtml});
   };
   for(const r of (S.history||[]).slice(-S.chatCount)){
     const txt=r.inputText||(r.items||[]).map(i=>i.rawLine||i.taskName).filter(Boolean).join('\n');
-    push(r.startedAt||r.endedAt,r.id,false,txt?`<div class="msg-user">${makeMessageHtml(txt,null)}</div>`:'','',`<div class="task-stack">${dedupeHistoryItems(r.items).map(i=>taskCard(i)).join('')}</div>`);
+    push(r.startedAt||r.endedAt,r.id,false,false,txt?`<div class="msg-user">${makeMessageHtml(txt,null)}</div>`:'','',`<div class="task-stack">${dedupeHistoryItems(r.items).map(i=>taskCard(i)).join('')}</div>`);
   }
   // 持久化的主控任务（重新发布状态，重启后保留）
   const historyIds=new Set((S.history||[]).flatMap(r=>(r.items||[]).map(i=>i.taskId)));
@@ -340,23 +347,46 @@ function renderChat(opts={}){
     const byRun={};
     for(const t of persisted){const key=t.batchRunId||'persisted';if(!byRun[key])byRun[key]={tasks:[],at:t.submittedAt||t.updatedAt,inputText:t.inputText||''};byRun[key].tasks.push(t);}
     for(const [,g] of Object.entries(byRun)){
-      push(g.at,g.tasks[0]?.batchRunId||'',true,g.inputText?`<div class="msg-user">${makeMessageHtml(g.inputText,null)}</div>`:'','',`<div class="task-stack">${g.tasks.map(t=>taskCard(t)).join('')}</div>`);
+      push(g.at,g.tasks[0]?.batchRunId||'',true,false,g.inputText?`<div class="msg-user">${makeMessageHtml(g.inputText,null)}</div>`:'','',`<div class="task-stack">${g.tasks.map(t=>taskCard(t)).join('')}</div>`);
     }
   }
   for(const g of lg){
-    push(g.at,g.id,false,g.txt?`<div class="msg-user">${makeMessageHtml(g.txt,g.rules)}</div>`:'','',`<div class="task-stack">${g.tasks.map(t=>taskCard(t,true)).join('')}</div>`);
+    push(g.at,g.id,false,true,g.txt?`<div class="msg-user">${makeMessageHtml(g.txt,g.rules)}</div>`:'','',`<div class="task-stack">${g.tasks.map(t=>taskCard(t,true)).join('')}</div>`);
   }
   // 按时间升序：最早在上、最新（进行中的任务）在最下
   groups.sort((a,b)=>a.at-b.at);
-  const parts=[];
+  const used=new Set();
+  const frag=document.createDocumentFragment();
   for(const g of groups){
     const at=g.at?new Date(g.at):null;
     const d=at?fmtDay(at):'';
-    if(d&&d!==day){day=d;parts.push(`<div class="chat-day">${esc(d)}</div>`)}
-    const pv=g.persisted?' data-persisted="1"':'';
-    parts.push(`<div class="run-group" data-run-id="${esc(g.runId)}"${pv}><div class="msg-time">${esc(at?fmtDate(at):'')}</div>${g.msgHtml}${g.rulesHtml||''}${g.tasksHtml}</div>`);
+    if(d&&d!==day){day=d;const dayEl=document.createElement('div');dayEl.className='chat-day';dayEl.textContent=esc(d);frag.appendChild(dayEl);}
+    const key=chatGroupKey(g);
+    const sig=chatGroupSig(g);
+    let hit=_chatCache.get(key);
+    if(!hit||hit.sig!==sig){
+      hit={sig,html:`<div class="msg-time">${esc(at?fmtDate(at):'')}</div>${g.msgHtml}${g.rulesHtml||''}${g.tasksHtml}`,el:null};
+      _chatCache.set(key,hit);
+    }
+    if(hit.el&&hit.el.isConnected){used.add(key);frag.appendChild(hit.el);continue;}
+    const div=document.createElement('div');
+    div.className='run-group';
+    div.setAttribute('data-run-id',esc(g.runId));
+    if(g.persisted)div.setAttribute('data-persisted','1');
+    div.innerHTML=hit.html;
+    hit.el=div;
+    used.add(key);
+    frag.appendChild(div);
   }
-  el.stream.innerHTML=parts.length?parts.join(''):'<div class="chat-empty">还没有任务。</div>';
+  // 移除已消失的组
+  for(const [k,h] of _chatCache){if(!used.has(k)&&h.el&&h.el.isConnected){h.el.remove();}}
+  if(!groups.length){
+    el.stream.replaceChildren(frag);
+    const empty=document.createElement('div');empty.className='chat-empty';empty.textContent='还没有任务。';
+    el.stream.appendChild(empty);
+    return;
+  }
+  el.stream.replaceChildren(frag);
   injectIcons();
   if(stick)requestAnimationFrame(()=>{el.scroll.scrollTop=el.scroll.scrollHeight});
 }
@@ -2158,7 +2188,19 @@ function bind(){
   // Chat scroll
   el.scroll?.addEventListener('scroll',()=>{if(!el.scroll||el.scroll.scrollTop>80||S.chatCount>=S.history.length)return;const ph=el.scroll.scrollHeight,pt=el.scroll.scrollTop;S.chatCount=Math.min(S.chatCount+20,S.history.length);renderChat();requestAnimationFrame(()=>{el.scroll.scrollTop=el.scroll.scrollHeight-ph+pt})});
   // IPC
-  window.antbot.onProgress(p=>{const pin=el.scroll&&(el.scroll.scrollHeight-el.scroll.scrollTop-el.scroll.clientHeight<80);const oldTasks=S.progress?.tasks||[];S.progress=p||S.progress;if(p?.tasks){const cancelIds=new Set(oldTasks.filter(t=>t.status==='cancelling').map(t=>t.id));p.tasks.forEach(t=>{if(cancelIds.has(t.id)&&t.status!=='stopped'&&t.status!=='failed'&&t.status!=='completed')t.status='cancelling'})}renderChat({stick:pin});renderBtns();renderStats();renderStatus()});
+  let progressTimer=null,progressPending=null;
+  window.antbot.onProgress(p=>{
+    progressPending=p||S.progress;
+    if(progressTimer)return;
+    progressTimer=setTimeout(()=>{
+      progressTimer=null;
+      const p2=progressPending;progressPending=null;
+      if(!p2)return;
+      const pin=el.scroll&&(el.scroll.scrollHeight-el.scroll.scrollTop-el.scroll.clientHeight<80);
+      const oldTasks=S.progress?.tasks||[];S.progress=p2;if(p2?.tasks){const cancelIds=new Set(oldTasks.filter(t=>t.status==='cancelling').map(t=>t.id));p2.tasks.forEach(t=>{if(cancelIds.has(t.id)&&t.status!=='stopped'&&t.status!=='failed'&&t.status!=='completed')t.status='cancelling'})}
+      renderChat({stick:pin});renderBtns();renderStats();renderStatus();
+    },100);
+  });
   window.antbot.onToast?.((msg, type) => { if (msg) toast(msg, type || 'info'); });
   window.antbot.onVoiceCloneProgress(p=>{
     // Update animation text

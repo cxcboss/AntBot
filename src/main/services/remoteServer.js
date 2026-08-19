@@ -4,7 +4,6 @@ const crypto = require('node:crypto');
 const path = require('node:path');
 const fs = require('node:fs/promises');
 const os = require('node:os');
-const { execFile } = require('node:child_process');
 
 const REMOTE_PORT = 18931;
 const TOKEN_TTL = 24 * 60 * 60 * 1000; // 会话 24 小时过期
@@ -134,34 +133,6 @@ function checkPortOpen(port, host = '127.0.0.1', timeoutMs = 1200) {
   });
 }
 
-async function getDiskSpace(targetPath) {
-  try {
-    if (process.platform === 'win32') {
-      const { stdout } = await new Promise((resolve, reject) => {
-        execFile('powershell', ['-NoProfile', '-Command', `Get-PSDrive -Name $((Get-Item '${targetPath.replace(/'/g, "''")}').PSDrive.Name) | Select-Object @{n='Used';e={[math]::Round($_.Used/1GB,1)}},@{n='Free';e={[math]::Round($_.Free/1GB,1)}} | ConvertTo-Json`], { timeout: 5000, windowsHide: true }, (e, so) => e ? reject(e) : resolve({ stdout: so }));
-      });
-      const m = stdout.match(/\{\s*"Used"\s*:\s*([\d.]+)[\s\S]*?"Free"\s*:\s*([\d.]+)/);
-      if (m) {
-        const used = parseFloat(m[1]), free = parseFloat(m[2]);
-        return { totalGB: used + free, usedGB: used, freeGB: free };
-      }
-    } else {
-      const { stdout } = await new Promise((resolve, reject) => {
-        execFile('df', ['-k', targetPath], { timeout: 5000 }, (e, so) => e ? reject(e) : resolve({ stdout: so }));
-      });
-      const lines = stdout.trim().split('\n');
-      const line = lines[lines.length - 1];
-      const parts = line.trim().split(/\s+/);
-      if (parts.length >= 4) {
-        const blocks = parseInt(parts[1], 10), used = parseInt(parts[2], 10), avail = parseInt(parts[3], 10);
-        const totalGB = blocks * 512 / 1024 / 1024 / 1024;
-        return { totalGB: +totalGB.toFixed(1), usedGB: +(used * 512 / 1024 / 1024 / 1024).toFixed(1), freeGB: +(avail * 512 / 1024 / 1024 / 1024).toFixed(1) };
-      }
-    }
-  } catch {}
-  return null;
-}
-
 async function getVoiceboxStatus() {
   const open = await checkPortOpen(17493);
   if (!open) return { running: false };
@@ -184,13 +155,13 @@ async function getVoiceboxStatus() {
 async function getServicesStatus() {
   const tunnel = (() => { try { return require('./tunnelManager').getStatus(); } catch { return { running: false }; } })();
   const [api, bridge, voicebox, remote] = await Promise.all([
-    checkPortOpen(18930), checkPortOpen(18321), getVoiceboxStatus(), checkPortOpen(18931),
+    checkPortOpen(18930), checkPortOpen(18321), getVoiceboxStatus(), checkPortOpen(_remotePort),
   ]);
   return {
     api: { name: '本地 API', port: 18930, running: api },
     bridge: { name: '桥接服务', port: 18321, running: bridge },
     voicebox: { name: '配音引擎', port: 17493, running: voicebox.running },
-    remote: { name: '远程服务', port: 18931, running: remote },
+    remote: { name: '远程服务', port: _remotePort, running: remote },
     tunnel: { name: '隧道', port: null, running: Boolean(tunnel.running), url: tunnel.url || null },
   };
 }
@@ -208,7 +179,7 @@ async function getApiUsage() {
 
 async function getStatus() {
   const tasks = _taskRunner ? _taskRunner.progressRows || [] : [];
-  const [services, disk, usage] = await Promise.all([getServicesStatus(), getDiskSpace(os.homedir()), getApiUsage()]);
+  const [services, usage] = await Promise.all([getServicesStatus(), getApiUsage()]);
   return {
     running: _taskRunner?.running || false,
     taskCount: tasks.length,
@@ -228,12 +199,11 @@ async function getStatus() {
       enqueuedAt: t.enqueuedAt || '',
       outputPath: t.outputPath || '',
       duration: t.duration || 0,
+      retryCount: t.retryCount || 0,
       _exec: t._exec || null,
     })),
     services,
-    disk,
     usage,
-    system: { platform: process.platform, uptime: Math.floor(process.uptime()), memoryFreeGB: +(os.freemem() / 1024 / 1024 / 1024).toFixed(1) },
   };
 }
 
@@ -441,6 +411,46 @@ function startRemoteServer({ store, taskRunner, mainWindowRef, appLog }) {
           return sendJson(res, 200, { ok: true, ...result });
         } catch (e) {
           return sendJson(res, 400, { ok: false, error: e.message });
+        }
+      }
+
+      // POST /remote/tasks/:id/republish — 重新发布已完成的视频（与 App 端 task:republish 同逻辑）
+      const republishMatch = pathname.match(/^\/remote\/tasks\/([^/]+)\/republish$/);
+      if (method === 'POST' && republishMatch) {
+        const taskId = republishMatch[1];
+        try {
+          const { publishVideo } = require('./publisher');
+          const settings = _store ? await _store.getSettings() : null;
+          const row = _taskRunner?.progressRows?.find(r => r.id === taskId);
+          let historyItem = null;
+          try {
+            const historyPath = path.join(os.homedir(), 'AntBot', 'antbot-store.json');
+            const data = JSON.parse(await fs.readFile(historyPath, 'utf-8'));
+            historyItem = (data.users?.[0]?.history || []).flatMap(h => h.items || []).find(i => i.id === taskId);
+          } catch {}
+          let persistedItem = null;
+          try { persistedItem = (await _taskRunner.loadPersistedTasks()).find(t => t.id === taskId); } catch {}
+          const outputPath = row?.outputPath || historyItem?.outputPath || persistedItem?.outputPath;
+          if (!outputPath) return sendJson(res, 200, { ok: false, error: '未找到视频文件路径' });
+
+          let fileExists = false;
+          try { const stat = await fs.stat(outputPath); fileExists = stat.isFile() && stat.size > 0; } catch {}
+          if (!fileExists) {
+            return sendJson(res, 200, { ok: false, error: 'FILE_DELETED', outputPath, rawLine: row?.rawLine || historyItem?.rawLine || persistedItem?.rawLine || '' });
+          }
+
+          if (settings?.publish?.enabled === false) return sendJson(res, 200, { ok: false, error: '自动发布已关闭' });
+          _taskRunner.setTaskState(taskId, { status: 'running', step: '发布', progress: 95, message: '重新发布中...' });
+          const task = { id: taskId, rawLine: row?.rawLine || historyItem?.rawLine || persistedItem?.rawLine || '', publishCopy: row?.publishCopy || historyItem?.publishCopy || persistedItem?.publishCopy || '', publishTopics: row?.publishTopics || historyItem?.publishTopics || persistedItem?.publishTopics || [], platforms: row?.platforms || historyItem?.platforms || persistedItem?.platforms || [], campaignName: row?.campaignName || historyItem?.campaignName || persistedItem?.campaignName || '' };
+          const result = await publishVideo({ task, settings, outputPath, log: (msg) => log('info', `[republish] ${msg}`) });
+          const publishedPlatforms = result?.platforms || [];
+          const platformNames = publishedPlatforms.map(p => p === 'videoChannel' ? '视频号' : '抖音').join('、');
+          _taskRunner.setTaskState(taskId, { status: 'completed', progress: 100, step: '完成', message: platformNames ? `已发布到 ${platformNames}` : '发布完成' });
+          await _taskRunner.removePersistedTask(taskId).catch(() => {});
+          return sendJson(res, 200, { ok: true });
+        } catch (e) {
+          _taskRunner?.setTaskState(taskId, { status: 'warning', step: '部分完成', message: `发布失败: ${e.message}` });
+          return sendJson(res, 200, { ok: false, error: e.message });
         }
       }
 

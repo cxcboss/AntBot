@@ -70,6 +70,8 @@ find release/mac-arm64/搬运蚁.app -name '__MACOSX' -type d -exec rm -rf {} +
 
 ### 2.2 发布到 GitHub
 
+**每次发布必须同时打包并上传两个平台产物**（mac zip + win exe），Assets 里必须有 mac 和 win 的版本 App：
+
 ```bash
 # 1. 提交并打 tag
 git add -A
@@ -77,13 +79,17 @@ git commit -m "v0.7.3: 更新说明"
 git tag v0.7.3
 git push origin main --tags
 
-# 2. 创建 Release（可选：同时上传 .app 压缩包作为资产）
+# 2. 创建 Release（必须同时上传 mac zip 和 win exe 两个资产）
 ditto -c -k --sequesterRsrc --keepParent "./搬运蚁.app" "/tmp/antbot-macos-arm64.zip"
-gh release create v0.7.3 /tmp/antbot-macos-arm64.zip \
+gh release create v0.7.3 \
+  /tmp/antbot-macos-arm64.zip \
+  "./AntBot-0.7.3-win-x64.exe" \
   --title "v0.7.3" \
   --notes "## v0.7.3\n\n### 修复\n- xxx\n### 新功能\n- xxx" \
   --repo cxcboss/AntBot
 ```
+
+> 大文件上传（283MB mac zip + 214MB win exe）直接跑 `gh release upload` 会超时，改用后台 nohup 方式上传（见历史记录）。
 
 ### 2.3 注意事项
 

@@ -267,7 +267,7 @@ body:not([data-platform="darwin"]) .toasts{top:8px}
 .chat-stream{display:flex;flex-direction:column;max-width:640px;margin:0 auto;min-height:100%}
 
 /* 时间线分组：消息+任务为一个 run-group，组间分割线 */
-.run-group{display:flex;flex-direction:column;gap:4px;padding:16px 0}
+.run-group{display:flex;flex-direction:column;gap:4px;padding:16px 0;content-visibility:auto;contain-intrinsic-size:auto 140px}
 .run-group+.run-group{border-top:1px solid var(--border)}
 .chat-day{display:flex;align-items:center;gap:12px;padding:20px 0 0;font-size:11px;color:var(--muted-foreground)}
 .chat-day::before,.chat-day::after{content:'';flex:1;height:1px;background:var(--border)}

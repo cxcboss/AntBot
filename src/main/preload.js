@@ -49,6 +49,7 @@ contextBridge.exposeInMainWorld('antbot', {
   // Update system
   checkAllUpdates: (options) => ipcRenderer.invoke('update:check-all', options || {}),
   downloadAppUpdate: (url) => ipcRenderer.invoke('update:download-app', url),
+  downloadWinUpdate: (url) => ipcRenderer.invoke('update:download-win', url),
   installAppUpdate: (zipPath, newVersion) => ipcRenderer.invoke('update:install-app', zipPath, newVersion),
   cancelDownload: () => ipcRenderer.invoke('update:cancel'),
   downloadPluginUpdate: (url) => ipcRenderer.invoke('update:download-plugin', url),

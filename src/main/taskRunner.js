@@ -136,7 +136,14 @@ class TaskRunner {
   }
 
   emitProgress() {
-    this.onProgress(this.getSnapshot());
+    this._progressDirty = true;
+    if (this._progressTimer) return;
+    this._progressTimer = setTimeout(() => {
+      this._progressTimer = null;
+      if (!this._progressDirty) return;
+      this._progressDirty = false;
+      this.onProgress(this.getSnapshot());
+    }, 200);
   }
 
   getSnapshot() {
