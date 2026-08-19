@@ -60,6 +60,8 @@ npm run build:win:portable   # 或便携版 exe
 
 | 版本 | 日期 | 修改内容 |
 |------|------|---------|
+| 0.8.3 | 2026-08-19 | Windows 兼容全面加固（Win10+ x64）：① 编码器功能性探测（1 帧试编码，qsv→nvenc 逐个验证驱动，最终兜底 libx264），合成运行期编码器失败自动降级 libx264 重试，不再因 N 卡驱动过旧硬失败；② Windows 禁用 system TTS（say 仅 macOS）；③ voicebox 去 Git Bash 依赖（Windows 原生 python -m venv + pip，后端复制到 ~/AntBot/auto-dub-web 可写目录运行，记录 torch 来源防 CPU/CUDA 互相覆盖，补 child.unref）；④ local-server 绑 127.0.0.1 + Host 校验 + 路径穿越校验（消防火墙弹窗与局域网风险）；⑤ 依赖下载链（ffmpeg/yt-dlp/node/cloudflared/CF API）统一走系统代理（proxyFetch + ProxyServer 多协议格式修复）；⑥ npm 托管解析（node-runtime npm-cli.js）；⑦ 7 处 execSync/execFile 补 windowsHide；⑧ 默认输出目录改用 app.getPath('desktop')（OneDrive 重定向）；⑨ win 更新 asset 精确匹配（排除 portable）；⑩ canRunBinary 超时 Windows 放宽 5s + 跳过 Store 桩；⑪ 中文字体兜底（Arial/Segoe UI）+ 存在性校验；⑫ 缩略图 30s 超时 + stderr；⑬ NSIS 中文安装器（zh_CN/en_US）+ build.files 加 assets/icon.png；⑭ 临时目录清理失败记日志。含 0.8.2 全部改动，合成一个版本 |
+| 0.8.2 | 2026-08-19 | 修复主控不显示历史记录+发任务报 map 错误（chatGroupSig 误用 tasks 数组，改用 tasksHtml 签名）；更新页新增浏览器插件"安装插件"按钮+安装教学；浏览器插件支持 App 启动自动更新；全部报错信息中文化（timeout/ffmpeg failed/Not found/fetch failed/HTTP 状态码/npm install exit 等）；远程状态页修复手机端无法滚动（100vh→100dvh），远程页面 v1.9.1。仅打 mac 测试包（未发布） |
 | 0.8.1 | 2026-08-19 | 主控流畅度优化（A 渲染节流 100ms 合并 + B 时间线增量渲染只重建变化任务组 + C 主进程 progress 推送 200ms 节流 + D 历史 run-group content-visibility）；修复远程状态页"远程服务"误报已停止（探测端口硬编码 18931 改为实际端口 17888）；远程主控同步 App（任务卡片状态/按钮/取消遮罩/chips 音色分类弹窗等，远程页面 v1.9.0）；移除远程状态页磁盘/内存显示；远程新增重新发布接口；Win 更新页支持直接下载安装包到下载目录（含前往 GitHub 兜底按钮） |
 | 0.8.0 | 2026-08-19 | 修复主控定时发布任务完成后仍显示"定时已过期"（completed/warning 状态不再显示过期标签）；版本规则改为 9 进制进位（patch/minor 到 9 进位），0.7.10 后续版本统一为 0.8.0 |
 | 0.7.10 | 2026-08-19 | 修复远程访问失败：cloudflared 命名隧道 config.yml 的 ingress 端口与服务端口不一致（18931 vs 17888），启动隧道时自动同步端口 |

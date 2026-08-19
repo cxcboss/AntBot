@@ -79,8 +79,19 @@ function register({ ipcMain, store, mainWindowRef, appLog }) {
             '-y',
             thumbnailPath
           ], { windowsHide: true });
-          child.on('close', (code) => code === 0 ? resolve() : reject(new Error('ffmpeg failed')));
-          child.on('error', reject);
+          let stderr = '';
+          const timer = setTimeout(() => {
+            try { child.kill('SIGKILL'); } catch {}
+            reject(new Error('ffmpeg 生成缩略图超时'));
+          }, 30000);
+          child.stdout.on('data', () => {});
+          child.stderr.on('data', (d) => { stderr += d.toString(); });
+          child.on('close', (code) => {
+            clearTimeout(timer);
+            if (code === 0) resolve();
+            else reject(new Error(`ffmpeg 生成缩略图失败（exit ${code}）${String(stderr).split('\n').filter(Boolean).slice(-2).join(' ')}`));
+          });
+          child.on('error', (e) => { clearTimeout(timer); reject(e); });
         });
       }
 

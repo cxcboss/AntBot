@@ -5,6 +5,7 @@ const os = require('node:os');
 const http = require('node:http');
 const https = require('node:https');
 const tls = require('node:tls');
+const { proxyFetch, parseWindowsProxyServer } = require('./proxyFetch');
 
 // 检测系统代理（cloudflared 需要走代理才能绕过 fake-ip DNS 的 UDP 超时）
 function getSystemProxy() {
@@ -23,11 +24,14 @@ function getSystemProxy() {
     } else if (process.platform === 'win32') {
       // Windows: 注册表 Internet Settings
       const key = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings';
-      const enable = execFileSync('reg', ['query', key, '/v', 'ProxyEnable'], { timeout: 3000 }).toString();
+      const enable = execFileSync('reg', ['query', key, '/v', 'ProxyEnable'], { timeout: 3000, windowsHide: true }).toString();
       if (/0x1\s*$/.test(enable.trim())) {
-        const server = execFileSync('reg', ['query', key, '/v', 'ProxyServer'], { timeout: 3000 }).toString();
-        const m = server.match(/ProxyServer\s+REG_SZ\s+([^\s]+)/);
-        if (m) return `http://${m[1]}`;
+        const server = execFileSync('reg', ['query', key, '/v', 'ProxyServer'], { timeout: 3000, windowsHide: true }).toString();
+        const m = server.match(/ProxyServer\s+REG_SZ\s+(.+)/);
+        if (m) {
+          const proxyUrl = parseWindowsProxyServer(m[1].trim());
+          if (proxyUrl) return proxyUrl;
+        }
       }
     }
   } catch {}
@@ -193,7 +197,7 @@ async function setupNamedTunnel(cfToken, port) {
 
   // 1. 获取账户 ID
   log('info', '获取 Cloudflare 账户信息...');
-  const accountsRes = await fetch(`${CF_API}/accounts`, {
+  const accountsRes = await proxyFetch(`${CF_API}/accounts`, {
     headers: { 'Authorization': `Bearer ${cfToken}` }
   });
   const accounts = await accountsRes.json();
@@ -202,7 +206,7 @@ async function setupNamedTunnel(cfToken, port) {
 
   // 2. 获取域名区域 ID
   log('info', '获取域名区域...');
-  const zonesRes = await fetch(`${CF_API}/zones?name=${DOMAIN}`, {
+  const zonesRes = await proxyFetch(`${CF_API}/zones?name=${DOMAIN}`, {
     headers: { 'Authorization': `Bearer ${cfToken}` }
   });
   const zones = await zonesRes.json();
@@ -216,7 +220,7 @@ async function setupNamedTunnel(cfToken, port) {
 
   // 4. 创建命名隧道
   log('info', `创建隧道 ${subdomain}...`);
-  const tunnelRes = await fetch(`${CF_API}/accounts/${accountId}/cfd_tunnel`, {
+  const tunnelRes = await proxyFetch(`${CF_API}/accounts/${accountId}/cfd_tunnel`, {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${cfToken}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ name: `antbot-${subdomain}` })
@@ -228,7 +232,7 @@ async function setupNamedTunnel(cfToken, port) {
 
   // 5. 创建 DNS CNAME 记录
   log('info', `创建 DNS 记录 ${fqdn}...`);
-  await fetch(`${CF_API}/zones/${zoneId}/dns_records`, {
+  await proxyFetch(`${CF_API}/zones/${zoneId}/dns_records`, {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${cfToken}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -241,7 +245,7 @@ async function setupNamedTunnel(cfToken, port) {
 
   // 6. 配置隧道路由
   log('info', '配置隧道路由...');
-  await fetch(`${CF_API}/accounts/${accountId}/cfd_tunnel/${tunnelId}/configurations`, {
+  await proxyFetch(`${CF_API}/accounts/${accountId}/cfd_tunnel/${tunnelId}/configurations`, {
     method: 'PUT',
     headers: { 'Authorization': `Bearer ${cfToken}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({

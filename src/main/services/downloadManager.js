@@ -149,8 +149,9 @@ function parseProgress(line) {
 
 class DownloadManager {
   constructor({ maxConcurrent = 3, outputBaseDir, onTaskUpdate, log } = {}) {
+    const { getDesktopDir } = require('./config');
     this.maxConcurrent = maxConcurrent;
-    this.outputBaseDir = outputBaseDir || path.join(os.homedir(), 'Desktop', '视频');
+    this.outputBaseDir = outputBaseDir || path.join(getDesktopDir(), '视频');
     this.downloadDir = path.join(this.outputBaseDir, '视频下载');
     this.onTaskUpdate = onTaskUpdate || (() => {});
     this.log = log || (() => {});
@@ -195,13 +196,13 @@ class DownloadManager {
       const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], env, windowsHide: true });
       let output = '';
       let settled = false;
-      const timer = setTimeout(() => { if (settled) return; settled = true; try { child.kill(); } catch {} reject(new Error('timeout')); }, 8000);
+      const timer = setTimeout(() => { if (settled) return; settled = true; try { child.kill(); } catch {} reject(new Error('检测超时')); }, 8000);
       const finish = (fn, val) => { if (settled) return; settled = true; clearTimeout(timer); fn(val); };
       child.stdout?.on('data', d => { output += d.toString(); });
       child.stderr?.on('data', d => { output += d.toString(); });
       child.on('close', () => {
         if (output.includes('.') || output.includes('version')) finish(resolve, true);
-        else finish(reject, new Error(`no version output: ${output.slice(0, 100)}`));
+        else finish(reject, new Error(`未检测到版本信息: ${output.slice(0, 100)}`));
       });
       child.on('error', (e) => finish(reject, e));
     });
@@ -239,7 +240,8 @@ class DownloadManager {
     if (isWin) artifact = 'yt-dlp.exe';
     else if (process.platform === 'linux') artifact = process.arch === 'arm64' ? 'yt-dlp_linux_aarch64' : 'yt-dlp_linux';
     const url = `https://github.com/yt-dlp/yt-dlp/releases/latest/download/${artifact}`;
-    const res = await fetch(url);
+    const { proxyFetch } = require('./proxyFetch');
+    const res = await proxyFetch(url);
     if (!res.ok) throw new Error(`下载 yt-dlp 失败: HTTP ${res.status}`);
     const buf = Buffer.from(await res.arrayBuffer());
     await fs.writeFile(target, buf);

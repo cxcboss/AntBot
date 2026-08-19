@@ -188,7 +188,7 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
       await new Promise((resolve, reject) => {
         if (process.platform === 'win32') {
           const esc = s => String(s||'').replace(/'/g, "''");
-          execFile('powershell.exe', ['-NoProfile', '-Command', `Expand-Archive -LiteralPath '${esc(zipPath)}' -DestinationPath '${esc(tmpDir)}' -Force`], { timeout: 30000 }, (err) => err ? reject(err) : resolve());
+          execFile('powershell.exe', ['-NoProfile', '-Command', `Expand-Archive -LiteralPath '${esc(zipPath)}' -DestinationPath '${esc(tmpDir)}' -Force`], { timeout: 30000, windowsHide: true }, (err) => err ? reject(err) : resolve());
         } else {
           execFile('unzip', ['-o', '-q', zipPath, '-d', tmpDir], { timeout: 30000 }, (err) => err ? reject(err) : resolve());
         }

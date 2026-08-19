@@ -77,6 +77,7 @@ contextBridge.exposeInMainWorld('antbot', {
   revealInFolder: (filePath) => ipcRenderer.invoke('app:reveal-in-folder', filePath),
   openDataDir: () => ipcRenderer.invoke('app:open-data-dir'),
   openPluginDir: () => ipcRenderer.invoke('open-plugin-dir'),
+  openPluginInstallPage: () => ipcRenderer.invoke('plugin:open-install-page'),
   openDir: (dirPath) => ipcRenderer.invoke('open-dir', dirPath),
   checkDep: (tool) => ipcRenderer.invoke('deps:check', tool),
   installDep: (tool) => ipcRenderer.invoke('deps:install', tool),

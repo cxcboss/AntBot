@@ -373,8 +373,18 @@
                   </div>
                 </div>
                 <div class="update-log" id="upd-plugin-log"></div>
-                <div style="margin-top:8px">
+                <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+                  <button class="btn btn-sm btn-ghost" id="upd-plugin-install-btn" type="button">安装插件</button>
                   <button class="btn btn-sm btn-ghost" id="upd-plugin-dir-btn" type="button">浏览器插件位置</button>
+                </div>
+                <div class="update-plugin-guide">
+                  <p class="update-plugin-guide-title">如何安装浏览器插件</p>
+                  <ol class="update-plugin-guide-steps">
+                    <li>点击上方「安装插件」，在打开的浏览器扩展管理页面开启「开发者模式」</li>
+                    <li>点击「加载已解压的扩展程序」，选择文件夹：<code>~/AntBot/browser-plugin/chrome-extension</code></li>
+                    <li>安装后点击浏览器工具栏的插件图标，扫码登录抖音即可使用</li>
+                  </ol>
+                  <p class="update-plugin-guide-note">插件更新后，请在扩展管理页点击刷新按钮重新加载插件。</p>
                 </div>
               </div>
             </div>

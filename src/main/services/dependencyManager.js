@@ -128,6 +128,8 @@ function canRunBinary(command, args) {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true
     });
+    // Windows 冷启动 + 杀软扫描可能明显超过 2s，放宽到 5s 避免误判已安装工具为缺失
+    const timeoutMs = isWindows() ? 5000 : 2000;
     const timer = setTimeout(() => {
       try {
         child.kill('SIGKILL');
@@ -135,7 +137,7 @@ function canRunBinary(command, args) {
         // noop
       }
       resolve(false);
-    }, 2000);
+    }, timeoutMs);
 
     child.once('error', () => {
       clearTimeout(timer);
@@ -181,6 +183,10 @@ function getWindowsPythonCandidates() {
   }
 
   for (const entry of getPathEntries()) {
+    // 跳过 Windows Store 的 python 别名桩（App Execution Aliases 目录），避免弹商店/慢探测
+    if (/[\\/]WindowsApps[\\/]?$/i.test(entry.trim())) {
+      continue;
+    }
     candidates.push(path.join(entry, 'python.exe'));
     candidates.push(path.join(entry, 'python3.exe'));
   }
@@ -241,6 +247,31 @@ function getToolCandidates(tool) {
       '/usr/local/bin/cloudflared',
       '/usr/bin/cloudflared',
       'cloudflared'
+    ];
+  }
+
+  if (tool === 'npm') {
+    // npm 优先用托管 node-runtime 里的 npm（跨平台可靠）：
+    // 优先返回 node-runtime 的 npm-cli.js（用 node 执行，避免 .cmd shell 问题）
+    const nodeRuntimeDir = getManagedRuntimeDir('node');
+    const npmCli = path.join(nodeRuntimeDir, 'node_modules', 'npm', 'bin', 'npm-cli.js');
+    return [
+      process.env.ANTBOT_NPM_BIN,
+      npmCli,
+      path.join(nodeRuntimeDir, 'npm.cmd'),
+      path.join(nodeRuntimeDir, 'npm'),
+      path.join(managedBin, 'npm.cmd'),
+      path.join(bundledBin, 'npm.cmd'),
+      path.join(programFiles, 'nodejs', 'npm.cmd'),
+      path.join(programFilesX86, 'nodejs', 'npm.cmd'),
+      path.join(localAppData, 'Programs', 'nodejs', 'npm.cmd'),
+      ...pathEntries.map((entry) => path.join(entry, 'npm.cmd')),
+      ...pathEntries.map((entry) => path.join(entry, 'npm')),
+      '/opt/homebrew/bin/npm',
+      '/usr/local/bin/npm',
+      '/usr/bin/npm',
+      'npm.cmd',
+      'npm'
     ];
   }
 
@@ -320,7 +351,8 @@ async function resolveDependencyPath(tool) {
 }
 
 async function downloadText(url) {
-  const response = await fetch(url, { redirect: 'follow' });
+  const { proxyFetch } = require('./proxyFetch');
+  const response = await proxyFetch(url, { redirect: 'follow' });
   if (!response.ok) {
     throw new Error(`下载失败（HTTP ${response.status}）：${url}`);
   }
@@ -328,7 +360,8 @@ async function downloadText(url) {
 }
 
 async function downloadFile(url, targetPath, logger = () => {}) {
-  const response = await fetch(url, { redirect: 'follow' });
+  const { proxyFetch } = require('./proxyFetch');
+  const response = await proxyFetch(url, { redirect: 'follow' });
   if (!response.ok || !response.body) {
     throw new Error(`下载失败（HTTP ${response.status}）：${url}`);
   }
@@ -531,6 +564,21 @@ async function repairMissingDependencies(logger = () => {}) {
   return getDependencyState();
 }
 
+// 构建可靠的 npm 调用方式：
+// 1. 优先：托管 node-runtime 的 npm-cli.js（用 node 执行，跨平台无 .cmd shell 问题）
+// 2. 回退：系统 npm / npm.cmd（Windows 需 shell）
+async function buildNpmInvocation() {
+  const npmCli = path.join(getManagedRuntimeDir('node'), 'node_modules', 'npm', 'bin', 'npm-cli.js');
+  const nodeBin = await resolveDependencyPath('node');
+  if (nodeBin && await pathExists(npmCli)) {
+    return { command: nodeBin, args: [npmCli], shell: false };
+  }
+  if (isWindows()) {
+    return { command: 'npm.cmd', args: [], shell: true };
+  }
+  return { command: 'npm', args: [], shell: false };
+}
+
 function injectManagedBinIntoProcessEnv() {
   const managedBinDir = getManagedBinDir();
   process.env.ANTBOT_MANAGED_BIN = managedBinDir;
@@ -546,5 +594,6 @@ module.exports = {
   ensureWindowsDependency,
   repairMissingDependencies,
   getDependencyState,
+  buildNpmInvocation,
   injectManagedBinIntoProcessEnv
 };

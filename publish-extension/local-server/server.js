@@ -36,6 +36,25 @@ function bridgeCommandView(commandId) {
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
 
+// ── 本地服务安全：仅限本机访问（防止 Windows 防火墙弹窗 + 局域网任意访问）──
+app.use((req, res, next) => {
+  const host = String(req.headers.host || '');
+  const isLocal = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(host);
+  if (!isLocal) {
+    return res.status(403).json({ error: '仅允许本机访问' });
+  }
+  next();
+});
+
+// 路径归一化校验：拒绝包含路径穿越（..）的路径，防任意文件读取
+function normalizeRequestedPath(rawPath) {
+  if (typeof rawPath !== 'string' || !rawPath) return '';
+  const resolved = path.normalize(rawPath);
+  const parts = resolved.split(/[\\/]/).filter(Boolean);
+  if (parts.includes('..')) return '';
+  return resolved;
+}
+
 // ── 搬运蚁 / 浏览器插件桥接接口 ──
 app.get('/api/bridge/status', (req, res) => {
   const snapshot = bridgeQueue.snapshot();
@@ -551,8 +570,9 @@ app.get('/api/videos', (req, res) => {
 });
 
 app.get('/api/video/file', (req, res) => {
-  const filePath = req.query.path;
-  
+  const rawPath = req.query.path;
+  const filePath = normalizeRequestedPath(rawPath);
+
   if (!filePath) {
     return res.status(400).json({ error: '请提供视频文件路径' });
   }
@@ -596,8 +616,8 @@ app.get('/api/video/file', (req, res) => {
 });
 
 app.get('/api/video/info', (req, res) => {
-  const filePath = req.query.path;
-  
+  const filePath = normalizeRequestedPath(req.query.path);
+
   if (!filePath) {
     return res.status(400).json({ error: '请提供视频文件路径' });
   }
@@ -624,8 +644,11 @@ app.get('/api/video/info', (req, res) => {
 });
 
 app.get('/api/directories', (req, res) => {
-  const basePath = req.query.path || process.env.HOME;
-  
+  const rawPath = req.query.path || process.env.HOME;
+  const basePath = normalizeRequestedPath(rawPath) || path.resolve(process.env.HOME || process.env.USERPROFILE || '');
+  if (!basePath) {
+    return res.status(400).json({ error: '无效路径' });
+  }
   try {
     const items = fs.readdirSync(basePath, { withFileTypes: true });
     const directories = items
@@ -753,7 +776,8 @@ app.post('/update', (req, res) => {
   });
 });
 
-app.listen(PORT, () => {
+// 仅绑定 127.0.0.1：避免 Windows 防火墙弹窗 + 局域网任意访问风险；浏览器扩展走 localhost 不受影响
+app.listen(PORT, '127.0.0.1', () => {
   console.log(`视频文件服务运行在 http://localhost:${PORT}`);
   console.log('支持的格式:', VIDEO_EXTENSIONS.join(', '));
   console.log('发布历史记录将保存到:', HISTORY_FILE);

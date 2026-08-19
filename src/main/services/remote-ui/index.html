@@ -139,7 +139,7 @@ input[type=number]::-webkit-inner-spin-button{opacity:1}
 .dialog-empty{padding:var(--space-4);text-align:center;font-size:12px;color:var(--muted-foreground)}
 
 /* ── 布局壳 ── */
-.app{display:flex;flex-direction:column;height:100vh}
+.app{display:flex;flex-direction:column;height:100vh;height:-webkit-fill-available;height:100dvh}
 .header{display:flex;align-items:center;height:var(--header-h);padding:0 var(--space-3);background:var(--background);border-bottom:1px solid var(--border);gap:var(--space-2);flex-shrink:0}
 .header-title{flex:1;font-size:15px;font-weight:600;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .header-device{font-size:12px;color:var(--muted-foreground);cursor:pointer;padding:4px 10px;border-radius:var(--radius);transition:background var(--transition-fast);display:inline-flex;align-items:center;gap:4px;flex-shrink:0;max-width:40vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -321,7 +321,7 @@ input[type=number]::-webkit-inner-spin-button{opacity:1}
 .chip-popup .style-section-arrow.open{transform:rotate(90deg)}
 
 /* ── 登录页 ── */
-.login-wrap{display:flex;align-items:center;justify-content:center;height:100vh;padding:var(--space-6);background:var(--background);position:relative;overflow:hidden}
+.login-wrap{display:flex;align-items:center;justify-content:center;height:100vh;height:100dvh;padding:var(--space-6);background:var(--background);position:relative;overflow:hidden}
 .login-wrap::before{content:'';position:absolute;top:-160px;left:50%;transform:translateX(-50%);width:520px;height:520px;border-radius:50%;background:var(--muted);opacity:.5;filter:blur(80px);pointer-events:none}
 .login-card{position:relative;width:100%;max-width:360px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius-xl);padding:var(--space-8) var(--space-6);box-shadow:var(--shadow-lg);animation:login-in var(--transition-slow)}
 @keyframes login-in{from{opacity:0;transform:translateY(12px) scale(.98)}to{opacity:1;transform:translateY(0) scale(1)}}
@@ -425,7 +425,7 @@ input[type=number]::-webkit-inner-spin-button{opacity:1}
 <div id="app"></div>
 <script>
 const HUB_URL='https://hub.onebugmanai.online';
-const APP_VERSION='1.9.0';
+const APP_VERSION='1.9.1';
 let API=window.location.origin;
 let token=localStorage.getItem('antbot-token');
 let tasks=[];

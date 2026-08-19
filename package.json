@@ -1,6 +1,6 @@
 {
   "name": "antbot",
-  "version": "0.8.1",
+  "version": "0.8.3",
   "description": "搬运蚁 - 内置浏览器的视频下载、字幕生成、剪辑与发布工作台",
   "main": "src/main/index.js",
   "author": "",
@@ -45,6 +45,7 @@
     },
     "files": [
       "src/**/*",
+      "assets/icon.png",
       "package.json",
       "README.md"
     ],
@@ -104,7 +105,11 @@
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
-      "unicode": true
+      "unicode": true,
+      "installerLanguages": [
+        "zh_CN",
+        "en_US"
+      ]
     },
     "linux": {
       "target": [

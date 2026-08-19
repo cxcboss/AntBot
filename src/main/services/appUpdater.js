@@ -42,13 +42,15 @@ function detectProxy() {
       }
     } else if (process.platform === 'win32') {
       const { execSync } = require('node:child_process');
-      const out = execSync('reg query "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ProxyEnable', { encoding: 'utf-8', timeout: 3000 });
+      const out = execSync('reg query "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ProxyEnable', { encoding: 'utf-8', timeout: 3000, windowsHide: true });
       if (/0x1/.test(out)) {
-        const serverOut = execSync('reg query "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ProxyServer', { encoding: 'utf-8', timeout: 3000 });
+        const serverOut = execSync('reg query "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ProxyServer', { encoding: 'utf-8', timeout: 3000, windowsHide: true });
         const match = serverOut.match(/ProxyServer\s+REG_SZ\s+(.+)/);
         if (match) {
           const proxyAddr = match[1].trim();
-          _proxyAgent = createProxyAgent(proxyAddr.startsWith('http') ? proxyAddr : `http://${proxyAddr}`);
+          const { parseWindowsProxyServer } = require('./proxyFetch');
+          const proxyUrl = parseWindowsProxyServer(proxyAddr);
+          if (proxyUrl) _proxyAgent = createProxyAgent(proxyUrl);
         }
       }
     }
@@ -132,7 +134,7 @@ function nodeGet(url, maxRedirects = 5) {
           if (redirectsLeft <= 0) return reject(new Error('重定向次数过多'));
           return doRequest(res.headers.location, redirectsLeft - 1);
         }
-        if (res.statusCode !== 200) { res.resume(); return reject(new Error(`HTTP ${res.statusCode}`)); }
+        if (res.statusCode !== 200) { res.resume(); return reject(new Error(`请求失败（HTTP ${res.statusCode}）`)); }
         let data = '';
         res.setEncoding('utf-8');
         res.on('data', (chunk) => { data += chunk; });
@@ -371,9 +373,11 @@ async function checkAppUpdate(force = false) {
 
     // Windows: 跳转浏览器让用户手动下载安装（同时提供直链下载到下载目录）
     if (process.platform === 'win32') {
-      const winAsset = release.assets.find((a) =>
-        String(a.name || '').includes('win') && String(a.name || '').endsWith('.exe')
-      );
+      // 精确匹配 NSIS 安装版（AntBot-<ver>-win-x64.exe），排除 portable 版
+      const winAsset = release.assets.find((a) => {
+        const name = String(a.name || '');
+        return name.endsWith('.exe') && name.includes('win') && !name.includes('portable');
+      });
       const releaseUrl = winAsset
         ? winAsset.browser_download_url
         : `https://github.com/cxcboss/AntBot/releases/tag/${release.tag_name}`;
@@ -653,6 +657,27 @@ async function installPluginUpdate(zipPath, newVersion) {
   }
 }
 
+// ─── 浏览器插件自动更新（App 启动时调用）───
+
+async function autoUpdatePlugin() {
+  try {
+    const result = await checkPluginUpdate(true);
+    if (!result.hasUpdate || !result.downloadUrl) {
+      return { ok: true, alreadyLatest: true, version: result.currentVersion || '0.0.0' };
+    }
+    _log('info', `[更新] 发现插件新版本 v${result.latestVersion}（当前 v${result.currentVersion}），自动更新`);
+    const dl = await downloadPluginUpdate(result.downloadUrl);
+    if (!dl?.ok) throw new Error(dl?.error || '下载失败');
+    const inst = await installPluginUpdate(dl.zipPath, result.latestVersion);
+    if (!inst?.ok) throw new Error(inst?.error || '安装失败');
+    _log('info', `[更新] 插件已自动更新到 v${result.latestVersion}`);
+    return { ok: true, alreadyLatest: false, version: result.latestVersion };
+  } catch (e) {
+    _log('warn', `[更新] 插件自动更新失败: ${e.message}`);
+    return { ok: false, alreadyLatest: false, error: e.message };
+  }
+}
+
 // ─── 版本读取 ───
 
 async function getAppVersion() {
@@ -693,6 +718,7 @@ module.exports = {
   downloadWinUpdate,
   downloadPluginUpdate,
   installPluginUpdate,
+  autoUpdatePlugin,
   getAppVersion,
   getPluginVersion,
   clearCache,

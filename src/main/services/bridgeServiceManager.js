@@ -80,24 +80,39 @@ class BridgeServiceManager {
 
   async ensureWritableServerDir() {
     const fs = require('node:fs');
+    const crypto = require('node:crypto');
     const writableDir = this.getWritableServerDir();
     const serverJs = path.join(writableDir, 'server.js');
 
-    // 如果可写目录已有 server.js，直接用
-    if (fs.existsSync(serverJs)) {
-      return writableDir;
-    }
-
-    // 从 bundled 目录复制过来
     const bundledDir = this.getBundledServerDir();
     if (!bundledDir) {
       log('error', `${this.logPrefix} 找不到打包的服务文件`);
       return null;
     }
 
-    log('info', `${this.logPrefix} 复制服务文件到可写目录...`);
-    await fs.promises.mkdir(writableDir, { recursive: true });
-    await fs.promises.cp(bundledDir, writableDir, { recursive: true });
+    // 比较 bundled 与可写目录 server.js 的 hash：
+    // 若 bundled 更新（App 升级后服务代码变更），则重新复制，避免旧副本带旧 bug/旧安全配置
+    const bundledServerJs = path.join(bundledDir, 'server.js');
+    const needsRefresh = await (async () => {
+      try {
+        if (!fs.existsSync(serverJs)) return true;
+        const hash = (p) => {
+          const data = fs.readFileSync(p);
+          return crypto.createHash('sha256').update(data).digest('hex');
+        };
+        return hash(bundledServerJs) !== hash(serverJs);
+      } catch {
+        return true;
+      }
+    })();
+
+    if (needsRefresh) {
+      log('info', `${this.logPrefix} 检测到服务文件更新，重新复制到可写目录...`);
+      await fs.promises.rm(writableDir, { recursive: true, force: true }).catch(() => {});
+      await fs.promises.mkdir(writableDir, { recursive: true });
+      await fs.promises.cp(bundledDir, writableDir, { recursive: true });
+    }
+
     return writableDir;
   }
 
@@ -139,16 +154,20 @@ class BridgeServiceManager {
       log('info', `${this.logPrefix} 正在安装依赖...`);
       try {
         const { resolveDependencyPath } = require('./dependencyManager');
-        const npmBin = await resolveDependencyPath('npm') || (process.platform === 'win32' ? 'npm.cmd' : 'npm');
+        const { buildNpmInvocation } = require('./dependencyManager');
+        const invocation = await buildNpmInvocation();
+        if (!invocation) {
+          throw new Error('未找到可用的 npm，无法安装桥接服务依赖');
+        }
         await new Promise((resolve, reject) => {
-          const child = spawn(npmBin, ['install', '--production'], {
+          const child = spawn(invocation.command, [...invocation.args, 'install', '--production'], {
             cwd: localServerDir,
             stdio: ['ignore', 'pipe', 'pipe'],
             windowsHide: true,
-            shell: process.platform === 'win32'
+            shell: invocation.shell === true
           });
           child.stderr?.on('data', d => { if (d.toString().trim()) log('info', `${this.logPrefix} ${d.toString().trim()}`); });
-          child.once('close', (code) => code === 0 ? resolve() : reject(new Error(`npm install exit ${code}`)));
+          child.once('close', (code) => code === 0 ? resolve() : reject(new Error(`依赖安装失败（退出码 ${code}）`)));
           child.once('error', reject);
         });
         log('info', `${this.logPrefix} 依赖安装完成`);
@@ -231,7 +250,7 @@ class BridgeServiceManager {
           const { execSync } = require('node:child_process');
           let pids = [];
           if (process.platform === 'win32') {
-            const result = execSync(`netstat -ano -p tcp | findstr :${this.port}`, { encoding: 'utf8', shell: 'cmd.exe' }).trim();
+            const result = execSync(`netstat -ano -p tcp | findstr :${this.port}`, { encoding: 'utf8', shell: 'cmd.exe', windowsHide: true }).trim();
             for (const line of result.split('\n')) {
               const parts = line.trim().split(/\s+/);
               const pid = parts[parts.length - 1];

@@ -172,7 +172,7 @@ function register({ ipcMain, store, mainWindowRef }) {
     try {
       sendProgress({ model: modelKey, status: 'downloading', percent: 0, message: '开始下载...' });
       const response = await proxyFetch(meta.url, { signal: controller.signal });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      if (!response.ok) throw new Error(`下载失败（HTTP ${response.status}）`);
       const total = parseInt(response.headers.get('content-length') || '0', 10);
       const reader = response.body.getReader();
       const chunks = [];

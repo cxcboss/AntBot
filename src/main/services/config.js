@@ -3,6 +3,24 @@ const path = require('node:path');
 
 const DEFAULT_DATA_DIR = path.join(os.homedir(), 'AntBot');
 
+// 使用 electron app.getPath('desktop') 获取真实桌面路径（处理 OneDrive 桌面重定向），
+// 非 Electron 环境回退 ~/Desktop。Windows 上大量用户桌面被重定向到 OneDrive\Desktop，
+// 写死 ~/Desktop 会生成"幽灵桌面"导致下载/输出看不见。
+function getDesktopDir() {
+  try {
+    const { app } = require('electron');
+    if (app && typeof app.getPath === 'function') {
+      const desktop = app.getPath('desktop');
+      if (desktop) {
+        return desktop;
+      }
+    }
+  } catch {
+    // 非 Electron 环境
+  }
+  return path.join(os.homedir(), 'Desktop');
+}
+
 function formatCnDateFolder(date = new Date()) {
   const year = String(date.getFullYear()).slice(-2);
   return `${date.getMonth() + 1}月${date.getDate()}日${year}年`;
@@ -42,8 +60,7 @@ function resolvePathEnv(rawPath) {
   return path.isAbsolute(value) ? value : path.resolve(process.cwd(), value);
 }
 
-function deepMerge(target, source) {
-  if (!source || typeof source !== 'object') {
+function deepMerge(target, source) {  if (!source || typeof source !== 'object') {
     return target;
   }
 
@@ -74,8 +91,8 @@ const BASE_DEFAULT_SETTINGS = {
     statPeriod: 'day',
   },
   paths: {
-    tempDir: path.join(os.homedir(), 'Desktop', '视频', '_临时'),
-    outputBaseDir: path.join(os.homedir(), 'Desktop', '视频'),
+    tempDir: path.join(getDesktopDir(), '视频', '_临时'),
+    outputBaseDir: path.join(getDesktopDir(), '视频'),
     youtubeProjectPath: '',
     editProjectPath: '',
     publishProjectPath: ''
@@ -253,6 +270,7 @@ module.exports = {
   DEFAULT_DATA_DIR,
   buildDefaultSettings,
   getSettingsOverridesFromEnv,
+  getDesktopDir,
   STEP_NAMES,
   formatCnDateFolder
 };

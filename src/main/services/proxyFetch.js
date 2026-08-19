@@ -15,6 +15,34 @@ function logToAppFile(msg) {
 let _proxyUrl = null;
 let _proxyDetected = false;
 
+// Windows ProxyServer 可能是多协议格式：
+//   "127.0.0.1:7890"（单值）
+//   "http=127.0.0.1:7890;https=127.0.0.1:7890"（分号分隔）
+//   "socks=127.0.0.1:1080;http=127.0.0.1:7890"（混合）
+// 统一提取 http 代理；无 http 段时若存在 http 单值直接用。
+function parseWindowsProxyServer(addr) {
+  const trimmed = String(addr || '').trim();
+  if (!trimmed) return '';
+  if (trimmed.includes('=')) {
+    const parts = trimmed.split(';').map((p) => p.trim()).filter(Boolean);
+    for (const part of parts) {
+      if (/^http=/i.test(part)) {
+        const value = part.slice(part.indexOf('=') + 1).trim();
+        if (value) return value.startsWith('http') ? value : `http://${value}`;
+      }
+    }
+    // 没有 http= 段：取第一个非 socks 的值作为候选（常见 Clash 配置 http 在首位）
+    for (const part of parts) {
+      if (/^socks(=|$)/i.test(part)) continue;
+      const value = part.includes('=') ? part.slice(part.indexOf('=') + 1).trim() : part.trim();
+      if (value) return value.startsWith('http') ? value : `http://${value}`;
+    }
+    // 只有 socks=：返回空（undici 不支持 socks，交给原生 fetch 直连）
+    return '';
+  }
+  return trimmed.startsWith('http') ? trimmed : `http://${trimmed}`;
+}
+
 function detectSystemProxy() {
   if (_proxyDetected) return _proxyUrl;
   _proxyDetected = true;
@@ -36,7 +64,7 @@ function detectSystemProxy() {
         const match = serverOut.match(/ProxyServer\s+REG_SZ\s+(.+)/);
         if (match) {
           const addr = match[1].trim();
-          _proxyUrl = addr.startsWith('http') ? addr : `http://${addr}`;
+          _proxyUrl = parseWindowsProxyServer(addr);
           logToAppFile(`从 Windows 注册表检测到代理: ${_proxyUrl}`);
         }
       }
@@ -242,4 +270,4 @@ function proxyFetch(url, options) {
   return getProxyFetch()(url, options);
 }
 
-module.exports = { proxyFetch, detectSystemProxy };
+module.exports = { proxyFetch, detectSystemProxy, parseWindowsProxyServer };

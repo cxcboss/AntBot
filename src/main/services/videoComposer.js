@@ -558,9 +558,13 @@ async function getFfmpegFilterSupport() {
 // ─── Video encoder resolution (hardware-first, libx264 fallback) ─────────────
 
 let cachedVideoEncoder = null;
+let cachedFfmpegVersion = null;
 
 // 优先使用硬件编码器（速度 3-10x），无硬件回退 libx264 faster/crf22。
 // 字幕烧录等 filter 与编码器无关，硬件编码同样支持。
+// Windows 上注意：`-encoders` 只要编译进 build 就会列出（gyan 全系都编入
+// nvenc/qsv），与显卡/驱动无关。必须做实际 1 帧试编码验证驱动可用，
+// 否则驱动过旧/无独显的机器会在合成时才硬失败。探测结果记日志便于排障。
 async function getVideoEncoder() {
   if (cachedVideoEncoder !== null) {
     return cachedVideoEncoder;
@@ -570,18 +574,70 @@ async function getVideoEncoder() {
   const probe = await runCommandCapture(ffmpegBin, ['-hide_banner', '-encoders'], { timeout: FFMPEG_PROBE_TIMEOUT });
   const combined = `${probe.stdout}\n${probe.stderr}`;
   const has = (name) => new RegExp(`\\b${name}\\b`).test(combined);
-
-  if (process.platform === 'darwin' && has('h264_videotoolbox')) {
-    cachedVideoEncoder = { name: 'videotoolbox', videoCodec: 'h264_videotoolbox', args: ['-q:v', '65'] };
-  } else if (has('h264_nvenc')) {
-    cachedVideoEncoder = { name: 'nvenc', videoCodec: 'h264_nvenc', args: ['-cq', '22', '-preset', 'p5'] };
-  } else if (has('h264_qsv')) {
-    cachedVideoEncoder = { name: 'qsv', videoCodec: 'h264_qsv', args: ['-global_quality', '22'] };
-  } else {
-    cachedVideoEncoder = { name: 'libx264', videoCodec: 'libx264', args: ['-preset', 'faster', '-crf', '22'] };
+  if (!cachedFfmpegVersion) {
+    cachedFfmpegVersion = String(combined.match(/ffmpeg version\s+\S+/)?.[0] || ffmpegBin);
   }
 
+  // 候选顺序：macOS→videotoolbox；Windows→qsv（Intel 核显先试）→nvenc；
+  // 其他→nvenc。逐个做 1 帧试编码，通过才选中。
+  const candidates = [];
+  if (process.platform === 'darwin' && has('h264_videotoolbox')) {
+    candidates.push({ name: 'videotoolbox', videoCodec: 'h264_videotoolbox', args: ['-q:v', '65'] });
+  }
+  if (process.platform !== 'darwin' && has('h264_qsv')) {
+    candidates.push({ name: 'qsv', videoCodec: 'h264_qsv', args: ['-global_quality', '22'] });
+  }
+  if (has('h264_nvenc')) {
+    candidates.push({ name: 'nvenc', videoCodec: 'h264_nvenc', args: ['-cq', '22', '-preset', 'p5'] });
+  }
+
+  const probeArgs = (codec, codecArgs) => [
+    '-hide_banner',
+    '-v', 'error',
+    '-f', 'lavfi',
+    '-i', 'testsrc=s=64x64:r=1',
+    '-frames:v', '1',
+    '-pix_fmt', 'yuv420p',
+    '-c:v', codec,
+    ...codecArgs,
+    '-f', 'null', '-',
+  ];
+
+  for (const candidate of candidates) {
+    const test = await runCommandCapture(ffmpegBin, probeArgs(candidate.videoCodec, candidate.args), {
+      timeout: 15000,
+    });
+    if (test.ok) {
+      cachedVideoEncoder = candidate;
+      console.log(`[encoder] 选用 ${candidate.name} (${candidate.videoCodec}) / ${cachedFfmpegVersion}`);
+      return cachedVideoEncoder;
+    }
+    console.log(`[encoder] ${candidate.name} 试编码失败，降级下一候选（${String(test.stderr || test.error || '').slice(0, 200)}）`);
+  }
+
+  cachedVideoEncoder = { name: 'libx264', videoCodec: 'libx264', args: ['-preset', 'faster', '-crf', '22'] };
+  console.log(`[encoder] 回退 libx264 / ${cachedFfmpegVersion}`);
   return cachedVideoEncoder;
+}
+
+// 编码器相关失败特征（stderr 匹配则判定为硬件编码不可用，可降级 libx264 重试）
+const ENCODER_FAILURE_PATTERNS = [
+  /\bnvenc\b/i,
+  /\bqsv\b/i,
+  /driver does not support/i,
+  /nvcuda\.dll/i,
+  /no capable devices/i,
+  /required nvenc api version/i,
+  /minimum required.*driver/i,
+];
+
+function isEncoderFailure(errorMessage) {
+  const text = String(errorMessage || '');
+  return ENCODER_FAILURE_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+function clearVideoEncoderCache() {
+  cachedVideoEncoder = null;
 }
 
 // ─── Subtitle font resolution ────────────────────────────────────────────────
@@ -605,6 +661,15 @@ function getSubtitleFontCandidates() {
       {
         path: path.join(windowsRoot, 'Fonts', 'simsun.ttc'),
         assName: 'SimSun'
+      },
+      // 精简系统/非中文语言包兜底：libass 仍可渲染中文 fallback
+      {
+        path: path.join(windowsRoot, 'Fonts', 'segoeui.ttf'),
+        assName: 'Segoe UI'
+      },
+      {
+        path: path.join(windowsRoot, 'Fonts', 'arial.ttf'),
+        assName: 'Arial'
       }
     ];
   }
@@ -662,8 +727,9 @@ async function resolveSubtitleFont() {
     }
   }
 
-  cachedSubtitleFont = candidates[0];
-  return cachedSubtitleFont;
+  // 所有候选都不存在时：不返回不存在的路径，抛清晰错误（避免 drawtext 引用空文件）
+  const missing = candidates.slice(0, 3).map((c) => path.basename(c.path)).join(', ');
+  throw new Error(`未找到可用的中文字幕字体（已尝试：${missing}）。请安装系统中文字体（如微软雅黑）后重试。`);
 }
 
 async function buildDrawtextFilter(
@@ -1329,34 +1395,52 @@ async function composeVideo({
 
   // 视频轨直通（无字幕烧录）→ copy；否则用硬件编码器（无硬件回退 libx264 faster）
   const encoder = videoTrackDirect ? null : await getVideoEncoder();
-  const args = [
-    '-y',
-    '-i',
-    videoPath,
-    '-i',
-    voiceTrackPath,
-    '-filter_complex',
-    filterParts.join(';'),
-  ];
-  if (videoTrackDirect) {
-    args.push('-map', '0:v:0', '-c:v', 'copy');
-  } else {
-    args.push('-map', '[vout]', '-c:v', encoder.videoCodec, ...encoder.args);
-  }
-  args.push(
-    '-map',
-    '[aout]',
-    '-c:a',
-    'aac',
-    '-b:a',
-    '320k',
-    '-movflags',
-    '+faststart',
-    '-shortest',
-    outputPath,
-  );
+  const buildArgs = (videoCodec, codecArgs) => {
+    const a = [
+      '-y',
+      '-i',
+      videoPath,
+      '-i',
+      voiceTrackPath,
+      '-filter_complex',
+      filterParts.join(';'),
+    ];
+    if (videoTrackDirect) {
+      a.push('-map', '0:v:0', '-c:v', 'copy');
+    } else {
+      a.push('-map', '[vout]', '-c:v', videoCodec, ...codecArgs);
+    }
+    a.push(
+      '-map',
+      '[aout]',
+      '-c:a',
+      'aac',
+      '-b:a',
+      '320k',
+      '-movflags',
+      '+faststart',
+      '-shortest',
+      outputPath,
+    );
+    return a;
+  };
 
-  await runFfmpegCommand(args, { signal, timeout: FFMPEG_COMPOSE_TIMEOUT });
+  try {
+    await runFfmpegCommand(buildArgs(encoder.videoCodec, encoder.args), { signal, timeout: FFMPEG_COMPOSE_TIMEOUT });
+  } catch (error) {
+    // 硬件编码器运行期失败（驱动过旧/驱动缺失/核显不支持）→ 清缓存 + 强制 libx264 重试一次
+    if (!videoTrackDirect && encoder.name !== 'libx264' && isEncoderFailure(error.message)) {
+      console.log(`[encoder] ${encoder.name} 运行期失败，自动降级 libx264 重试：${String(error.message).slice(0, 200)}`);
+      clearVideoEncoderCache();
+      await runFfmpegCommand(buildArgs('libx264', ['-preset', 'faster', '-crf', '22']), {
+        signal,
+        timeout: FFMPEG_COMPOSE_TIMEOUT,
+      });
+      cachedVideoEncoder = { name: 'libx264', videoCodec: 'libx264', args: ['-preset', 'faster', '-crf', '22'] };
+    } else {
+      throw error;
+    }
+  }
 
   return {
     subtitleMode,
@@ -1647,8 +1731,9 @@ async function composeVideoWithDub({
     // 6. Clean up temp files
     try {
       await fs.rm(tmpDir, { recursive: true, force: true });
-    } catch {
-      // ignore cleanup errors
+    } catch (cleanupError) {
+      // Windows 上 ffmpeg 子进程句柄可能未及时释放，清理失败需记录而非静默吞掉
+      console.log(`[compose] 临时目录清理失败（Windows 上可能残留，占盘）：${tmpDir} — ${String(cleanupError?.message || cleanupError).slice(0, 150)}`);
     }
   }
 }

@@ -325,10 +325,7 @@ function taskCard(t,live=false){
 /* 时间线增量渲染缓存：key=runId → {sig, html, el}，sig 不变时复用已有 DOM 节点 */
 const _chatCache = new Map();
 function chatGroupKey(g){return (g.persisted?'p:':g.live?'l:':'h:')+g.runId}
-function chatGroupSig(g){
-  const taskSig=g.tasks.map(t=>[t.id,t.status,t.progress,t.retryCount,t.message,t.taskName,t.outputPath,(t.platforms||[]).join(','),t.isOriginal?'1':'0',t.campaignName||'',t.publishAt||'',t.duration||0,t.startedAt||'',t.completedAt||'',t.index||0,t.queueIndex||0,t.attempt||1,JSON.stringify(t._exec||{})].join('¦')).join('§');
-  return `${g.at}|${g.msgHtml||''}|${g.rulesHtml||''}|${taskSig}`;
-}
+function chatGroupSig(g){return `${g.at}|${g.msgHtml||''}|${g.rulesHtml||''}|${g.tasksHtml}`}
 function renderChat(opts={}){
   if(!el.stream)return;const stick=opts.stick,lg=liveGroups();
   const groups=[];let day='';
@@ -1754,7 +1751,7 @@ async function loadPresetVoices() {
   box.innerHTML = '<div class="sv-note">加载中...</div>';
   try {
     const res = await fetch(PRESET_MANIFEST_URL);
-    if (!res.ok) throw new Error('fetch failed');
+    if (!res.ok) throw new Error('获取失败');
     const manifest = await res.json();
     S.presetVoices = manifest;
     renderPresetVoices();

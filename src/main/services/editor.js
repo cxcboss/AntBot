@@ -41,6 +41,11 @@ async function editVideo(taskContext) {
   const useAzureTts = isAzureVoiceId(rawVoiceId);
   const useVoiceClone = !useAzureTts && !!(settings.voiceClone?.profileName || rawVoiceId);
 
+  // 系统语音（macOS `say`）仅存在于 macOS；Windows 上无此能力，提前报错避免 spawn ENOENT
+  if (!useAzureTts && !useVoiceClone && process.platform === 'win32') {
+    throw new Error('系统语音仅支持 macOS，请选择内置 Azure 音色或克隆音色');
+  }
+
   let cloneProfileId = '';
   let cloneProfileName = '';
 

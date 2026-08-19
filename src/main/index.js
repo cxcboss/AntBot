@@ -353,6 +353,17 @@ app.whenReady().then(async () => {
     }).catch(() => {});
   } catch {}
 
+  // 自动检查浏览器插件更新
+  try {
+    const updater = require('./services/appUpdater');
+    updater.autoUpdatePlugin().then(result => {
+      if (result.ok && !result.alreadyLatest) {
+        const win = BrowserWindow.getAllWindows()[0];
+        if (win && !win.isDestroyed()) win.webContents.send('app:toast', `浏览器插件已自动更新到 v${result.version}，请刷新插件页面`, 'info');
+      }
+    }).catch(() => {});
+  } catch {}
+
   app.on('activate', () => {
     if (isHeadlessMode) {
       return;

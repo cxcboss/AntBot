@@ -1,4 +1,5 @@
 const fs = require('node:fs/promises');
+const fsSync = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { shell } = require('electron');
@@ -129,6 +130,43 @@ function register({ ipcMain, store, taskRunner, mainWindowRef, appLog }) {
     await fs.mkdir(dir, { recursive: true }).catch(() => {});
     await shell.openPath(dir);
     return { ok: true, path: dir };
+  });
+
+  ipcMain.handle('plugin:open-install-page', async () => {
+    // 找到系统浏览器（Chrome / Edge），打开扩展管理页
+    const candidates = [];
+    if (process.platform === 'darwin') {
+      candidates.push(
+        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+        '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'
+      );
+    } else if (process.platform === 'win32') {
+      const pf = process.env.ProgramFiles || 'C:\\Program Files';
+      const pf86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)';
+      candidates.push(
+        path.join(pf, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+        path.join(pf86, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+        path.join(pf, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+        path.join(pf86, 'Microsoft', 'Edge', 'Application', 'msedge.exe')
+      );
+    }
+    for (const exe of candidates) {
+      try {
+        if (fsSync.existsSync(exe)) {
+          const { spawn } = require('node:child_process');
+          const url = exe.includes('Edge') ? 'edge://extensions/' : 'chrome://extensions/';
+          spawn(exe, [url], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+          return { ok: true, browser: exe.includes('Edge') ? 'Edge' : 'Chrome' };
+        }
+      } catch {}
+    }
+    // 兜底：尝试用系统默认浏览器打开（部分环境 chrome:// 协议可被默认浏览器接管）
+    try {
+      await shell.openExternal('chrome://extensions/');
+      return { ok: true, browser: '默认浏览器' };
+    } catch {
+      return { ok: false, error: '未找到 Chrome 或 Edge 浏览器' };
+    }
   });
 
   ipcMain.handle('open-dir', async (_event, dirPath) => {

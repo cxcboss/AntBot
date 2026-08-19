@@ -789,10 +789,55 @@ async function resolveAutoDubProjectPath(explicitPath) {
   }
 
   if (await detectAutoDubProject(resourcesCandidate)) {
+    // 打包态：资源位于只读目录（Windows 上为 C:\Program Files\搬运蚁\resources）。
+    // 复制到 ~/AntBot/auto-dub-web 再运行，避免 __pycache__ 写入拒绝、模型落盘失败。
+    if (process.platform === 'win32') {
+      const writablePath = await ensureWritableAutoDubProject(resourcesCandidate);
+      if (writablePath) {
+        return writablePath;
+      }
+    }
     return resourcesCandidate;
   }
 
   return '';
+}
+
+// 将 auto_dub_web 后端复制到 ~/AntBot/auto-dub-web（可写目录），照 bridgeServiceManager 模式。
+async function ensureWritableAutoDubProject(sourcePath) {
+  const targetDir = path.join(os.homedir(), 'AntBot', 'auto-dub-web');
+  const markerPath = path.join(targetDir, '.antbot-copy-version');
+  try {
+    // 已复制过且完整 → 直接复用；但若 bundled 后端更新（App 升级后代码变更），需重新复制
+    if (await detectAutoDubProject(targetDir)) {
+      const needsRefresh = await (async () => {
+        try {
+          const sourceMain = path.join(sourcePath, 'vendor', 'voicebox', 'backend', 'main.py');
+          const targetMain = path.join(targetDir, 'vendor', 'voicebox', 'backend', 'main.py');
+          const [sourceStat, targetStat] = await Promise.all([
+            fs.stat(sourceMain).catch(() => null),
+            fs.stat(targetMain).catch(() => null),
+          ]);
+          return sourceStat && (!targetStat || sourceStat.mtimeMs > targetStat.mtimeMs + 1000);
+        } catch {
+          return false;
+        }
+      })();
+      if (!needsRefresh) {
+        return targetDir;
+      }
+      console.log('[voicebox] 检测到后端源码更新，重新复制到可写目录...');
+    }
+    await fs.rm(targetDir, { recursive: true, force: true }).catch(() => {});
+    await fs.mkdir(targetDir, { recursive: true });
+    await fs.cp(sourcePath, targetDir, { recursive: true });
+    await fs.writeFile(markerPath, new Date().toISOString(), 'utf8').catch(() => {});
+    console.log(`[voicebox] 后端已复制到可写目录：${targetDir}`);
+    return targetDir;
+  } catch (error) {
+    console.log(`[voicebox] 复制后端到可写目录失败，回退只读路径：${String(error?.message || error).slice(0, 200)}`);
+    return '';
+  }
 }
 
 async function fetchVoiceCloneStatus(timeoutMs = 6000) {
@@ -856,6 +901,179 @@ async function waitForVoiceCloneReady(timeoutMs = 60000) {
     ready: false,
     status: lastStatus
   };
+}
+
+// ─── Windows 原生 voicebox 初始化（无需 Git Bash）────────────────────────────
+// 复用 ipc/voicebox.js 的 python -m venv + pip install 流程：
+// 1. 创建 venv（如不存在）
+// 2. 升级 pip + 基础包
+// 3. 安装 requirements.txt（Python 3.13 自动改写 numba 约束）
+// 4. 检测 NVIDIA GPU → 有则装 CUDA PyTorch（requirements 装完后再装，避免被覆盖）
+
+async function runCommandCollect(command, args, options = {}) {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, {
+      cwd: options.cwd,
+      env: withRuntimeEnv(options.env),
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    let timer = null;
+    if (options.timeout) {
+      timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        try { child.kill('SIGTERM'); } catch {}
+        resolve({ ok: false, code: -2, stdout, stderr, error: `命令超时(${(options.timeout / 1000).toFixed(0)}s)` });
+      }, options.timeout);
+    }
+    child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
+    child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+    child.once('error', (error) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve({ ok: false, code: -1, stdout, stderr, error: String(error?.message || error) });
+    });
+    child.once('close', (code) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve({ ok: code === 0, code: code ?? -1, stdout, stderr });
+    });
+  });
+}
+
+async function detectNvidiaGpuName() {
+  const result = await runCommandCollect('nvidia-smi', ['--query-gpu=name', '--format=csv,noheader'], { timeout: 15000 });
+  if (result.ok) {
+    const name = String(result.stdout || '').trim().split('\n')[0]?.trim();
+    return name || '';
+  }
+  return '';
+}
+
+async function detectInstalledTorchSource(venvDir, logger) {
+  const venvPython = await resolveVoiceboxVenvPython(venvDir);
+  if (!(await exists(venvPython))) {
+    return 'none';
+  }
+  const result = await runCommandCollect(
+    venvPython,
+    ['-c', 'import torch; print(torch.__version__); print(torch.cuda.is_available())'],
+    { timeout: 20000 },
+  );
+  if (!result.ok) {
+    logger('[voicebox] 无法检测 torch 来源（torch 未安装或导入失败）。');
+    return 'unknown';
+  }
+  const lines = String(result.stdout || '').trim().split('\n');
+  const version = lines[0]?.trim() || '';
+  const cudaAvailable = String(lines[1] || '').trim() === 'True';
+  logger(`[voicebox] torch ${version}${cudaAvailable ? '（CUDA 可用）' : '（CPU）'}`);
+  return cudaAvailable ? 'cuda' : 'cpu';
+}
+
+// Windows 上安装 CUDA PyTorch（requirements 装完后调用，--no-deps 避免覆盖其它依赖）
+async function installWindowsCudaTorch({ venvDir, projectPath, gpuName, logger }) {
+  const venvPython = await resolveVoiceboxVenvPython(venvDir);
+  logger(`[voicebox] 检测到 NVIDIA GPU：${gpuName}，正在安装 CUDA PyTorch...`);
+  const result = await runCommandCollect(
+    venvPython,
+    [
+      '-u', '-m', 'pip', 'install', 'torch', 'torchaudio',
+      '--index-url', 'https://download.pytorch.org/whl/cu121',
+      '--force-reinstall', '--no-deps',
+      '--timeout', '60', '--retries', '5',
+    ],
+    { cwd: projectPath, timeout: 90 * 60 * 1000 },
+  );
+  if (!result.ok) {
+    logger(`[voicebox] CUDA PyTorch 安装失败（exit ${result.code}）：${String(result.stderr || result.error || '').slice(0, 300)}`);
+  } else {
+    logger('[voicebox] CUDA PyTorch 安装完成。');
+  }
+}
+
+async function setupVoiceboxBackendWindowsNative({
+  pythonBinary,
+  venvDir,
+  projectPath,
+  venvPython,
+  requirementsPath,
+  gpuMode,
+  logger,
+  progress,
+}) {
+  // 1. 创建 venv
+  const venvExists = await exists(venvPython);
+  if (!venvExists) {
+    progress({ status: 'running', step: '安装依赖', percent: 42, message: '正在创建虚拟环境...' });
+    logger('[voicebox] 创建虚拟环境...');
+    const venvResult = await runCommandCollect(pythonBinary, ['-m', 'venv', venvDir], { cwd: projectPath, timeout: 120000 });
+    if (!venvResult.ok) {
+      const detail = String(venvResult.stderr || venvResult.error || '').slice(0, 300);
+      throw new Error(`虚拟环境创建失败（exit ${venvResult.code}）：${detail}\n请确认已安装 Python 3.10-3.13（Microsoft Store 版 Python 可能缺少 venv 模块，请从 python.org 安装）`);
+    }
+  }
+
+  // 2. 升级 pip + 基础包
+  progress({ status: 'running', step: '安装依赖', percent: 46, message: '正在升级 pip...' });
+  const pipUpgrade = await runCommandCollect(
+    venvPython,
+    ['-m', 'pip', 'install', '--upgrade', 'pip', 'wheel', 'setuptools', 'huggingface_hub'],
+    { cwd: projectPath, timeout: 180000 },
+  );
+  if (!pipUpgrade.ok) {
+    throw new Error(`pip 升级失败（exit ${pipUpgrade.code}）：${String(pipUpgrade.stderr || pipUpgrade.error || '').slice(0, 200)}`);
+  }
+
+  // 3. Python 3.13 numba 约束改写
+  let effectiveRequirementsPath = requirementsPath;
+  const pyVersion = await runCommandCollect(venvPython, ['-c', 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")'], { timeout: 20000 });
+  const pyMinor = Number((String(pyVersion.stdout || '').match(/^3\.(\d+)$/) || [])[1] || 0);
+  if (pyMinor >= 13) {
+    try {
+      const raw = await fs.readFile(requirementsPath, 'utf8');
+      const patched = raw.replace(/numba>=0\.60\.0,<0\.61\.0/g, 'numba>=0.61.2,<0.62.0');
+      if (patched !== raw) {
+        const tmpReqs = path.join(os.tmpdir(), `antbot-voicebox-reqs-${Date.now()}.txt`);
+        await fs.writeFile(tmpReqs, patched, 'utf8');
+        effectiveRequirementsPath = tmpReqs;
+        logger('[voicebox] 检测到 Python 3.13，已自动适配 numba 版本约束');
+      }
+    } catch (error) {
+      logger(`[voicebox] requirements 改写失败，按原文件安装：${String(error?.message || error).slice(0, 150)}`);
+    }
+  }
+
+  // 4. 安装 requirements
+  progress({ status: 'running', step: '安装依赖', percent: 50, message: '正在安装 voicebox 依赖（首次需下载模型库，可能较慢）...' });
+  logger('[voicebox] 安装 requirements.txt...');
+  const reqResult = await runCommandCollect(
+    venvPython,
+    ['-u', '-m', 'pip', 'install', '-r', effectiveRequirementsPath],
+    { cwd: projectPath, timeout: 90 * 60 * 1000 },
+  );
+  if (!reqResult.ok) {
+    const detail = String(reqResult.stderr || reqResult.error || '').split(/\r?\n/).filter(Boolean).slice(-6).join('\n');
+    throw new Error(`voicebox 依赖安装失败（exit ${reqResult.code}）：\n${detail || '未知错误'}`);
+  }
+
+  // 4.5 Windows GPU：requirements 装完后按需装 CUDA PyTorch
+  if (process.platform === 'win32' && gpuMode !== 'cpu') {
+    const gpuName = await detectNvidiaGpuName();
+    if (gpuName) {
+      await installWindowsCudaTorch({ venvDir, projectPath, gpuName, logger });
+    } else {
+      logger('[voicebox] 未检测到 NVIDIA GPU，使用 CPU 模式。');
+    }
+  }
+
+  logger('[voicebox] Windows 原生初始化完成。');
 }
 
 async function ensureVoiceCloneBackend(projectPath, logger = () => {}, progress = () => {}, options = {}) {
@@ -986,6 +1204,7 @@ async function ensureVoiceCloneBackend(projectPath, logger = () => {}, progress 
       const child = await spawnLoggedDetachedProcess(launchCommand, launchArgs, {
         cwd: voiceboxCwd, env, logFilePath, label: 'voicebox'
       });
+      child.unref(); // 防止 detached 子进程句柄阻塞 App 退出
       startedVoiceboxBackends.set(projectPath, { child, logFilePath });
       progress({ status: 'running', step: '启动后端', percent: 80, message: '正在启动 voicebox 后端...' });
       await waitForVoiceCloneReady(15000);
@@ -997,17 +1216,14 @@ async function ensureVoiceCloneBackend(projectPath, logger = () => {}, progress 
   }
 
   const needsSetup = forceRepair || !(venvOk && hasCompleteBackendRepo);
-  const needsBash = needsSetup || process.platform !== 'win32';
+  // Windows 走原生 python venv + pip（无需 Git Bash）；macOS/Linux 走 bash 脚本
+  const needsBash = needsSetup && process.platform !== 'win32';
   const bashBinary = needsBash ? await resolveBashBinary() : '';
   if (needsBash && !bashBinary) {
     throw new Error('未找到 bash，无法初始化或启动 voicebox 后端。');
   }
 
   if (needsSetup) {
-    if (!hasSetupScript) {
-      throw new Error('缺少 setup_voicebox_backend.sh，无法初始化语音克隆环境。');
-    }
-
     const pythonBinary = await resolvePythonBinary();
     if (!pythonBinary) {
       throw new Error('未找到可用 Python 3.10~3.13。');
@@ -1021,23 +1237,44 @@ async function ensureVoiceCloneBackend(projectPath, logger = () => {}, progress 
     });
     logger(`${forceRepair ? '开始修复' : '开始初始化'} voicebox 环境（python: ${pythonBinary}）。`);
 
-    const env = {
-      ...process.env,
-      PYTHON_BIN: pythonBinary,
-      VENV_DIR: venvDir  // Override default venv location to data directory
-    };
-    await runScriptWithLogs(setupScript, {
-      cwd: projectPath,
-      env,
-      shellBinary: bashBinary,
-      logger,
-      logPrefix: '[voicebox setup] '
-    });
-    // Write setup completion marker
+    if (process.platform === 'win32') {
+      // Windows 原生初始化：python -m venv + pip install（复用 voicebox:install 的同款流程）
+      await setupVoiceboxBackendWindowsNative({
+        pythonBinary,
+        venvDir,
+        projectPath,
+        venvPython,
+        requirementsPath: backendRequirements,
+        gpuMode,
+        logger,
+        progress
+      });
+    } else {
+      if (!hasSetupScript) {
+        throw new Error('缺少 setup_voicebox_backend.sh，无法初始化语音克隆环境。');
+      }
+      const env = {
+        ...process.env,
+        PYTHON_BIN: pythonBinary,
+        VENV_DIR: venvDir  // Override default venv location to data directory
+      };
+      await runScriptWithLogs(setupScript, {
+        cwd: projectPath,
+        env,
+        shellBinary: bashBinary,
+        logger,
+        logPrefix: '[voicebox setup] '
+      });
+    }
+
+    // Write setup completion marker（记录 torch 来源，防 CUDA/CPU 互相覆盖）
+    const torchSource = await detectInstalledTorchSource(venvDir, logger);
     await fs.writeFile(setupMarker, JSON.stringify({
       completedAt: new Date().toISOString(),
       pythonBinary,
-      projectPath
+      projectPath,
+      torchSource,
+      platform: process.platform
     }), 'utf-8').catch(() => {});
   }
 

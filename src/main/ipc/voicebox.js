@@ -90,6 +90,12 @@ function register({ ipcMain, store, mainWindowRef, appLog }) {
       ? await fs.access(requirementsPath).then(() => true).catch(() => false)
       : false;
     if (!hasReqs) {
+      // Windows 不再依赖 Git Bash：后端已由 ensureWritableAutoDubProject 复制为完整副本，
+      // requirements.txt 理应存在；若仍缺失说明副本不完整，给出明确错误而非 spawn bash。
+      if (process.platform === 'win32') {
+        send({ status: 'failed', message: 'voicebox 后端源码不完整（缺少 requirements.txt），请尝试在"克隆"面板重新初始化' });
+        return { ok: false, message: 'voicebox 后端源码不完整' };
+      }
       const setupScript = path.join(info.projectPath, 'scripts', 'setup_voicebox_backend.sh');
       try { await fs.access(setupScript); } catch { return { ok: false, message: '缺少 setup_voicebox_backend.sh 和 requirements.txt' }; }
       send({ status: 'installing', message: '正在下载 voicebox 源码...' });

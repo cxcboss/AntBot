@@ -21,7 +21,8 @@ function register({ ipcMain, store, mainWindowRef, appLog }) {
   ipcMain.handle('download:add', async (_event, text) => {
     try {
       const settings = await store.getSettings();
-      downloadManager.outputBaseDir = settings.paths?.outputBaseDir || path.join(os.homedir(), 'Desktop', '视频');
+      const { getDesktopDir } = require('../services/config');
+      downloadManager.outputBaseDir = settings.paths?.outputBaseDir || path.join(getDesktopDir(), '视频');
       downloadManager.downloadDir = path.join(downloadManager.outputBaseDir, '视频下载');
       const result = await downloadManager.addTasks(text);
       return { ok: true, ...result };

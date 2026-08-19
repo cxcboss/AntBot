@@ -825,7 +825,8 @@ class TaskRunner {
 
     try {
       const settings = await this.store.getSettingsForUser(job.userId);
-      const outputBaseDir = settings.paths.outputBaseDir || path.join(os.homedir(), 'Desktop', '视频');
+      const { getDesktopDir } = require('./services/config');
+      const outputBaseDir = settings.paths.outputBaseDir || path.join(getDesktopDir(), '视频');
       const mainControlCacheDir = path.join(outputBaseDir, '主控缓存');
       const mainControlOutputDir = path.join(outputBaseDir, '主控输出');
       await ensureDir(mainControlCacheDir);

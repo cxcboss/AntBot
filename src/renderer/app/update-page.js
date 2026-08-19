@@ -50,6 +50,20 @@ async function initUpdatePage() {
     });
   }
 
+  // 安装插件按钮：打开浏览器扩展管理页
+  const pluginInstallBtn = document.getElementById('upd-plugin-install-btn');
+  if (pluginInstallBtn && !pluginInstallBtn._bound) {
+    pluginInstallBtn._bound = true;
+    pluginInstallBtn.addEventListener('click', async () => {
+      try {
+        const r = await window.antbot.openPluginInstallPage();
+        if (r?.ok) toast(`已打开${r.browser || '浏览器'}扩展管理页`, 'success');
+        else throw new Error(r?.error || '打开失败');
+      }
+      catch (e) { toast('打开失败: ' + e.message, 'error'); }
+    });
+  }
+
   // 打开下载目录按钮
   const appDirBtn = document.getElementById('upd-app-dir-btn');
   if (appDirBtn && !appDirBtn._bound) {

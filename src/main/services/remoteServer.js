@@ -607,7 +607,7 @@ function startRemoteServer({ store, taskRunner, mainWindowRef, appLog }) {
       }
 
       // 404
-      sendJson(res, 404, { ok: false, error: 'Not found' });
+      sendJson(res, 404, { ok: false, error: '接口不存在' });
 
     } catch (error) {
       log('error', `请求处理失败: ${error.message}`);

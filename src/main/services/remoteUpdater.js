@@ -28,13 +28,15 @@ function detectProxy() {
       }
     } else if (process.platform === 'win32') {
       const { execSync } = require('node:child_process');
-      const out = execSync('reg query "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ProxyEnable', { encoding: 'utf-8', timeout: 3000 });
+      const out = execSync('reg query "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ProxyEnable', { encoding: 'utf-8', timeout: 3000, windowsHide: true });
       if (/0x1/.test(out)) {
-        const serverOut = execSync('reg query "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ProxyServer', { encoding: 'utf-8', timeout: 3000 });
+        const serverOut = execSync('reg query "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ProxyServer', { encoding: 'utf-8', timeout: 3000, windowsHide: true });
         const match = serverOut.match(/ProxyServer\s+REG_SZ\s+(.+)/);
         if (match) {
           const proxyAddr = match[1].trim();
-          _proxyAgent = createProxyAgent(proxyAddr.startsWith('http') ? proxyAddr : `http://${proxyAddr}`);
+          const { parseWindowsProxyServer } = require('./proxyFetch');
+          const proxyUrl = parseWindowsProxyServer(proxyAddr);
+          if (proxyUrl) _proxyAgent = createProxyAgent(proxyUrl);
         }
       }
     }
@@ -101,7 +103,7 @@ function nodeGet(url, maxRedirects = 5) {
           if (redirectsLeft <= 0) return reject(new Error('重定向次数过多'));
           return doRequest(res.headers.location, redirectsLeft - 1);
         }
-        if (res.statusCode !== 200) { res.resume(); return reject(new Error(`HTTP ${res.statusCode}`)); }
+        if (res.statusCode !== 200) { res.resume(); return reject(new Error(`请求失败（HTTP ${res.statusCode}）`)); }
         let data = '';
         res.setEncoding('utf-8');
         res.on('data', (chunk) => { data += chunk; });

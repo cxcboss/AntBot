@@ -221,7 +221,7 @@ function startApiServer({ store, taskRunner, editScheduler, mainWindowRef, appLo
         } catch { return send(200, { ok: true, voices: [] }); }
       }
 
-      send(404, { ok: false, message: `Not found: ${method} ${pathname}` });
+      send(404, { ok: false, message: `接口不存在: ${method} ${pathname}` });
     } catch (err) {
       send(500, { ok: false, message: err.message });
     }
