@@ -66,11 +66,16 @@ function validateSourceUrl(value, sourceType = inferSourceType(value)) {
     }
     return url.toString();
   }
-  const youtubePath = /^\/(?:@[^/]+|channel\/[^/]+|c\/[^/]+|user\/[^/]+)(?:\/videos)?$/i;
-  if (!(host === 'youtube.com' || host.endsWith('.youtube.com')) || !youtubePath.test(pathname)) {
-    throw new Error('请填写 YouTube 频道或用户主页链接');
+  // YouTube 频道页常见后缀：/videos /featured /shorts /streams /playlists /community /about 等，统一归一到频道主页
+  const youtubeBaseMatch = pathname.match(/^\/(?:@[^/]+|channel\/[^/]+|c\/[^/]+|user\/[^/]+)/i);
+  const youtubeBase = youtubeBaseMatch ? youtubeBaseMatch[0] : '';
+  const youtubeSuffix = youtubeBase ? pathname.slice(youtubeBase.length).replace(/\/+$/, '') : '';
+  const youtubeSuffixAllowed = !youtubeSuffix || /^\/(?:videos|featured|shorts|streams|playlists|community|about|channels|releases|podcasts)$/i.test(youtubeSuffix);
+  if (!(host === 'youtube.com' || host.endsWith('.youtube.com')) || !youtubeBase || !youtubeSuffixAllowed) {
+    throw new Error('请填写 YouTube 频道或用户主页链接，例如 https://www.youtube.com/@username 或 https://www.youtube.com/channel/UCxxx');
   }
-  return url.toString();
+  // 归一化到频道主页，去除后缀和多余的 search/hash，避免同频道多条记录
+  return `${url.protocol}//${url.host}${youtubeBase}`;
 }
 
 function sourceVideoKey(sourceType, videoId) {

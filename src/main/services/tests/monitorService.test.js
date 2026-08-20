@@ -25,7 +25,8 @@ test('新监控默认只下载且 TikTok 使用平台前缀去重', () => {
 test('只接受公开账号主页', () => {
   assert.throws(() => validateSourceUrl('https://www.tiktok.com/video/123', 'tiktok'));
   assert.equal(inferSourceType('https://www.tiktok.com/@demo'), 'tiktok');
-  assert.equal(validateSourceUrl('https://www.youtube.com/@demo/videos', 'youtube'), 'https://www.youtube.com/@demo/videos');
+  assert.equal(validateSourceUrl('https://www.youtube.com/@demo/videos', 'youtube'), 'https://www.youtube.com/@demo');
+  assert.equal(validateSourceUrl('https://www.youtube.com/@demo/featured', 'youtube'), 'https://www.youtube.com/@demo');
 });
 
 test('标准化来源视频并生成平台化 key', () => {

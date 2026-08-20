@@ -167,8 +167,8 @@ export function createMonitorPage({ state: S, esc, toast, injectIcons }) {
         if (urlEl) urlEl.placeholder = 'https://www.tiktok.com/@username';
         if (helpEl) helpEl.textContent = '仅支持公开账号主页，例如 https://www.tiktok.com/@username';
       } else {
-        if (urlEl) urlEl.placeholder = 'https://www.youtube.com/@xxx/videos';
-        if (helpEl) helpEl.textContent = '仅支持频道或用户主页，例如 https://www.youtube.com/@xxx/videos';
+        if (urlEl) urlEl.placeholder = 'https://www.youtube.com/@xxx';
+        if (helpEl) helpEl.textContent = '支持频道/用户主页，自动兼容 /videos /featured /shorts 等后缀，例如 https://www.youtube.com/@xxx';
       }
     }
 
