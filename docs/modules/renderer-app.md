@@ -15,7 +15,7 @@
 | `app/download-page.js` | ~325 | 下载页：yt-dlp 管理、YouTube 登录、下载任务 |
 | `app/update-page.js` | ~280 | 更新页：App/插件/远程页面更新检查与安装 |
 | `app/remote-page.js` | ~148 | 远程页：Cloudflare 隧道、QR 码、凭证管理 |
-| `app/monitor-page.js` | ~300 | 监控页：YouTube 博主监控、独立覆盖配置、立即检查 |
+| `app/monitor-page.js` | ~300 | 监控页：YouTube/TikTok 公开账号监控、处理动作、独立覆盖配置、立即检查 |
 
 ## 关键状态
 
@@ -93,5 +93,5 @@ const publishPage = createPublishPage({ state: S, esc });
 - **时间线组结构**：每条 run（消息+其任务）渲染为一个 `.run-group`，组间用分割线分隔；组内依次为 `.msg-time`（时间戳）、`.msg-user`（消息正文，**平铺无卡片**）、`.msg-rules`（可选规则折叠面板）、`.task-stack`（任务卡片）
 - **消息操作行**：`.msg-actions` 内「原文/复制」按钮，hover 时淡入；点击「原文」展开未缩略文本（`.msg-raw`），点击「复制」写入剪贴板并反馈「已复制」；事件委托绑定在 `#chat-stream`（`data-msg-raw` / `data-msg-copy`）
 - **规则面板**：发送时若走了预览规则（AI 优化或编辑过），`appendPending` 携带 `rules`（= `S.preview.items`），消息下方渲染 `.msg-rules` 折叠面板（`makeRulesHtml`）：头部摘要「已按规则解析 N 条任务 · 原创 X · 平台 Y」，展开显示每条任务的结构化规则（平台/原创/活动/定时/话题/标题）。**仅当前会话内有效**（`S.pending` 内存数据；重启后历史消息不保留规则面板）
-- **任务卡片字段**：`taskCard(t)` 读取平台 `t.platforms || t.taskSnapshot.platforms`、原创 `t.isOriginal`、活动 `t.campaignName`、定时 `t.publishAt`、耗时 `t.duration`、执行配置 `t._exec`（`{styleName, voiceName, voiceover, subtitle}`，主进程 runTask 时快照写入）。元信息行展示平台/原创/活动/定时；「执行详情」展开区展示耗时/风格/音色/旁白/字幕
+- **任务卡片字段**：`taskCard(t)` 读取平台 `t.platforms || t.taskSnapshot.platforms`、来源 `t.sourceType`、处理动作 `t.processMode`、原创 `t.isOriginal`、活动 `t.campaignName`、定时 `t.publishAt`、耗时 `t.duration`、执行配置 `t._exec`（`{styleName, voiceName, voiceover, subtitle, sourceType, processMode}`，主进程 runTask 时快照写入）。元信息行展示来源/动作/平台/原创/活动/定时；「执行详情」展开区展示耗时/风格/音色/旁白/字幕
 - **任务操作按钮**：完成/部分完成 →「打开目录」「重新发布」；运行中 →「取消」；排队 →「跳过」；失败 →「重试」

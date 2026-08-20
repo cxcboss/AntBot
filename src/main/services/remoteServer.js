@@ -198,6 +198,11 @@ async function getStatus() {
       isOriginal: t.isOriginal,
       rawLine: t.rawLine,
       platforms: Array.isArray(t.platforms) ? t.platforms.slice() : [],
+      sourceType: t.sourceType || '',
+      processMode: t.processMode || 'publish',
+      monitorId: t.monitorId || '',
+      monitorName: t.monitorName || '',
+      taskSnapshot: t.taskSnapshot || null,
       campaignName: t.campaignName || '',
       publishAt: t.publishAt || '',
       batchRunId: t.batchRunId || '',
@@ -233,6 +238,14 @@ function startRemoteServer({ store, taskRunner, mainWindowRef, appLog }) {
   _taskRunner = taskRunner;
   _mainWindowRef = mainWindowRef;
   _appLog = appLog;
+
+  // 监控更新复用远程 SSE，远程页面无需轮询即可同步启停、检查和统计状态。
+  try {
+    const monitorService = require('./monitorService');
+    monitorService.setContext({ taskRunner, store, mainWindowRef, appLog, monitorBroadcast: (payload) => broadcast('monitor-update', payload) });
+  } catch (error) {
+    log('warn', `监控远程广播初始化失败: ${error.message}`);
+  }
 
   // 支持通过 settings.remote.port / ANTBOT_REMOTE_PORT 配置端口（默认 18931）
   const envPort = Number(process.env.ANTBOT_REMOTE_PORT) || null;
@@ -412,7 +425,18 @@ function startRemoteServer({ store, taskRunner, mainWindowRef, appLog }) {
       const retryMatch = pathname.match(/^\/remote\/tasks\/([^/]+)\/retry$/);
       if (method === 'POST' && retryMatch) {
         try {
-          const result = await _taskRunner.resumeTask(retryMatch[1], {});
+          const taskId = retryMatch[1];
+          let taskPayload = null;
+          try {
+            const historyPath = path.join(os.homedir(), 'AntBot', 'antbot-store.json');
+            const data = JSON.parse(await fs.readFile(historyPath, 'utf-8'));
+            const item = (data.users?.[0]?.history || []).flatMap(h => h.items || []).find(i => i.taskId === taskId || i.id === taskId);
+            taskPayload = item?.taskSnapshot || null;
+          } catch {}
+          if (!taskPayload) {
+            try { taskPayload = (await _taskRunner.loadPersistedTasks()).find(t => t.id === taskId)?.taskSnapshot || null; } catch {}
+          }
+          const result = await _taskRunner.resumeTask(taskId, {}, taskPayload);
           return sendJson(res, 200, { ok: true, ...result });
         } catch (e) {
           return sendJson(res, 400, { ok: false, error: e.message });
@@ -435,6 +459,11 @@ function startRemoteServer({ store, taskRunner, mainWindowRef, appLog }) {
           } catch {}
           let persistedItem = null;
           try { persistedItem = (await _taskRunner.loadPersistedTasks()).find(t => t.id === taskId); } catch {}
+          const sourceItem = row || historyItem || persistedItem || {};
+          const processMode = sourceItem.processMode || sourceItem.taskSnapshot?.processMode || 'publish';
+          if (processMode !== 'publish') {
+            return sendJson(res, 400, { ok: false, error: '该任务无需重新发布' });
+          }
           const outputPath = row?.outputPath || historyItem?.outputPath || persistedItem?.outputPath;
           if (!outputPath) return sendJson(res, 200, { ok: false, error: '未找到视频文件路径' });
 
@@ -446,7 +475,16 @@ function startRemoteServer({ store, taskRunner, mainWindowRef, appLog }) {
 
           if (settings?.publish?.enabled === false) return sendJson(res, 200, { ok: false, error: '自动发布已关闭' });
           _taskRunner.setTaskState(taskId, { status: 'running', step: '发布', progress: 95, message: '重新发布中...' });
-          const task = { id: taskId, rawLine: row?.rawLine || historyItem?.rawLine || persistedItem?.rawLine || '', publishCopy: row?.publishCopy || historyItem?.publishCopy || persistedItem?.publishCopy || '', publishTopics: row?.publishTopics || historyItem?.publishTopics || persistedItem?.publishTopics || [], platforms: row?.platforms || historyItem?.platforms || persistedItem?.platforms || [], campaignName: row?.campaignName || historyItem?.campaignName || persistedItem?.campaignName || '' };
+          const snapshot = sourceItem.taskSnapshot || {};
+          const task = {
+            ...snapshot,
+            id: taskId,
+            rawLine: row?.rawLine || historyItem?.rawLine || persistedItem?.rawLine || snapshot.rawLine || '',
+            publishCopy: row?.publishCopy || historyItem?.publishCopy || persistedItem?.publishCopy || snapshot.publishCopy || '',
+            publishTopics: row?.publishTopics || historyItem?.publishTopics || persistedItem?.publishTopics || snapshot.publishTopics || [],
+            platforms: row?.platforms || historyItem?.platforms || persistedItem?.platforms || snapshot.platforms || [],
+            campaignName: row?.campaignName || historyItem?.campaignName || persistedItem?.campaignName || snapshot.campaignName || '',
+          };
           const result = await publishVideo({ task, settings, outputPath, log: (msg) => log('info', `[republish] ${msg}`) });
           const publishedPlatforms = result?.platforms || [];
           const platformNames = publishedPlatforms.map(p => p === 'videoChannel' ? '视频号' : '抖音').join('、');
@@ -463,6 +501,51 @@ function startRemoteServer({ store, taskRunner, mainWindowRef, appLog }) {
       if (method === 'GET' && pathname === '/remote/tasks') {
         const status = await getStatus();
         return sendJson(res, 200, { ok: true, tasks: status.tasks });
+      }
+
+      // ── 监控：桌面端与远程端共用同一份监控配置 ──
+      if (method === 'GET' && pathname === '/remote/monitors') {
+        const monitorService = require('./monitorService');
+        return sendJson(res, 200, { ok: true, monitors: await monitorService.getMonitors() });
+      }
+
+      if (method === 'POST' && pathname === '/remote/monitors') {
+        const body = await readBody(req, res);
+        if (!body) return;
+        try {
+          const monitorService = require('./monitorService');
+          const monitor = await monitorService.addMonitor(body);
+          return sendJson(res, 200, { ok: true, monitor });
+        } catch (error) {
+          return sendJson(res, 400, { ok: false, error: error.message });
+        }
+      }
+
+      const monitorActionMatch = pathname.match(/^\/remote\/monitors\/([^/]+)\/(update|toggle|check|remove)$/);
+      if (method === 'POST' && monitorActionMatch) {
+        const monitorId = decodeURIComponent(monitorActionMatch[1]);
+        const action = monitorActionMatch[2];
+        const body = await readBody(req, res);
+        if (!body) return;
+        try {
+          const monitorService = require('./monitorService');
+          if (action === 'update') {
+            const monitor = await monitorService.updateMonitor(monitorId, body);
+            return sendJson(res, 200, { ok: true, monitor });
+          }
+          if (action === 'toggle') {
+            const monitor = await monitorService.updateMonitor(monitorId, { enabled: body.enabled !== false });
+            return sendJson(res, 200, { ok: true, monitor });
+          }
+          if (action === 'check') {
+            const result = await monitorService.checkMonitorNow(monitorId);
+            return sendJson(res, 200, { ok: true, result });
+          }
+          await monitorService.removeMonitor(monitorId);
+          return sendJson(res, 200, { ok: true });
+        } catch (error) {
+          return sendJson(res, 400, { ok: false, error: error.message });
+        }
       }
 
       // GET /remote/history — 主控历史记录

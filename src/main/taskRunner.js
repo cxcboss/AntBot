@@ -3,7 +3,7 @@ const path = require('node:path');
 const os = require('node:os');
 const { app } = require('electron');
 const { STEP_NAMES } = require('./services/config');
-const { ensureDir, getDaySequence, buildTaskBaseName } = require('./services/fileUtil');
+const { ensureDir, getDaySequence, buildTaskBaseName, sanitizeName } = require('./services/fileUtil');
 const { downloadVideo } = require('./services/downloader');
 const { prepareEditVideo, composeEditVideo } = require('./services/smartEditor');
 const { publishVideo } = require('./services/publisher');
@@ -71,6 +71,33 @@ class TaskRunner {
     return `task-${Date.now()}-${this.jobSequence}`;
   }
 
+  resolveProcessMode(task) {
+    const mode = String(task?.processMode || '').trim().toLowerCase();
+    return new Set(['download', 'edit', 'publish']).has(mode) ? mode : 'publish';
+  }
+
+  async copyDownloadedVideo(task, sourcePath, outputDir) {
+    if (!(await this.fileExists(sourcePath))) {
+      throw new Error('下载文件不存在或为空');
+    }
+
+    const dayDir = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const targetDir = path.join(outputDir, dayDir);
+    await ensureDir(targetDir);
+
+    const baseName = sanitizeName(task?._baseName || task?.taskName || '视频');
+    const extension = path.extname(sourcePath).toLowerCase() || '.mp4';
+    let targetPath = path.join(targetDir, `${baseName}${extension}`);
+    let suffix = 1;
+    while (await this.fileExists(targetPath)) {
+      targetPath = path.join(targetDir, `${baseName}-${suffix}${extension}`);
+      suffix += 1;
+    }
+
+    await fs.copyFile(sourcePath, targetPath);
+    return targetPath;
+  }
+
   createJob(kind, payload, userContext = {}) {
     let resolve;
     let reject;
@@ -110,6 +137,9 @@ class TaskRunner {
       kind: job.kind,
       userId: job.userId,
       userName: job.userName,
+      sourceType: task.sourceType || '',
+      processMode: this.resolveProcessMode(task),
+      monitorId: task._monitorId || '',
       inputText: String(job.payload?.inputText || '').trim(),
       taskName: task.isOriginal ? '原创' : task.taskName,
       rawLine: task.rawLine || '',
@@ -408,7 +438,7 @@ class TaskRunner {
         throw new Error('不能恢复其他用户的任务。');
       }
       // 视频已生成（发布阶段失败/停止）：直接重试发布，跳过下载/识别/合成
-      if (row.outputPath) {
+      if (row.outputPath && row.processMode !== 'download' && row.processMode !== 'edit') {
         const fsSync = require('node:fs');
         try {
           const stat = fsSync.statSync(row.outputPath);
@@ -440,6 +470,20 @@ class TaskRunner {
         }
       }
       if (row.status === 'stopped' || row.status === 'failed') {
+        if (row.taskSnapshot) {
+          const retryTask = {
+            ...row.taskSnapshot,
+            id: this.buildTaskId(),
+            publishAt: row.taskSnapshot.publishAt
+              ? new Date(row.taskSnapshot.publishAt)
+              : null
+          };
+          const scheduled = this.enqueueTasks([retryTask], {
+            id: requestUserId || row.userId || 'user-1',
+            name: requestUserName || row.userName || ''
+          }, row.inputText || row.rawLine || '');
+          return { resumed: true, taskId: retryTask.id, queued: scheduled.queued, runId: scheduled.runId };
+        }
         // 重新入队为新任务
         const rawLine = row.rawLine || '';
         if (rawLine) {
@@ -475,7 +519,7 @@ class TaskRunner {
       return { resumed: true, taskId: targetId };
     }
 
-    if (taskPayload && requestUserId) {
+    if (taskPayload && (requestUserId || !row)) {
       const publishAt = taskPayload.publishAt
         ? new Date(taskPayload.publishAt)
         : null;
@@ -485,7 +529,7 @@ class TaskRunner {
         publishAt: publishAt && !Number.isNaN(publishAt.getTime()) ? publishAt : null
       };
       const scheduled = this.enqueueTasks([clonedTask], {
-        id: requestUserId,
+        id: requestUserId || taskPayload.userId || 'user-1',
         name: requestUserName || requestUser?.name || requestUser?.userName || ''
       }, taskPayload.rawLine || taskPayload.taskName || '');
       return {
@@ -518,6 +562,10 @@ class TaskRunner {
       publishCopy: row.publishCopy || '',
       publishTopics: Array.isArray(row.publishTopics) ? row.publishTopics : [],
       campaignName: row.campaignName || '',
+      sourceType: row.sourceType || '',
+      processMode: row.processMode || 'publish',
+      _monitorId: row.monitorId || '',
+      _monitorName: row.monitorName || '',
       publishAt: row.publishAt ? new Date(row.publishAt) : null
     };
 
@@ -664,6 +712,10 @@ class TaskRunner {
       publishCopy: task.publishCopy || '',
       publishTopics: Array.isArray(task.publishTopics) ? task.publishTopics.slice() : [],
       campaignName: task.campaignName || '',
+      sourceType: task.sourceType || '',
+      processMode: this.resolveProcessMode(task),
+      monitorId: task._monitorId || '',
+      monitorName: task._monitorName || '',
       publishAt: task.publishAt instanceof Date
         ? task.publishAt
         : (task.publishAt ? new Date(task.publishAt) : null)
@@ -678,6 +730,9 @@ class TaskRunner {
       taskName: row?.taskName || (task.isOriginal ? '原创' : task.taskName),
       rawLine: task.rawLine || '',
       status,
+      sourceType: task.sourceType || '',
+      processMode: this.resolveProcessMode(task),
+      monitorId: task._monitorId || '',
       taskSnapshot: this.serializeTaskSnapshot(task),
       ...extra
     };
@@ -738,6 +793,11 @@ class TaskRunner {
         taskName: row.taskName,
         rawLine: row.rawLine,
         inputText: row.inputText,
+        sourceType: row.sourceType || '',
+        processMode: row.processMode || 'publish',
+        monitorId: row.monitorId || '',
+        monitorName: row.monitorName || '',
+        taskSnapshot: row.taskSnapshot || null,
         status: row.status,
         step: row.step,
         message: row.message,
@@ -818,6 +878,10 @@ class TaskRunner {
       index: index + 1,
       userId: job.userId,
       userName: job.userName,
+      sourceType: task.sourceType || '',
+      processMode: this.resolveProcessMode(task),
+      monitorId: task._monitorId || '',
+      monitorName: task._monitorName || '',
       inputText: String(job.payload?.inputText || '').trim(),
       taskName: task.isOriginal ? '原创' : task.taskName,
       rawLine: task.rawLine,
@@ -829,6 +893,7 @@ class TaskRunner {
       retryCount: 0,
       retryLimit: 0,
       outputPath: '',
+      taskSnapshot: this.serializeTaskSnapshot(task),
       campaignName: task.campaignName || '',
       batchRunId: job.runId,
       submittedAt: job.enqueuedAt,
@@ -900,9 +965,11 @@ class TaskRunner {
 
       // ── Phase 1: 并行下载所有视频 ──
       this.log('', `开始并行下载 ${tasks.length} 个视频...`);
-      // 下载期间后台预热语音模型（若任务需要音色配音）
-      this.prewarmVoiceModel();
       const activeTasks = tasks.filter(t => !t.__stopped);
+      // 只有需要剪辑的任务才预热语音模型，纯下载监控不启动 Voicebox。
+      if (activeTasks.some((task) => this.resolveProcessMode(task) !== 'download')) {
+        this.prewarmVoiceModel();
+      }
       const downloadResults = new Map();
 
       // 并发限制（最多 5 个同时下载）
@@ -931,7 +998,13 @@ class TaskRunner {
               const downloadResult = await downloadVideo({ task, tempDir: mainControlCacheDir, baseName, settings, log: (msg) => this.log(task.id, msg) });
               downloadResults.set(task.id, downloadResult);
               taskTempFiles.set(task.id, { downloadPath: downloadResult.outputPath, tmpDir: '' });
-              this.setTaskState(task.id, { progress: 25, step: '下载完成', message: '视频下载完成，等待剪辑...' });
+              const processMode = this.resolveProcessMode(task);
+              const nextStepMessage = processMode === 'download'
+                ? '视频下载完成，等待保存...'
+                : processMode === 'edit'
+                  ? '视频下载完成，等待剪辑...'
+                  : '视频下载完成，等待处理...';
+              this.setTaskState(task.id, { progress: 25, step: '下载完成', message: nextStepMessage });
             } catch (err) {
               downloadResults.set(task.id, { error: err });
               this.setTaskState(task.id, { status: 'failed', step: '下载失败', message: err.message });
@@ -958,12 +1031,15 @@ class TaskRunner {
       const runSingleTask = async (task, attemptIndex = 0) => {
         const t0 = Date.now();
         // 执行配置快照（任务实际使用的风格/音色/旁白/字幕）
+        const processMode = this.resolveProcessMode(task);
         const voiceoverEnabled = settings?.style?.voiceoverEnabled !== false;
         const execSnapshot = {
           styleName: task._styleName || '',
           voiceName: task._voiceProfileName || task._voiceId || settings?.voiceClone?.profileName || settings?.voiceClone?.voiceId || '',
           voiceover: voiceoverEnabled,
           subtitle: voiceoverEnabled && settings?.style?.subtitleEnabled !== false,
+          sourceType: task.sourceType || '',
+          processMode,
         };
         const commitItem = (status, extra = {}) => this.buildRunItem(job, task, row, status, {
           ...extra,
@@ -989,7 +1065,7 @@ class TaskRunner {
         }
 
         // 检查下载结果（重试时如果之前下载成功则跳过）
-        const dlResult = downloadResults.get(task.id);
+        let dlResult = downloadResults.get(task.id);
         const hasExistingOutput = dlResult?.outputPath && !dlResult?.error;
         if (!hasExistingOutput && (!dlResult || dlResult.error)) {
           // 重试时重新下载
@@ -998,7 +1074,11 @@ class TaskRunner {
               this.setTaskState(task.id, { status: 'running', progress: 10, step: '重新下载', message: `重试: 重新下载...` });
               const baseName = task._baseName || buildTaskBaseName(task, 0, new Date());
               const redlResult = await downloadVideo({ task, settings, baseName, tempDir: mainControlCacheDir, log: (msg) => this.log(task.id, msg) });
+              dlResult = redlResult;
               downloadResults.set(task.id, redlResult);
+              if (redlResult?.outputPath) {
+                taskTempFiles.set(task.id, { downloadPath: redlResult.outputPath, tmpDir: '' });
+              }
             } catch (redlErr) {
               downloadResults.set(task.id, { error: redlErr });
               const errMsg = redlErr.message || '视频下载失败';
@@ -1015,6 +1095,57 @@ class TaskRunner {
         }
 
         this.currentTaskId = task.id;
+        if (processMode === 'download') {
+          try {
+            const outputPath = await this.copyDownloadedVideo(task, dlResult.outputPath, mainControlOutputDir);
+            task._outPath = outputPath;
+            this.setTaskState(task.id, {
+              status: 'completed',
+              progress: 100,
+              step: '完成',
+              message: '下载完成，已保存到主控输出',
+              attempt: attemptIndex + 1,
+              retryCount: attemptIndex,
+              retryLimit,
+              outputPath,
+              duration: Math.round((Date.now() - t0) / 1000),
+              _exec: execSnapshot
+            });
+            this.savePersistedTask(this.progressRows.find(r => r.id === task.id));
+            runRecord.items.push(commitItem('completed', {
+              outputPath,
+              publishMode: 'disabled',
+              finishedAt: nowIso(),
+              attempt: attemptIndex + 1,
+              retryCount: attemptIndex,
+              message: '视频已下载'
+            }));
+            this.currentTaskId = '';
+            this.stopRequested = false;
+            return { status: 'completed', retryable: false };
+          } catch (downloadSaveError) {
+            const message = `下载文件保存失败: ${downloadSaveError.message}`;
+            this.setTaskState(task.id, {
+              status: 'failed',
+              step: '失败',
+              message,
+              attempt: attemptIndex + 1,
+              retryCount: attemptIndex,
+              retryLimit
+            });
+            this.log(task.id, message, 'error');
+            runRecord.items.push(commitItem('failed', {
+              message,
+              finishedAt: nowIso(),
+              attempt: attemptIndex + 1,
+              retryCount: attemptIndex,
+              retryable: true
+            }));
+            this.currentTaskId = '';
+            this.stopRequested = false;
+            return { status: 'failed', retryable: true };
+          }
+        }
         const publishOnlyRetry = attemptIndex > 0 && task._outPath && await this.fileExists(task._outPath);
         if (publishOnlyRetry) {
           this.log(task.id, '视频已生成，跳过下载和编辑，直接重试发布');
@@ -1024,7 +1155,14 @@ class TaskRunner {
         if (publishOnlyRetry) {
           // 发布重试：直接跳到发布步骤
           const outPath = task._outPath;
-          const publishEnabled = settings?.publish?.enabled !== false;
+          const publishEnabled = processMode === 'publish' && settings?.publish?.enabled !== false;
+          if (task._monitorId && processMode === 'publish' && !publishEnabled) {
+            const message = '成品已生成，但自动发布已关闭';
+            this.setTaskState(task.id, { status: 'warning', progress: 100, step: '部分完成', message, attempt: attemptIndex + 1, retryCount: attemptIndex, retryLimit, outputPath: task._outPath });
+            this.savePersistedTask(this.progressRows.find(r => r.id === task.id));
+            runRecord.items.push(commitItem('warning', { outputPath: task._outPath, publishedPlatforms: [], publishMode: 'disabled', finishedAt: nowIso(), attempt: attemptIndex + 1, retryCount: attemptIndex, message, retryable: false }));
+            return { status: 'completed', retryable: false };
+          }
           try {
             let publishResult = null;
             if (publishEnabled) {
@@ -1052,7 +1190,7 @@ class TaskRunner {
         const baseName = task._baseName;
         let outDir = '';
         let outPath = '';
-        const publishEnabled = settings?.publish?.enabled !== false;
+        const publishEnabled = processMode === 'publish' && settings?.publish?.enabled !== false;
         let editCompleted = false;
 
         try {
@@ -1151,6 +1289,61 @@ class TaskRunner {
           }), 75);
           editCompleted = true;
           task._outPath = outPath; // 保存路径供发布重试使用
+
+          if (processMode === 'edit') {
+            const message = '剪辑完成，已保存到主控输出';
+            this.setTaskState(task.id, {
+              status: 'completed',
+              progress: 100,
+              step: '完成',
+              message,
+              attempt: attemptIndex + 1,
+              retryCount: attemptIndex,
+              retryLimit,
+              outputPath: outPath,
+              duration: Math.round((Date.now() - t0) / 1000),
+              _exec: execSnapshot
+            });
+            this.savePersistedTask(this.progressRows.find(r => r.id === task.id));
+            runRecord.items.push(commitItem('completed', {
+              outputPath: outPath,
+              publishMode: 'disabled',
+              finishedAt: nowIso(),
+              attempt: attemptIndex + 1,
+              retryCount: attemptIndex,
+              message: '视频已剪辑'
+            }));
+            return { status: 'completed', retryable: false };
+          }
+
+          if (task._monitorId && processMode === 'publish' && settings?.publish?.enabled === false) {
+            const message = '成品已生成，但自动发布已关闭';
+            this.setTaskState(task.id, {
+              status: 'warning',
+              progress: 100,
+              step: '部分完成',
+              message,
+              attempt: attemptIndex + 1,
+              retryCount: attemptIndex,
+              retryLimit,
+              outputPath: outPath,
+              duration: Math.round((Date.now() - t0) / 1000),
+              _exec: execSnapshot
+            });
+            this.savePersistedTask(this.progressRows.find(r => r.id === task.id));
+            runRecord.items.push(commitItem('warning', {
+              outputPath: outPath,
+              publishAt: task.publishAt ? task.publishAt.toISOString() : '',
+              publishedPlatforms: [],
+              publishMode: 'disabled',
+              finishedAt: nowIso(),
+              attempt: attemptIndex + 1,
+              retryCount: attemptIndex,
+              message,
+              retryable: false
+            }));
+            return { status: 'completed', retryable: false };
+          }
 
           let publishResult = null;
           if (publishEnabled) {
@@ -1378,6 +1571,10 @@ class TaskRunner {
       index: 1,
       userId: job.userId,
       userName: job.userName,
+      sourceType: task.sourceType || '',
+      processMode: this.resolveProcessMode(task),
+      monitorId: task._monitorId || '',
+      monitorName: task._monitorName || '',
       taskName: task.isOriginal ? '原创' : (task.taskName || path.basename(videoPath)),
       rawLine: task.rawLine || '',
       status: 'pending',
@@ -1388,6 +1585,7 @@ class TaskRunner {
       retryCount: 0,
       retryLimit: 0,
       outputPath: videoPath,
+      taskSnapshot: this.serializeTaskSnapshot(task),
       submittedAt: job.enqueuedAt,
       updatedAt: nowIso()
     }];
@@ -1417,6 +1615,8 @@ class TaskRunner {
         voiceName: settings?.voiceClone?.profileName || settings?.voiceClone?.voiceId || '',
         voiceover: voiceoverEnabled,
         subtitle: voiceoverEnabled && settings?.style?.subtitleEnabled !== false,
+        sourceType: task.sourceType || '',
+        processMode: this.resolveProcessMode(task),
       };
       const commitItem = (status, extra = {}) => this.buildRunItem(job, task, this.progressRows[0], status, {
         ...extra,

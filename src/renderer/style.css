@@ -906,6 +906,10 @@ body:not([data-platform="darwin"]) .toasts{top:8px}
 .monitor-url{font-size:11px;color:var(--muted-foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .monitor-meta{display:flex;flex-wrap:wrap;gap:6px}
 .monitor-tag{font-size:11px;padding:2px 8px;border-radius:var(--radius-full);background:var(--muted);color:var(--muted-foreground)}
+.monitor-tag.action{background:var(--accent);color:var(--accent-foreground);font-weight:500}
+.monitor-source-type{font-weight:600;color:var(--foreground);margin-right:4px}
+.monitor-help{display:block;font-size:11px;line-height:1.5;color:var(--muted-foreground);margin-top:4px}
+.monitor-card.disabled{opacity:.72}
 .monitor-stats{font-size:11px;color:var(--muted-foreground)}
 .monitor-error{font-size:11px;color:var(--destructive);background:var(--destructive-bg);padding:6px 8px;border-radius:var(--radius);word-break:break-word}
 .monitor-actions{display:flex;gap:6px;justify-content:flex-end}

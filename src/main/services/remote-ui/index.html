@@ -404,8 +404,49 @@ input[type=number]::-webkit-inner-spin-button{opacity:1}
 .status-queue-item{text-align:center}
 .status-queue-num{font-size:20px;font-weight:700;color:var(--foreground)}
 .status-queue-label{font-size:11px;color:var(--muted-foreground);margin-top:var(--space-1)}
+.monitor-toolbar{display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);margin-bottom:var(--space-4)}
+.monitor-toolbar-copy{min-width:0}
+.monitor-toolbar-title{font-size:15px;font-weight:600}
+.monitor-toolbar-hint{font-size:11px;color:var(--muted-foreground);margin-top:var(--space-1)}
+.monitor-toolbar-actions{display:flex;gap:var(--space-2);flex-shrink:0}
+.monitor-list{display:flex;flex-direction:column;gap:var(--space-3)}
+.monitor-card{position:relative;background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--space-4);transition:border-color var(--transition-fast)}
+.monitor-card:hover{border-color:var(--muted-foreground)}
+.monitor-card.disabled{opacity:.72}
+.monitor-head{display:flex;align-items:flex-start;gap:var(--space-3)}
+.monitor-head-copy{min-width:0;flex:1}
+.monitor-name{font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.monitor-source{display:flex;align-items:center;gap:var(--space-2);margin-top:var(--space-1);font-size:11px;color:var(--muted-foreground);overflow:hidden}
+.monitor-source-type{font-weight:600;color:var(--foreground);flex-shrink:0}
+.monitor-source-url{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.monitor-switch{width:36px;height:20px;border:1px solid var(--border);border-radius:var(--radius-full);background:var(--muted);padding:2px;flex-shrink:0;transition:background var(--transition-fast),border-color var(--transition-fast)}
+.monitor-switch::after{content:'';display:block;width:14px;height:14px;border-radius:var(--radius-full);background:var(--card);box-shadow:var(--shadow-xs);transition:transform var(--transition-fast)}
+.monitor-switch.on{background:var(--primary);border-color:var(--primary)}
+.monitor-switch.on::after{transform:translateX(16px);background:var(--primary-foreground)}
+.monitor-meta{display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-3)}
+.monitor-tag{display:inline-flex;align-items:center;min-height:24px;padding:0 var(--space-2);border-radius:var(--radius-sm);background:var(--secondary);color:var(--muted-foreground);font-size:11px}
+.monitor-tag.action{background:var(--accent);color:var(--accent-foreground);font-weight:500}
+.monitor-stats{margin-top:var(--space-3);font-size:11px;color:var(--muted-foreground)}
+.monitor-error{margin-top:var(--space-2);padding:var(--space-2) var(--space-3);border-radius:var(--radius);background:var(--destructive-bg);color:var(--destructive);font-size:11px;line-height:1.5}
+.monitor-actions{display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-4);padding-top:var(--space-3);border-top:1px solid var(--border)}
+.monitor-empty{padding:var(--space-8) var(--space-4);text-align:center;color:var(--muted-foreground)}
+.monitor-empty-title{font-size:14px;color:var(--foreground);font-weight:600;margin-bottom:var(--space-2)}
+.monitor-empty-hint{font-size:12px;line-height:1.6}
+.monitor-modal .dialog{max-width:440px}
+.monitor-modal .dialog-form{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3)}
+.monitor-modal .dialog-form .full{grid-column:1 / -1}
+.monitor-modal .dialog-actions{display:flex;gap:var(--space-2);margin-top:var(--space-4)}
+.monitor-modal .dialog-actions .btn{flex:1}
+.monitor-help{font-size:11px;line-height:1.5;color:var(--muted-foreground);margin-top:var(--space-1)}
 @media(min-width:768px){
   .status-grid{grid-template-columns:repeat(2,1fr)}
+}
+@media(max-width:560px){
+  .monitor-toolbar{align-items:flex-start;flex-direction:column}
+  .monitor-toolbar-actions{width:100%}
+  .monitor-toolbar-actions .btn{flex:1}
+  .monitor-modal .dialog-form{grid-template-columns:1fr}
+  .monitor-modal .dialog-form .full{grid-column:auto}
 }
 
 /* ── 平台卡片 / 状态页 优化 ── */
@@ -444,6 +485,7 @@ const APP_VERSION='1.9.3';
 let API=window.location.origin;
 let token=localStorage.getItem('antbot-token');
 let tasks=[];
+let monitors=[];
 let historyRecords=[];
 let sseSource=null;
 let currentPage='main';
@@ -581,6 +623,12 @@ function connectSSE(){
       renderChips(currentSettings);
     }
   });
+  sseSource.addEventListener('monitor-update',e=>{
+    const payload=JSON.parse(e.data||'{}');
+    if(payload.removed&&payload.id){monitors=monitors.filter(m=>m.id!==payload.id)}
+    else if(payload.monitor?.id){const i=monitors.findIndex(m=>m.id===payload.monitor.id);if(i>=0)monitors[i]=payload.monitor;else monitors.unshift(payload.monitor)}
+    renderMonitors();
+  });
   sseSource.onerror=()=>{
     consecutiveErrors++;
     if(consecutiveErrors>=3){showBanner('retry');reconnectViaHub();}
@@ -659,6 +707,7 @@ function initApp(){
   bindEvents();
   loadSettings();
   loadTasks();
+  loadMonitors();
   connectSSE();
 }
 
@@ -667,6 +716,7 @@ const ICON_SUB='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strok
 const ICON_GLOBE='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>';
 const ICON_LOCK='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>';
 const ICON_STAT='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>';
+const ICON_EYE='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>';
 const ICON_MENU='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" x2="21" y1="6" y2="6"/><line x1="3" x2="21" y1="12" y2="12"/><line x1="3" x2="21" y1="18" y2="18"/></svg>';
 const ICON_SEND='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>';
 const ICON_SPARK='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z"/><path d="M20 2v4"/><path d="M22 4h-4"/><circle cx="4" cy="20" r="2"/></svg>';
@@ -691,6 +741,7 @@ function renderAppShell(){
         <button class="nav-item active" data-page="main">${ICON_PLAY}<span>主控</span></button>
         <button class="nav-item" data-page="subtitle">${ICON_SUB}<span>字幕</span></button>
         <button class="nav-item" data-page="remote">${ICON_GLOBE}<span>远程</span></button>
+        <button class="nav-item" data-page="monitor">${ICON_EYE}<span>监控</span></button>
         <button class="nav-item" data-page="login">${ICON_LOCK}<span>平台登录</span></button>
         <button class="nav-item" data-page="status">${ICON_STAT}<span>状态</span></button>
       </nav>
@@ -742,6 +793,14 @@ function renderAppShell(){
         <div class="form-group"><label class="form-label">密码</label><input class="form-input" id="remote-pass" type="password"></div>
         <button class="btn btn-primary btn-block" id="remote-save-btn" type="button">保存并重新登录</button>
       </div>
+      <div class="page" id="page-monitor">
+        <div class="monitor-toolbar">
+          <div class="monitor-toolbar-copy"><div class="monitor-toolbar-title">视频监控</div><div class="monitor-toolbar-hint">发现新视频后，按每个监控的动作自动下载、剪辑或发布。</div></div>
+          <div class="monitor-toolbar-actions"><button class="btn btn-primary btn-sm" id="monitor-add-btn" type="button">添加监控</button><button class="btn btn-ghost btn-sm" id="monitor-check-all-btn" type="button">全部检查</button></div>
+        </div>
+        <div class="monitor-list" id="monitor-list"></div>
+        <div class="monitor-empty" id="monitor-empty" style="display:none"><div class="monitor-empty-title">还没有监控</div><div class="monitor-empty-hint">添加 YouTube 频道或 TikTok 公开账号主页，首次检查只建立基线，不会批量处理旧视频。</div></div>
+      </div>
       <div class="page" id="page-login">
         <div class="section-title">平台登录</div>
         <div class="platform-card" id="login-douyin">
@@ -781,6 +840,25 @@ function renderAppShell(){
       <button class="send-btn" id="send-btn" type="button" disabled>${ICON_SEND}</button>
     </div>
     <div class="chips" id="chips"></div>
+  </div>
+</div>
+<div class="dialog-overlay monitor-modal" id="monitor-modal">
+  <div class="dialog">
+    <div class="dialog-title"><span id="monitor-dialog-title">添加监控</span><button class="dialog-close" id="monitor-close-btn" type="button" aria-label="关闭">×</button></div>
+    <div class="dialog-form">
+      <label class="full"><span class="form-label">名称</span><input class="form-input" id="monitor-name" placeholder="例如：科技频道" autocomplete="off"></label>
+      <label class="full"><span class="form-label">来源平台</span><select class="form-input" id="monitor-source-type"><option value="youtube">YouTube</option><option value="tiktok">TikTok</option></select><div class="monitor-help" id="monitor-url-help">仅支持频道或用户主页，例如 https://www.youtube.com/@xxx/videos</div></label>
+      <label class="full"><span class="form-label">频道 / 账号主页链接</span><input class="form-input" id="monitor-url" type="url" placeholder="https://www.youtube.com/@xxx/videos" autocomplete="off"></label>
+      <label><span class="form-label">检查频率</span><select class="form-input" id="monitor-freq"><option value="30">每 30 分钟</option><option value="60" selected>每小时</option><option value="120">每 2 小时</option><option value="360">每 6 小时</option><option value="1440">每天</option></select></label>
+      <label><span class="form-label">处理动作</span><select class="form-input" id="monitor-process-mode"><option value="download">仅下载</option><option value="edit">下载并剪辑</option><option value="publish">下载、剪辑并发布</option></select></label>
+      <label><span class="form-label">发布平台</span><select class="form-input" id="monitor-platforms"><option value="">跟随全局</option><option value="videoChannel">仅视频号</option><option value="douyin">仅抖音</option><option value="both">视频号 + 抖音</option></select></label>
+      <label><span class="form-label">原创标记</span><select class="form-input" id="monitor-original"><option value="">跟随全局</option><option value="true">是</option><option value="false">否</option></select></label>
+      <label class="full"><span class="form-label">话题（空格分隔）</span><input class="form-input" id="monitor-topics" placeholder="#科技 #测评" autocomplete="off"></label>
+      <label class="full"><span class="form-label">活动名（可选）</span><input class="form-input" id="monitor-campaign" placeholder="留空=不参加" autocomplete="off"></label>
+      <label><span class="form-label">风格</span><select class="form-input" id="monitor-style"><option value="">跟随全局</option></select></label>
+      <label><span class="form-label">音色</span><select class="form-input" id="monitor-voice"><option value="">跟随全局</option></select></label>
+    </div>
+    <div class="dialog-actions"><button class="btn btn-primary" id="monitor-save-btn" type="button">保存监控</button><button class="btn btn-ghost" id="monitor-cancel-btn" type="button">取消</button></div>
   </div>
 </div>
 <div class="qr-overlay" id="qr-overlay">
@@ -863,6 +941,34 @@ function bindEvents(){
       }).catch(()=>{showToast('网络错误')}).finally(()=>{actBtn.disabled=false;actBtn.textContent='重新发布'});
     }
   });
+  document.getElementById('monitor-add-btn')?.addEventListener('click',()=>openMonitorDialog(null));
+  document.getElementById('monitor-check-all-btn')?.addEventListener('click',checkAllMonitors);
+  document.getElementById('monitor-save-btn')?.addEventListener('click',saveMonitor);
+  document.getElementById('monitor-cancel-btn')?.addEventListener('click',closeMonitorDialog);
+  document.getElementById('monitor-close-btn')?.addEventListener('click',closeMonitorDialog);
+  document.getElementById('monitor-source-type')?.addEventListener('change',updateMonitorFormHints);
+  document.getElementById('monitor-modal')?.addEventListener('click',e=>{if(e.target.id==='monitor-modal')closeMonitorDialog()});
+  document.getElementById('monitor-list')?.addEventListener('click',async e=>{
+    const btn=e.target.closest('[data-monitor-act]');if(!btn)return;
+    const id=btn.dataset.id;const monitor=monitors.find(m=>m.id===id);if(!monitor)return;
+    const act=btn.dataset.monitorAct;
+    if(act==='edit'){openMonitorDialog(monitor);return}
+    if(act==='remove'){
+      if(!confirm('确定删除这个监控？'))return;
+      btn.disabled=true;const d=await api('POST','/remote/monitors/'+encodeURIComponent(id)+'/remove');
+      if(d?.ok){monitors=monitors.filter(m=>m.id!==id);renderMonitors();showToast('监控已删除')}else{showToast(d?.error||'删除失败');btn.disabled=false}
+      return;
+    }
+    if(act==='toggle'){
+      const d=await api('POST','/remote/monitors/'+encodeURIComponent(id)+'/toggle',{enabled:!monitor.enabled});
+      if(d?.ok&&d.monitor){Object.assign(monitor,d.monitor);renderMonitors()}else showToast(d?.error||'更新失败');
+      return;
+    }
+    if(act==='check'){
+      btn.disabled=true;const old=btn.textContent;btn.textContent='检查中...';
+      try{const d=await api('POST','/remote/monitors/'+encodeURIComponent(id)+'/check');if(d?.ok){await loadMonitors();const n=d.result?.newVideos?.length||0;showToast(d.result?.firstRun?'首次已建立视频基线':(n?'发现 '+n+' 个新视频，已入队':'暂无新视频'))}else showToast(d?.error||'检查失败')}catch{showToast('网络错误')}finally{btn.disabled=false;btn.textContent=old}
+    }
+  });
   document.getElementById('sub-save-btn')?.addEventListener('click',async()=>{
     await api('POST','/remote/settings',{style:{subtitleTextColor:getColorHex('color'),subtitleStrokeColor:getColorHex('stroke'),subtitlePositionPercent:parseInt(document.getElementById('sub-position')?.value)||12}});
     showToast('已保存并同步');
@@ -891,7 +997,7 @@ function switchPage(page){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.getElementById('page-'+page)?.classList.add('active');
   document.querySelectorAll('.nav-item[data-page]').forEach(n=>n.classList.toggle('active',n.dataset.page===page));
-  document.getElementById('header-title').textContent={main:'主控',subtitle:'字幕',remote:'远程',login:'平台登录',status:'状态'}[page]||'主控';
+  document.getElementById('header-title').textContent={main:'主控',subtitle:'字幕',remote:'远程',monitor:'监控',login:'平台登录',status:'状态'}[page]||'主控';
   // 桌面侧边栏常驻不关闭；手机抽屉切换后关闭
   if(window.innerWidth<768){
     document.getElementById('sidebar')?.classList.remove('open');
@@ -900,6 +1006,7 @@ function switchPage(page){
   const ib=document.getElementById('input-bar');if(ib)ib.style.display=page==='main'?'':'none';
   if(page==='subtitle')loadSubtitleSettings();
   if(page==='remote')loadRemoteSettings();
+  if(page==='monitor')loadMonitors();
   if(page==='status')loadSystemStatus();
 }
 
@@ -1301,6 +1408,139 @@ async function loadTasks(){
   renderTimeline();
 }
 
+const monitorModeLabel={download:'仅下载',edit:'下载并剪辑',publish:'下载、剪辑并发布'};
+let monitorEditingId='';
+let monitorStyles=[];
+let monitorVoices=[];
+
+function monitorSourceLabel(type){return type==='tiktok'?'TikTok':'YouTube'}
+function monitorFrequencyLabel(v){const n=Number(v)||60;return n>=1440?'每天':n>=60?('每 '+Math.round(n/60)+' 小时'):('每 '+n+' 分钟')}
+function monitorPlatformLabel(m){
+  const items=Array.isArray(m?.overrides?.publishPlatforms)?m.overrides.publishPlatforms:[];
+  return items.length?items.map(p=>platformLabel[p]||p).join('、'):'跟随全局';
+}
+
+function renderMonitors(){
+  const list=document.getElementById('monitor-list'),empty=document.getElementById('monitor-empty');
+  if(!list)return;
+  if(!monitors.length){list.innerHTML='';if(empty)empty.style.display='';return}
+  if(empty)empty.style.display='none';
+  list.innerHTML=monitors.map(m=>{
+    const mode=m.processMode||'publish';
+    const last=m.lastCheckAt?fmtGroupTime(m.lastCheckAt):'未检查';
+    const stats='已发现 '+(m.stats?.totalFetched||0)+' · 已入队 '+(m.stats?.totalQueued||0);
+    const style=m.overrides?.styleName||'跟随全局';
+    const voice=m.overrides?.voiceProfileName||'跟随全局';
+    return '<div class="monitor-card '+(m.enabled?'':'disabled')+'" data-monitor-id="'+esc(m.id)+'">'+
+      '<div class="monitor-head"><div class="monitor-head-copy"><div class="monitor-name">'+esc(m.name||'未命名监控')+'</div><div class="monitor-source"><span class="monitor-source-type">'+monitorSourceLabel(m.sourceType)+'</span><span class="monitor-source-url" title="'+esc(m.sourceUrl)+'">'+esc(m.sourceUrl)+'</span></div></div>'+
+      '<button class="monitor-switch '+(m.enabled?'on':'')+'" type="button" data-monitor-act="toggle" data-id="'+esc(m.id)+'" aria-label="'+(m.enabled?'停用':'启用')+'监控" aria-pressed="'+(m.enabled?'true':'false')+'"></button></div>'+
+      '<div class="monitor-meta"><span class="monitor-tag action">'+esc(monitorModeLabel[mode]||monitorModeLabel.download)+'</span><span class="monitor-tag">'+esc(monitorFrequencyLabel(m.checkIntervalMinutes))+'</span><span class="monitor-tag">'+esc(monitorPlatformLabel(m))+'</span><span class="monitor-tag">风格 '+esc(style)+'</span><span class="monitor-tag">音色 '+esc(voice)+'</span></div>'+
+      '<div class="monitor-stats">'+esc(stats)+' · 上次 '+esc(last)+'</div>'+
+      (m.stats?.lastError?'<div class="monitor-error">'+esc(m.stats.lastError)+'</div>':'')+
+      '<div class="monitor-actions"><button class="btn btn-xs btn-ghost" type="button" data-monitor-act="check" data-id="'+esc(m.id)+'" '+(m.enabled?'':'disabled')+'>立即检查</button><button class="btn btn-xs btn-ghost" type="button" data-monitor-act="edit" data-id="'+esc(m.id)+'">编辑</button><button class="btn btn-xs btn-ghost btn-danger" type="button" data-monitor-act="remove" data-id="'+esc(m.id)+'">删除</button></div></div>';
+  }).join('');
+}
+
+async function loadMonitors(){
+  const d=await api('GET','/remote/monitors');
+  if(d?.ok){monitors=Array.isArray(d.monitors)?d.monitors:[];renderMonitors();}
+}
+
+function updateMonitorFormHints(){
+  const type=document.getElementById('monitor-source-type')?.value||'youtube';
+  const url=document.getElementById('monitor-url');
+  const help=document.getElementById('monitor-url-help');
+  if(type==='tiktok'){
+    if(url)url.placeholder='https://www.tiktok.com/@username';
+    if(help)help.textContent='仅支持公开账号主页，例如 https://www.tiktok.com/@username';
+  }else{
+    if(url)url.placeholder='https://www.youtube.com/@xxx/videos';
+    if(help)help.textContent='仅支持频道或用户主页，例如 https://www.youtube.com/@xxx/videos';
+  }
+}
+
+async function loadMonitorOptions(){
+  if(!monitorStyles.length){const d=await api('GET','/remote/styles');monitorStyles=Array.isArray(d?.styles)?d.styles:[]}
+  if(!monitorVoices.length){const d=await api('GET','/remote/voices');monitorVoices=Array.isArray(d?.voices)?d.voices:[]}
+  const style=document.getElementById('monitor-style');
+  if(style){const cur=style.value;style.innerHTML='<option value="">跟随全局</option>'+monitorStyles.filter(s=>s?.name).map(s=>'<option value="'+esc(s.name)+'">'+esc(s.name)+'</option>').join('');if(cur)style.value=cur}
+  const voice=document.getElementById('monitor-voice');
+  if(voice){const cur=voice.value;voice.innerHTML='<option value="">跟随全局</option>'+monitorVoices.filter(v=>v?.name).map(v=>'<option value="'+esc(v.name)+'">'+esc(v.name)+'</option>').join('');if(cur)voice.value=cur}
+}
+
+async function openMonitorDialog(monitor){
+  await loadMonitorOptions();
+  monitorEditingId=monitor?.id||'';
+  document.getElementById('monitor-dialog-title').textContent=monitorEditingId?'编辑监控':'添加监控';
+  document.getElementById('monitor-name').value=monitor?.name||'';
+  document.getElementById('monitor-source-type').value=monitor?.sourceType||'youtube';
+  document.getElementById('monitor-url').value=monitor?.sourceUrl||'';
+  document.getElementById('monitor-freq').value=String(monitor?.checkIntervalMinutes||60);
+  document.getElementById('monitor-process-mode').value=monitor?.processMode||'download';
+  const plats=monitor?.overrides?.publishPlatforms||[];
+  document.getElementById('monitor-platforms').value=plats.includes('videoChannel')&&plats.includes('douyin')?'both':plats[0]||'';
+  const original=monitor?.overrides?.isOriginal;
+  document.getElementById('monitor-original').value=original===null||original===undefined?'':String(Boolean(original));
+  document.getElementById('monitor-topics').value=(monitor?.overrides?.topics||[]).join(' ');
+  document.getElementById('monitor-campaign').value=monitor?.overrides?.campaignName||'';
+  document.getElementById('monitor-style').value=monitor?.overrides?.styleName||'';
+  document.getElementById('monitor-voice').value=monitor?.overrides?.voiceProfileName||monitor?.overrides?.voiceId||'';
+  updateMonitorFormHints();
+  document.getElementById('monitor-modal')?.classList.add('show');
+  document.getElementById('monitor-name')?.focus();
+}
+
+function closeMonitorDialog(){document.getElementById('monitor-modal')?.classList.remove('show');monitorEditingId=''}
+
+function collectMonitorForm(){
+  const type=document.getElementById('monitor-source-type').value;
+  const platformValue=document.getElementById('monitor-platforms').value;
+  const topicsRaw=document.getElementById('monitor-topics').value.trim();
+  const voiceName=document.getElementById('monitor-voice').value;
+  const voice=monitorVoices.find(v=>v.name===voiceName);
+  const original=document.getElementById('monitor-original').value;
+  return {
+    name:document.getElementById('monitor-name').value.trim(),
+    sourceType:type,
+    sourceUrl:document.getElementById('monitor-url').value.trim(),
+    checkIntervalMinutes:Number(document.getElementById('monitor-freq').value)||60,
+    processMode:document.getElementById('monitor-process-mode').value,
+    overrides:{
+      publishPlatforms:platformValue==='both'?['videoChannel','douyin']:platformValue?[platformValue]:null,
+      topics:topicsRaw?topicsRaw.split(/[\s,，、]+/).filter(Boolean).map(v=>v.startsWith('#')?v:'#'+v).slice(0,5):null,
+      styleName:document.getElementById('monitor-style').value,
+      voiceId:voice?.id||'',
+      voiceProfileName:voiceName,
+      isOriginal:original===''?null:original==='true',
+      campaignName:document.getElementById('monitor-campaign').value.trim()
+    }
+  };
+}
+
+async function saveMonitor(){
+  const data=collectMonitorForm();
+  if(!data.name||!data.sourceUrl){showToast('请填写名称和主页链接');return}
+  const isEditing=Boolean(monitorEditingId);
+  const btn=document.getElementById('monitor-save-btn');if(btn){btn.disabled=true;btn.textContent='保存中...'}
+  try{
+    const d=monitorEditingId?await api('POST','/remote/monitors/'+encodeURIComponent(monitorEditingId)+'/update',data):await api('POST','/remote/monitors',data);
+    if(!d?.ok){showToast(d?.error||'保存失败');return}
+    if(d.monitor){const i=monitors.findIndex(m=>m.id===d.monitor.id);if(i>=0)monitors[i]=d.monitor;else monitors.unshift(d.monitor)}
+    renderMonitors();closeMonitorDialog();showToast(isEditing?'监控已更新':'监控已添加');
+  }catch(e){showToast(e?.message||'网络错误')}
+  finally{if(btn){btn.disabled=false;btn.textContent='保存监控'}}
+}
+
+async function checkAllMonitors(){
+  const btn=document.getElementById('monitor-check-all-btn');
+  const enabled=monitors.filter(m=>m.enabled);
+  if(!enabled.length){showToast('没有启用中的监控');return}
+  if(btn){btn.disabled=true;btn.textContent='检查中...'}
+  let count=0,failed=0;
+  try{for(const m of enabled){try{const d=await api('POST','/remote/monitors/'+encodeURIComponent(m.id)+'/check');count+=d?.result?.newVideos?.length||0}catch{failed++}}await loadMonitors();showToast('检查完成：'+count+' 个新视频入队'+(failed?'，'+failed+' 个失败':''))}
+  finally{if(btn){btn.disabled=false;btn.textContent='全部检查'}}
+}
+
 async function sendTask(forceItems){
   const input=document.getElementById('task-input');if(!input)return;
   const text=input.value.trim();
@@ -1402,6 +1642,8 @@ function rulesFromItem(t){
     taskName:t.taskName||snap.taskName,
     rawLine:t.rawLine||'',
     videoUrl:t.videoUrl||snap.videoUrl,
+    sourceType:t.sourceType||snap.sourceType||'',
+    processMode:t.processMode||snap.processMode||'publish',
     _exec:t._exec||null,
     duration:t.duration||0,
     retryCount:t.retryCount||snap.retryCount||0,
@@ -1516,6 +1758,8 @@ function taskCard(t,live){
 
   // 元信息行（纯文字标签，无图标）
   const meta=[];
+  if(r.sourceType)meta.push('<span class="task-meta-item">'+esc(r.sourceType==='tiktok'?'TikTok':'YouTube')+'</span>');
+  if(r.processMode)meta.push('<span class="task-meta-item task-meta-platform">'+esc(monitorModeLabel[r.processMode]||r.processMode)+'</span>');
   if(r.platforms.length)meta.push('<span class="task-meta-item task-meta-platform">'+esc(r.platforms.map(p=>platformLabel[p]||p).join('、'))+'</span>');
   if(r.isOriginal)meta.push('<span class="task-meta-item task-meta-original">原创</span>');
   if(r.campaignName)meta.push('<span class="task-meta-item task-meta-campaign"><b>'+esc(r.campaignName)+'</b></span>');
@@ -1530,6 +1774,8 @@ function taskCard(t,live){
   // 执行详情（耗时/风格/音色/旁白/字幕）
   const exec=r._exec||{};
   const detail=[];
+  if(r.sourceType)detail.push('<span class="task-detail-item">来源 <b>'+esc(r.sourceType==='tiktok'?'TikTok':'YouTube')+'</b></span>');
+  if(r.processMode)detail.push('<span class="task-detail-item">动作 <b>'+esc(monitorModeLabel[r.processMode]||r.processMode)+'</b></span>');
   if(r.duration>0)detail.push('<span class="task-detail-item">耗时 <b>'+fmtDuration(r.duration)+'</b></span>');
   if(exec.styleName)detail.push('<span class="task-detail-item">风格 <b>'+esc(exec.styleName)+'</b></span>');
   if(exec.voiceName)detail.push('<span class="task-detail-item">音色 <b>'+esc(exec.voiceName)+'</b></span>');
@@ -1544,8 +1790,8 @@ function taskCard(t,live){
   const acts=[];
   if(live&&['queued','pending'].includes(st))acts.push('<button class="task-btn skip" data-action="skip" data-id="'+esc(t.id)+'">跳过</button>');
   if(live&&['running'].includes(st))acts.push('<button class="task-btn cancel" data-action="stop" data-id="'+esc(t.id)+'">取消</button>');
-  if(live&&['failed','stopped'].includes(st))acts.push('<button class="task-btn" data-action="retry" data-id="'+esc(t.id)+'">重试</button>');
-  if(isCompleted&&t.outputPath)acts.push('<button class="task-btn" data-action="republish" data-id="'+esc(t.id)+'">重新发布</button>');
+  if((live||t.history)&&['failed','stopped'].includes(st))acts.push('<button class="task-btn" data-action="retry" data-id="'+esc(t.id)+'">重试</button>');
+  if(isCompleted&&t.outputPath&&r.processMode==='publish')acts.push('<button class="task-btn" data-action="republish" data-id="'+esc(t.id)+'">重新发布</button>');
   const actsHtml=acts.length?('<div class="task-actions">'+acts.join('')+'</div>'):'';
 
   const inner='<div class="task-inner"><div class="task-head"><div class="task-title">'+esc(title)+'</div><div class="task-badge">'+esc(badge)+'</div></div>'+metaHtml+detailHtml+progressHtml+msg+actsHtml+'</div>';

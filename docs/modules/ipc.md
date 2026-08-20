@@ -23,7 +23,7 @@ IPC handler 的注册中心。核心逻辑委托给 `ipc/` 子模块，本文件
 | `ipc/remote.js` | ~169 | `remote:*`, `open-dir`, `open-plugin-dir` | 远程控制服务器、Cloudflare 隧道、凭证管理 |
 | `ipc/edit.js` | ~150 | `edit:*`, `history:get` | 剪辑调度器（EditScheduler 实例化、任务 CRUD） |
 | `ipc/download.js` | ~111 | `download:*` | 下载管理器（DownloadManager 实例化、yt-dlp） |
-| `ipc/monitor.js` | ~40 | `monitor:*` | YouTube 博主监控 CRUD、立即检查、启停 |
+| `ipc/monitor.js` | ~40 | `monitor:*` | YouTube/TikTok 公开账号监控 CRUD、动作配置、立即检查、启停 |
 | `ipc/updates.js` | ~53 | `update:*`, `app:quit` | App/插件更新、退出 |
 
 ## 核心设计
@@ -45,6 +45,7 @@ IPC handler 的注册中心。核心逻辑委托给 `ipc/` 子模块，本文件
 - 渲染进程通过 `preload.js` 调用
 - 业务逻辑委托给各 services 模块
 - 状态变更通过 `webContents.send()` 推送
+- 远程页面通过 `remoteServer` 的 `/remote/monitors` 及 `monitor-update` SSE 事件复用同一套监控配置
 - App 退出时调用 `editScheduler.shutdown()`，中断活动剪辑任务并清理其缓存
 
 ## 任务解析（task:parse / task:start）

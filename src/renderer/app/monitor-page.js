@@ -65,6 +65,8 @@ export function createMonitorPage({ state: S, esc, toast, injectIcons }) {
       if (emptyEl) emptyEl.style.display = 'none';
       list.innerHTML = monitors.map(m => {
         const enabledCls = m.enabled ? 'on' : '';
+        const sourceLabel = m.sourceType === 'tiktok' ? 'TikTok' : 'YouTube';
+        const modeLabel = { download: '仅下载', edit: '下载并剪辑', publish: '下载、剪辑并发布' }[m.processMode || 'publish'] || '下载';
         const lastCheck = m.lastCheckAt ? new Date(m.lastCheckAt).toLocaleString() : '未检查';
         const stats = `已发现 ${m.stats?.totalFetched||0} · 已入队 ${m.stats?.totalQueued ?? m.stats?.totalPublished ?? 0}`;
         const freqLabel = m.checkIntervalMinutes >= 1440 ? `每天` : m.checkIntervalMinutes >= 60 ? `${Math.round(m.checkIntervalMinutes/60)}小时` : `${m.checkIntervalMinutes}分钟`;
@@ -72,13 +74,14 @@ export function createMonitorPage({ state: S, esc, toast, injectIcons }) {
         const styleLabel = m.overrides?.styleName || '跟随全局';
         const voiceLabel = m.overrides?.voiceProfileName || '跟随全局';
         return `
-          <div class="monitor-card" data-mid="${esc(m.id)}">
+          <div class="monitor-card ${m.enabled ? '' : 'disabled'}" data-mid="${esc(m.id)}">
             <div class="monitor-head">
               <div class="monitor-title" title="${esc(m.sourceUrl)}">${esc(m.name)}</div>
               <button class="monitor-toggle ${enabledCls}" type="button" data-toggle="${esc(m.id)}" title="启用/禁用" aria-label="${m.enabled ? '停用' : '启用'}监控" aria-pressed="${m.enabled}"></button>
             </div>
-            <div class="monitor-url">${esc(m.sourceUrl)}</div>
+            <div class="monitor-url"><span class="monitor-source-type">${sourceLabel}</span>${esc(m.sourceUrl)}</div>
             <div class="monitor-meta">
+              <span class="monitor-tag action">${esc(modeLabel)}</span>
               <span class="monitor-tag">频率 ${esc(freqLabel)}</span>
               <span class="monitor-tag">${esc(plats)}</span>
               <span class="monitor-tag">风格 ${esc(styleLabel)}</span>
@@ -101,9 +104,13 @@ export function createMonitorPage({ state: S, esc, toast, injectIcons }) {
       const title = document.getElementById('monitor-dialog-title');
       if (title) title.textContent = monitor ? '编辑监控' : '添加监控';
       const nameEl = document.getElementById('monitor-name');
+      const sourceTypeEl = document.getElementById('monitor-source-type');
       const urlEl = document.getElementById('monitor-url');
       if (nameEl) nameEl.value = monitor?.name || '';
+      if (sourceTypeEl) sourceTypeEl.value = monitor?.sourceType || 'youtube';
       if (urlEl) urlEl.value = monitor?.sourceUrl || '';
+      const processModeEl = document.getElementById('monitor-process-mode');
+      if (processModeEl) processModeEl.value = monitor?.processMode || 'download';
       const freqSel = document.getElementById('monitor-freq');
       const v = monitor?.checkIntervalMinutes || 60;
       let selVal = '60';
@@ -145,8 +152,23 @@ export function createMonitorPage({ state: S, esc, toast, injectIcons }) {
         voiceSel.innerHTML = '<option value="">跟随全局</option>' + voicesCache.filter(v=>v?.name).map(v=>`<option value="${esc(v.name)}" ${v.name===curVoice?'selected':''}>${esc(v.name)}</option>`).join('');
       }
 
+      updateSourceHint();
+
       if (dialog && typeof dialog.showModal === 'function' && !dialog.open) {
         dialog.showModal();
+      }
+    }
+
+    function updateSourceHint() {
+      const type = document.getElementById('monitor-source-type')?.value || 'youtube';
+      const urlEl = document.getElementById('monitor-url');
+      const helpEl = document.getElementById('monitor-url-help');
+      if (type === 'tiktok') {
+        if (urlEl) urlEl.placeholder = 'https://www.tiktok.com/@username';
+        if (helpEl) helpEl.textContent = '仅支持公开账号主页，例如 https://www.tiktok.com/@username';
+      } else {
+        if (urlEl) urlEl.placeholder = 'https://www.youtube.com/@xxx/videos';
+        if (helpEl) helpEl.textContent = '仅支持频道或用户主页，例如 https://www.youtube.com/@xxx/videos';
       }
     }
 
@@ -162,6 +184,8 @@ export function createMonitorPage({ state: S, esc, toast, injectIcons }) {
       const topics = topicsRaw ? topicsRaw.split(/[\s,，、]+/).filter(Boolean).map(t=>t.startsWith('#')?t:'#'+t).slice(0,5) : null;
       const styleName = document.getElementById('monitor-style')?.value?.trim() || '';
       const voiceName = document.getElementById('monitor-voice')?.value?.trim() || '';
+      const sourceType = document.getElementById('monitor-source-type')?.value || 'youtube';
+      const processMode = document.getElementById('monitor-process-mode')?.value || 'download';
       let voiceId = '', voiceProfileName = '';
       if (voiceName) {
         const found = voicesCache.find(v=>v.name===voiceName);
@@ -170,8 +194,10 @@ export function createMonitorPage({ state: S, esc, toast, injectIcons }) {
       }
       return {
         name: name || url,
+        sourceType,
         sourceUrl: url,
         checkIntervalMinutes: Number.isFinite(freq) ? freq : 60,
+        processMode,
         overrides: {
           publishPlatforms: platforms,
           topics,
@@ -216,6 +242,7 @@ export function createMonitorPage({ state: S, esc, toast, injectIcons }) {
       openDialog(null);
     });
     saveBtn?.addEventListener('click', save);
+    document.getElementById('monitor-source-type')?.addEventListener('change', updateSourceHint);
     document.querySelectorAll('[data-monitor-cancel]').forEach(button => {
       button.addEventListener('click', () => { if (dialog) dialog.close(); });
     });

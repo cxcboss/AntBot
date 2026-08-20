@@ -226,8 +226,8 @@
         <div class="feat-view" id="view-monitor">
           <div class="monitor-layout">
             <div class="monitor-header">
-              <h3 class="sv-title monitor-title-heading">YouTube 博主监控</h3>
-              <p class="sv-desc">自动检测博主新视频并下载发布，独立配置不影响全局</p>
+              <h3 class="sv-title monitor-title-heading">视频监控</h3>
+              <p class="sv-desc">支持 YouTube / TikTok 公开账号；每个监控可独立选择下载、剪辑或发布动作。</p>
               <div class="monitor-header-actions">
                 <button class="btn btn-primary btn-sm" id="monitor-add-btn" type="button"><span class="icon" data-icon="plus"></span>添加监控</button>
                 <button class="btn btn-ghost btn-sm" id="monitor-check-all-btn" type="button">全部检查</button>
@@ -236,8 +236,8 @@
             <div class="monitor-list" id="monitor-list"></div>
             <div class="monitor-empty" id="monitor-empty">
               <div class="edit-empty-icon"><span class="icon" data-icon="eye"></span></div>
-              <p>暂无监控，添加一位 YouTube 博主开始自动搬运</p>
-              <p class="monitor-empty-hint">支持 YouTube 频道/用户主页，例如 https://www.youtube.com/@xxx/videos</p>
+              <p>暂无监控，添加一个公开账号开始自动处理</p>
+              <p class="monitor-empty-hint">YouTube 频道/用户主页或 TikTok 账号主页，例如 https://www.tiktok.com/@username</p>
             </div>
           </div>
         </div>
@@ -611,9 +611,11 @@
     <div class="dlg-head"><h3 id="monitor-dialog-title">添加监控</h3><button type="button" aria-label="关闭" class="dlg-close" id="monitor-cancel-btn"><span class="icon" data-icon="x"></span></button></div>
     <div class="dlg-body">
       <div class="dlg-grid">
-        <label class="full">博主名称<input class="input" id="monitor-name" type="text" placeholder="例如：游戏解说 - 某博主" /></label>
-        <label class="full">频道/主页链接<input class="input" id="monitor-url" type="url" placeholder="https://www.youtube.com/@xxx/videos" /></label>
+        <label class="full">名称<input class="input" id="monitor-name" type="text" placeholder="例如：科技频道" /></label>
+        <label>来源平台<select id="monitor-source-type" class="select"><option value="youtube">YouTube</option><option value="tiktok">TikTok</option></select><span class="monitor-help" id="monitor-url-help">仅支持频道或用户主页，例如 https://www.youtube.com/@xxx/videos</span></label>
+        <label class="full">频道/账号主页链接<input class="input" id="monitor-url" type="url" placeholder="https://www.youtube.com/@xxx/videos" /></label>
         <label>监控频率<select id="monitor-freq" class="select"><option value="60">每小时</option><option value="30">每 30 分钟</option><option value="120">每 2 小时</option><option value="360">每 6 小时</option><option value="1440">每天</option></select></label>
+        <label>处理动作<select id="monitor-process-mode" class="select"><option value="download">仅下载</option><option value="edit">下载并剪辑</option><option value="publish">下载、剪辑并发布</option></select></label>
         <label>发布平台<select id="monitor-platforms" class="select"><option value="">跟随全局</option><option value="videoChannel">仅视频号</option><option value="douyin">仅抖音</option><option value="both">视频号 + 抖音</option></select></label>
         <label>话题（空格分隔）<input class="input" id="monitor-topics" type="text" placeholder="#游戏 #解说" /></label>
         <label>活动名<input class="input" id="monitor-campaign" type="text" placeholder="留空=不参加" /></label>

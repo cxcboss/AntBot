@@ -278,6 +278,8 @@ function taskCard(t,live=false){
   const st=t.status||'pending';const pg=Math.max(0,Math.min(100,Number(t.progress||0)));
   const snap=t.taskSnapshot||{};
   const platforms=t.platforms||snap.platforms||[];
+  const sourceType=t.sourceType||snap.sourceType||'';
+  const processMode=t.processMode||snap.processMode||'publish';
   const isOriginal=t.isOriginal!==undefined?t.isOriginal:snap.isOriginal;
   const campaignName=t.campaignName||snap.campaignName;
   const publishAt=t.publishAt||snap.publishAt;
@@ -293,8 +295,10 @@ function taskCard(t,live=false){
   const isCancelling=st==='cancelling';
   const msg=t.message?`<div class="task-msg">${esc(t.message)}</div>`:'';
 
-  /* 元信息行：平台 · 原创 · 活动 · 定时（纯文字，无图标） */
+  /* 元信息行：来源 · 动作 · 平台 · 原创 · 活动 · 定时（纯文字，无图标） */
   const meta=[];
+  if(sourceType)meta.push(`<span class="task-meta-item">${esc(sourceType==='tiktok'?'TikTok':'YouTube')}</span>`);
+  if(processMode)meta.push(`<span class="task-meta-item task-meta-platform">${esc({download:'仅下载',edit:'下载并剪辑',publish:'下载、剪辑并发布'}[processMode]||processMode)}</span>`);
   if(platforms.length)meta.push(`<span class="task-meta-item task-meta-platform">${esc(platforms.map(p=>platformLabel[p]||p).join('、'))}</span>`);
   if(isOriginal)meta.push('<span class="task-meta-item task-meta-original">原创</span>');
   if(campaignName)meta.push(`<span class="task-meta-item task-meta-campaign"><b>${esc(campaignName)}</b></span>`);
@@ -304,6 +308,8 @@ function taskCard(t,live=false){
   /* 执行配置展开区：耗时 + 旁白/字幕/音色/风格 */
   const dur=t.duration||(t.startedAt&&t.completedAt?Math.round((new Date(t.completedAt)-new Date(t.startedAt))/1000):0);
   const detailItems=[];
+  if(sourceType)detailItems.push(`<span class="task-detail-item">来源 <b>${esc(sourceType==='tiktok'?'TikTok':'YouTube')}</b></span>`);
+  if(processMode)detailItems.push(`<span class="task-detail-item">动作 <b>${esc({download:'仅下载',edit:'下载并剪辑',publish:'下载、剪辑并发布'}[processMode]||processMode)}</b></span>`);
   if(dur>0)detailItems.push(`<span class="task-detail-item">耗时 <b>${fmtDuration(dur)}</b></span>`);
   if(exec.styleName)detailItems.push(`<span class="task-detail-item">风格 <b>${esc(exec.styleName)}</b></span>`);
   if(exec.voiceName)detailItems.push(`<span class="task-detail-item">音色 <b>${esc(exec.voiceName)}</b></span>`);
@@ -319,7 +325,7 @@ function taskCard(t,live=false){
   if(canCancel)acts.push(`<button class="task-btn cancel" data-stop="${esc(t.id)}">取消</button>`);
   if(canRetry)acts.push(`<button class="task-btn" data-retry-task="${esc(t.id)}">重试</button>`);
   if(isCompleted&&t.outputPath)acts.push(`<button class="task-btn" data-open-output="${esc(t.outputPath)}">打开目录</button>`);
-  if((isCompleted||st==='failed')&&t.outputPath)acts.push(`<button class="task-btn" data-republish="${esc(t.id)}">重新发布</button>`);
+  if((isCompleted||st==='failed')&&t.outputPath&&processMode==='publish')acts.push(`<button class="task-btn" data-republish="${esc(t.id)}">重新发布</button>`);
 
   const inner=`<div class="task-inner"><div class="task-head"><div class="task-title">${esc(title)}</div><div class="task-badge">${esc(statusLabel)}</div></div>${metaHtml}${detailHtml}${progressHtml}${msg}${acts.length?`<div class="task-acts">${acts.join('')}</div>`:''}</div>`;
   const overlay=isCancelling?'<div class="task-cancelling">取消中...</div>':'';
@@ -2041,7 +2047,8 @@ function bind(){
       const taskId=retryTaskBtn.dataset.retryTask;
       const task=S.progress?.tasks?.find(t=>t.id===taskId)||S.history?.flatMap(h=>h.items||[]).find(t=>t.id===taskId);
       const rawLine=task?.rawLine||'';
-      if(rawLine){void window.antbot.startTasks(rawLine).then(r=>{toast('已重新提交','success');appendPending({runId:r.runId,inputText:rawLine});renderChat({stick:true})}).catch(err=>toast(err.message,'error'))}
+      const taskPayload=task?.taskSnapshot||task;
+      if(rawLine||taskPayload){void window.antbot.resumeTask({taskId,task:taskPayload}).then(r=>{toast('已重新提交','success');appendPending({runId:r.runId,inputText:rawLine});renderChat({stick:true})}).catch(err=>toast(err.message,'error'))}
       else{toast('无法重试：缺少原始输入','error')}
     }
     if(openOutputBtn){

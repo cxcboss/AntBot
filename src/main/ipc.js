@@ -327,6 +327,9 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
       const historyItem = (await store.getHistory())?.flatMap(h => h.items || []).find(i => i.id === taskId);
       const persistedTasks = await taskRunner.loadPersistedTasks();
       const persistedItem = persistedTasks.find(t => t.id === taskId);
+      const sourceItem = row || historyItem || persistedItem || {};
+      const processMode = sourceItem.processMode || sourceItem.taskSnapshot?.processMode || 'publish';
+      if (processMode !== 'publish') return { ok: false, error: '该任务无需重新发布' };
       const outputPath = row?.outputPath || historyItem?.outputPath || persistedItem?.outputPath;
       if (!outputPath) return { ok: false, error: '未找到视频文件路径' };
 
@@ -340,7 +343,8 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
       const publishEnabled = settings?.publish?.enabled !== false;
       if (!publishEnabled) return { ok: false, error: '自动发布已关闭' };
       taskRunner.setTaskState(taskId, { status: 'running', step: '发布', progress: 95, message: '重新发布中...' });
-      const task = { id: taskId, rawLine: row?.rawLine || historyItem?.rawLine || persistedItem?.rawLine || '', publishCopy: row?.publishCopy || historyItem?.publishCopy || persistedItem?.publishCopy || '', publishTopics: row?.publishTopics || historyItem?.publishTopics || persistedItem?.publishTopics || [], platforms: row?.platforms || historyItem?.platforms || persistedItem?.platforms || [], campaignName: row?.campaignName || historyItem?.campaignName || persistedItem?.campaignName || '' };
+      const snapshot = sourceItem.taskSnapshot || {};
+      const task = { ...snapshot, id: taskId, rawLine: row?.rawLine || historyItem?.rawLine || persistedItem?.rawLine || snapshot.rawLine || '', publishCopy: row?.publishCopy || historyItem?.publishCopy || persistedItem?.publishCopy || snapshot.publishCopy || '', publishTopics: row?.publishTopics || historyItem?.publishTopics || persistedItem?.publishTopics || snapshot.publishTopics || [], platforms: row?.platforms || historyItem?.platforms || persistedItem?.platforms || snapshot.platforms || [], campaignName: row?.campaignName || historyItem?.campaignName || persistedItem?.campaignName || snapshot.campaignName || '' };
       const result = await publishVideo({ task, settings, outputPath, log: (msg) => appLog('info', `[republish] ${msg}`) });
       const publishedPlatforms = result?.platforms || [];
       const platformNames = publishedPlatforms.map(p => p === 'videoChannel' ? '视频号' : '抖音').join('、');
