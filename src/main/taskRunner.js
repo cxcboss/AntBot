@@ -8,6 +8,11 @@ const { downloadVideo } = require('./services/downloader');
 const { prepareEditVideo, composeEditVideo } = require('./services/smartEditor');
 const { publishVideo } = require('./services/publisher');
 const { resolveAutoDubProjectPath, ensureVoiceCloneBackend, prewarmVoiceCloneModel } = require('./services/autoDubClient');
+const {
+  buildRetryTask,
+  getLogicalTaskId,
+  getTaskIdentityParts,
+} = require('./services/taskState');
 
 function nowIso() {
   return new Date().toISOString();
@@ -38,6 +43,7 @@ class TaskRunner {
     this.jobSequence = 0;
     this.currentJob = null;
     this.persistedTasksFile = path.join(os.homedir(), 'AntBot', 'main-control-tasks.json');
+    this._republishInFlight = new Map();
   }
 
   // 下载视频期间后台预热语音模型：下载（分钟级）与模型加载（分钟级）重叠，
@@ -133,6 +139,7 @@ class TaskRunner {
   summarizeQueuedTask(task, job, index = 0) {
     return {
       id: task.id,
+      logicalTaskId: getLogicalTaskId(task),
       batchRunId: job.runId,
       kind: job.kind,
       userId: job.userId,
@@ -472,8 +479,7 @@ class TaskRunner {
       if (row.status === 'stopped' || row.status === 'failed') {
         if (row.taskSnapshot) {
           const retryTask = {
-            ...row.taskSnapshot,
-            id: this.buildTaskId(),
+            ...buildRetryTask(row, this.buildTaskId()),
             publishAt: row.taskSnapshot.publishAt
               ? new Date(row.taskSnapshot.publishAt)
               : null
@@ -524,8 +530,7 @@ class TaskRunner {
         ? new Date(taskPayload.publishAt)
         : null;
       const clonedTask = {
-        ...taskPayload,
-        id: this.buildTaskId(),
+        ...buildRetryTask({ taskSnapshot: taskPayload, ...taskPayload }, this.buildTaskId()),
         publishAt: publishAt && !Number.isNaN(publishAt.getTime()) ? publishAt : null
       };
       const scheduled = this.enqueueTasks([clonedTask], {
@@ -544,46 +549,160 @@ class TaskRunner {
     throw new Error('任务不存在或无法恢复。');
   }
 
-  /**
-   * 视频已生成（发布阶段失败/停止）：跳过下载/识别/合成，直接重试发布
-   */
-  async resumePublishOnly(row, requestUser = {}) {
-    const targetId = String(row?.id || '');
+  async republishTask(taskId, requestUser = {}, options = {}) {
+    const targetId = String(taskId || '').trim();
     if (!targetId) throw new Error('缺少任务。');
+    if (this._republishInFlight.has(targetId)) throw new Error('该任务正在重新发布，请稍候。');
+
+    const promise = this._republishTaskInternal(targetId, requestUser, options);
+    this._republishInFlight.set(targetId, promise);
+    try {
+      return await promise;
+    } finally {
+      if (this._republishInFlight.get(targetId) === promise) this._republishInFlight.delete(targetId);
+    }
+  }
+
+  async _republishTaskInternal(targetId, requestUser = {}, options = {}) {
+    const row = this.progressRows.find(item => item.id === targetId);
+    const [history, persistedTasks] = row || options.source
+      ? [[], []]
+      : await Promise.all([this.store?.getHistory ? this.store.getHistory() : [], this.loadPersistedTasks()]);
+    const historyItem = (history || []).flatMap(record => record.items || [])
+      .find(item => getTaskIdentityParts(item).includes(targetId));
+    const persistedItem = (persistedTasks || []).find(item => getTaskIdentityParts(item).includes(targetId));
+    const source = options.source || row || historyItem || persistedItem;
+    if (!source) throw new Error('任务不存在或无法重新发布。');
+
+    const requestUserId = typeof requestUser === 'string'
+      ? String(requestUser || '').trim()
+      : String(requestUser?.id || requestUser?.userId || '').trim();
+    if (requestUserId && source.userId && requestUserId !== source.userId) {
+      throw new Error('不能操作其他用户的任务。');
+    }
+
+    const snapshot = source.taskSnapshot && typeof source.taskSnapshot === 'object' ? source.taskSnapshot : source;
+    const processMode = source.processMode || snapshot.processMode || 'publish';
+    if (processMode !== 'publish') throw new Error('该任务无需重新发布');
+
+    const outputPath = row?.outputPath || source.outputPath || historyItem?.outputPath || persistedItem?.outputPath;
+    if (!outputPath) throw new Error('未找到视频文件路径');
+    try {
+      const stat = require('node:fs').statSync(outputPath);
+      if (!stat.isFile() || stat.size <= 0) throw new Error('FILE_DELETED');
+    } catch (error) {
+      const deletedError = new Error('FILE_DELETED');
+      deletedError.outputPath = outputPath;
+      deletedError.rawLine = source.rawLine || snapshot.rawLine || '';
+      throw deletedError;
+    }
+
+    const settings = this.store
+      ? (this.store.getSettingsForUser && source.userId
+        ? await this.store.getSettingsForUser(source.userId)
+        : await this.store.getSettings())
+      : {};
+    if (settings?.publish?.enabled === false) throw new Error('自动发布已关闭');
+
+    const canonicalId = row?.id || persistedItem?.id || historyItem?.taskId || historyItem?.id || targetId;
+    if (!this.progressRows.some(item => item.id === canonicalId)) {
+      this.progressRows.push({
+        id: canonicalId,
+        logicalTaskId: getLogicalTaskId(source) || canonicalId,
+        userId: source.userId || 'user-1',
+        userName: source.userName || '',
+        sourceType: source.sourceType || snapshot.sourceType || '',
+        processMode,
+        monitorId: source.monitorId || snapshot.monitorId || '',
+        monitorName: source.monitorName || snapshot.monitorName || '',
+        inputText: source.inputText || source.rawLine || snapshot.rawLine || '',
+        taskName: source.taskName || snapshot.taskName || '任务',
+        rawLine: source.rawLine || snapshot.rawLine || '',
+        status: 'pending',
+        progress: 0,
+        step: '等待发布',
+        message: '',
+        attempt: Number(source.attempt || 1),
+        retryCount: Number(source.retryCount || 0),
+        retryLimit: Number(source.retryLimit || 0),
+        outputPath,
+        taskSnapshot: source.taskSnapshot || snapshot,
+        platforms: source.platforms || snapshot.platforms || [],
+        publishAt: source.publishAt || snapshot.publishAt || '',
+        campaignName: source.campaignName || snapshot.campaignName || '',
+        submittedAt: source.submittedAt || nowIso(),
+        enqueuedAt: source.enqueuedAt || source.submittedAt || nowIso(),
+        updatedAt: nowIso()
+      });
+    }
 
     const task = {
-      id: targetId,
-      rawLine: row.rawLine || '',
-      taskName: row.taskName || '',
-      isOriginal: Boolean(row.isOriginal),
-      videoUrl: row.videoUrl || '',
-      timeRange: row.timeRange || '',
-      platforms: Array.isArray(row.platforms) ? row.platforms : [],
-      publishCopy: row.publishCopy || '',
-      publishTopics: Array.isArray(row.publishTopics) ? row.publishTopics : [],
-      campaignName: row.campaignName || '',
-      sourceType: row.sourceType || '',
-      processMode: row.processMode || 'publish',
-      _monitorId: row.monitorId || '',
-      _monitorName: row.monitorName || '',
-      publishAt: row.publishAt ? new Date(row.publishAt) : null
+      ...snapshot,
+      id: canonicalId,
+      logicalTaskId: getLogicalTaskId(source) || canonicalId,
+      rawLine: source.rawLine || snapshot.rawLine || '',
+      publishCopy: source.publishCopy || snapshot.publishCopy || '',
+      publishTopics: source.publishTopics || snapshot.publishTopics || [],
+      platforms: source.platforms || snapshot.platforms || [],
+      campaignName: source.campaignName || snapshot.campaignName || '',
+      processMode,
+      publishAt: source.publishAt ? new Date(source.publishAt) : (snapshot.publishAt ? new Date(snapshot.publishAt) : null)
     };
+    const logicalTaskId = getLogicalTaskId(source) || canonicalId;
+    this.setTaskState(canonicalId, { status: 'running', progress: 95, step: '重新发布', message: '重新发布中...', outputPath, logicalTaskId });
 
-    this.setTaskState(targetId, { status: 'running', progress: 80, step: '重新发布', message: '正在重新发布...' });
     try {
-      const settings = this.store ? await this.store.getSettings() : {};
-      const { publishVideo } = require('./services/publisher');
-      const result = await publishVideo({ task, settings, outputPath: row.outputPath, log: (msg) => this.log(targetId, msg) });
-      const publishedPlatforms = result?.platforms || [];
+      const result = await publishVideo({ task, settings, outputPath, log: (msg) => this.log(canonicalId, msg) });
+      const publishedPlatforms = Array.isArray(result?.platforms) ? result.platforms : [];
       const platformNames = publishedPlatforms.map(p => p === 'videoChannel' ? '视频号' : '抖音').join('、');
-      this.setTaskState(targetId, { status: 'completed', progress: 100, step: '完成', message: platformNames ? `已发布到 ${platformNames}` : '任务完成', outputPath: row.outputPath });
-      this.savePersistedTask(this.progressRows.find(r => r.id === targetId));
-      return { resumed: true, taskId: targetId, publishOnly: true };
+      const completedAt = nowIso();
+      const message = platformNames ? `已发布到 ${platformNames}` : '发布完成';
+      const patch = { status: 'completed', progress: 100, step: '完成', message, outputPath, logicalTaskId, publishedPlatforms, publishMode: result?.mode || '', finishedAt: completedAt, republishedAt: completedAt, retryable: false };
+      this.setTaskState(canonicalId, patch);
+      try {
+        await this.removePersistedTask(canonicalId);
+        if (targetId !== canonicalId) await this.removePersistedTask(targetId);
+        if (this.store?.updateHistoryTask) await this.store.updateHistoryTask(logicalTaskId, patch, source.userId || requestUserId);
+        if (this.store?.appendPublishedRecordsForUser && publishedPlatforms.length) {
+          await this.store.appendPublishedRecordsForUser(source.userId || requestUserId || 'user-1', [{
+            userId: source.userId || requestUserId || 'user-1',
+            userName: source.userName || '',
+            taskId: canonicalId,
+            logicalTaskId,
+            taskName: task.taskName || '任务',
+            outputPath,
+            publishAt: completedAt,
+            publishedPlatforms,
+            publishMode: result?.mode || '',
+            completedAt,
+            republished: true,
+            runId: this.progressRows.find(item => item.id === canonicalId)?.batchRunId || ''
+          }]);
+        }
+      } catch (syncError) {
+        this.log(canonicalId, `发布成功，但状态同步失败: ${syncError.message}`, 'warn');
+      }
+      this.emitProgress();
+      return { ok: true, resumed: true, taskId: canonicalId, publishOnly: true, message };
     } catch (pubErr) {
-      this.setTaskState(targetId, { status: 'warning', progress: 100, step: '部分完成', message: `发布失败: ${pubErr.message}`, outputPath: row.outputPath });
-      this.savePersistedTask(this.progressRows.find(r => r.id === targetId));
-      throw new Error(`发布失败: ${pubErr.message}`);
+      const isDeleted = pubErr?.message === 'FILE_DELETED';
+      const message = isDeleted ? '视频文件已被删除，无法重新发布' : `发布失败: ${pubErr.message}`;
+      const patch = { status: 'warning', progress: 100, step: '部分完成', message, outputPath, logicalTaskId, finishedAt: nowIso(), republishError: pubErr.message, retryable: !isDeleted };
+      this.setTaskState(canonicalId, patch);
+      if (!isDeleted) await this.savePersistedTask(this.progressRows.find(item => item.id === canonicalId));
+      try {
+        if (this.store?.updateHistoryTask) await this.store.updateHistoryTask(logicalTaskId, patch, source.userId || requestUserId);
+      } catch (syncError) {
+        this.log(canonicalId, `发布失败，但历史状态同步失败: ${syncError.message}`, 'warn');
+      }
+      this.emitProgress();
+      throw pubErr;
     }
+  }
+
+  /** 视频已生成（发布阶段失败/停止）：跳过下载、识别、合成，直接重试发布。 */
+  async resumePublishOnly(row, requestUser = {}) {
+    return this.republishTask(row?.id, requestUser, { source: row });
   }
 
   enqueueTasks(tasks, userContext = {}, inputText = '') {
@@ -703,6 +822,8 @@ class TaskRunner {
   serializeTaskSnapshot(task) {
     return {
       id: task.id,
+      logicalTaskId: getLogicalTaskId(task),
+      retryOf: task.retryOf || '',
       rawLine: task.rawLine || '',
       taskName: task.taskName || '',
       isOriginal: Boolean(task.isOriginal),
@@ -727,6 +848,8 @@ class TaskRunner {
       userId: job.userId,
       userName: job.userName,
       taskId: task.id,
+      logicalTaskId: getLogicalTaskId(task),
+      retryOf: task.retryOf || '',
       taskName: row?.taskName || (task.isOriginal ? '原创' : task.taskName),
       rawLine: task.rawLine || '',
       status,
@@ -742,7 +865,7 @@ class TaskRunner {
     const result = [];
     const indexes = new Map();
     for (const item of Array.isArray(items) ? items : []) {
-      const key = String(item?.taskId || item?.taskSnapshot?.id || item?.taskSnapshot?.taskId || item?.id || '').trim();
+      const key = getLogicalTaskId(item);
       if (!key) {
         result.push(item);
         continue;
@@ -790,6 +913,7 @@ class TaskRunner {
       const entry = {
         id: row.id,
         taskId: row.id,
+        logicalTaskId: row.logicalTaskId || getLogicalTaskId(row),
         taskName: row.taskName,
         rawLine: row.rawLine,
         inputText: row.inputText,
@@ -875,6 +999,7 @@ class TaskRunner {
     await this.initRunLog();
     this.progressRows = tasks.map((task, index) => ({
       id: task.id,
+      logicalTaskId: getLogicalTaskId(task),
       index: index + 1,
       userId: job.userId,
       userName: job.userName,
@@ -1568,6 +1693,7 @@ class TaskRunner {
     await this.initRunLog();
     this.progressRows = [{
       id: task.id,
+      logicalTaskId: getLogicalTaskId(task),
       index: 1,
       userId: job.userId,
       userName: job.userName,

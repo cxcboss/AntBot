@@ -18,7 +18,7 @@ function register({ ipcMain, store, taskRunner, mainWindowRef, appLog }) {
     if (originalOnProgress) originalOnProgress(payload);
     // 推送到远程 SSE 客户端
     if (isServerRunning()) {
-      for (const task of (payload.tasks || [])) {
+      for (const task of [...(payload.tasks || []), ...(payload.queueTasks || [])]) {
         broadcastTaskUpdate(task);
       }
     }

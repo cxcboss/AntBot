@@ -95,3 +95,6 @@ const publishPage = createPublishPage({ state: S, esc });
 - **规则面板**：发送时若走了预览规则（AI 优化或编辑过），`appendPending` 携带 `rules`（= `S.preview.items`），消息下方渲染 `.msg-rules` 折叠面板（`makeRulesHtml`）：头部摘要「已按规则解析 N 条任务 · 原创 X · 平台 Y」，展开显示每条任务的结构化规则（平台/原创/活动/定时/话题/标题）。**仅当前会话内有效**（`S.pending` 内存数据；重启后历史消息不保留规则面板）
 - **任务卡片字段**：`taskCard(t)` 读取平台 `t.platforms || t.taskSnapshot.platforms`、来源 `t.sourceType`、处理动作 `t.processMode`、原创 `t.isOriginal`、活动 `t.campaignName`、定时 `t.publishAt`、耗时 `t.duration`、执行配置 `t._exec`（`{styleName, voiceName, voiceover, subtitle, sourceType, processMode}`，主进程 runTask 时快照写入）。元信息行展示来源/动作/平台/原创/活动/定时；「执行详情」展开区展示耗时/风格/音色/旁白/字幕
 - **任务操作按钮**：完成/部分完成 →「打开目录」「重新发布」；运行中 →「取消」；排队 →「跳过」；失败 →「重试」
+- **逻辑任务归并**：重试会生成新的执行 ID，但保留 `logicalTaskId`/`retryOf`，时间线按逻辑任务合并，避免重启、重连或重试产生重复卡片
+- **主控筛选**：支持全部/进行中/需处理/已完成筛选，以及按标题、来源链接、错误信息搜索；顶部状态同时统计运行中、排队和需处理任务
+- **历史操作**：历史失败任务可直接重试，历史任务使用 `taskId` 兼容旧数据；重新发布结果由主进程回写历史并同步远程页面

@@ -45,6 +45,7 @@ IPC handler 的注册中心。核心逻辑委托给 `ipc/` 子模块，本文件
 - 渲染进程通过 `preload.js` 调用
 - 业务逻辑委托给各 services 模块
 - 状态变更通过 `webContents.send()` 推送
+- 主控重新发布统一委托给 `TaskRunner.republishTask()`，成功/失败后同步历史记录，避免桌面端与远程端各自维护一套状态
 - 远程页面通过 `remoteServer` 的 `/remote/monitors` 及 `monitor-update` SSE 事件复用同一套监控配置
 - App 退出时调用 `editScheduler.shutdown()`，中断活动剪辑任务并清理其缓存
 

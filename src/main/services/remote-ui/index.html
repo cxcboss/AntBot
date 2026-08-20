@@ -179,6 +179,15 @@ input[type=number]::-webkit-inner-spin-button{opacity:1}
 @keyframes spin{to{transform:rotate(360deg)}}
 
 /* ── 主控：时间线（与 App 对齐） ── */
+.chat-toolbar{display:flex;align-items:center;gap:var(--space-3);padding:var(--space-2) var(--space-4);border-bottom:1px solid var(--border);background:var(--background);flex-shrink:0}
+.chat-filter-tabs{display:flex;align-items:center;gap:var(--space-3);min-width:0;overflow-x:auto}
+.chat-filter{height:28px;padding:0 var(--space-2);border:0;border-bottom:2px solid transparent;background:none;color:var(--muted-foreground);font-size:12px;white-space:nowrap;cursor:pointer;transition:color var(--transition-fast),border-color var(--transition-fast)}
+.chat-filter:hover{color:var(--foreground)}
+.chat-filter.active{border-color:var(--foreground);color:var(--foreground);font-weight:500}
+.chat-search{display:flex;align-items:center;gap:var(--space-1);width:180px;height:28px;padding:0 var(--space-2);border:1px solid var(--border);border-radius:var(--radius);background:var(--card);color:var(--muted-foreground);flex-shrink:0}
+.chat-search:focus-within{border-color:var(--ring);box-shadow:0 0 0 3px color-mix(in srgb,var(--ring) 12%,transparent)}
+.chat-search input{width:100%;border:0;outline:0;background:transparent;color:var(--foreground);font-size:12px}
+.chat-search input::placeholder{color:var(--muted-foreground)}
 .chat{flex:1;overflow-y:auto;padding:0 var(--space-4)}
 .chat-stream{display:flex;flex-direction:column;max-width:640px;margin:0 auto;min-height:100%}
 .chat-day{display:flex;align-items:center;gap:12px;padding:20px 0 0;font-size:11px;color:var(--muted-foreground)}
@@ -222,6 +231,7 @@ input[type=number]::-webkit-inner-spin-button{opacity:1}
 .task-inner{display:flex;flex-direction:column;gap:6px;padding:10px 14px}
 .task-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
 .task-title{font-size:13px;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.task-title-index{margin-left:var(--space-1);font-size:11px;font-weight:400;color:var(--muted-foreground)}
 .task-badge{font-size:11px;font-weight:500;color:var(--muted-foreground);white-space:nowrap;flex-shrink:0;display:inline-flex;align-items:center;gap:5px}
 .task-badge::before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor;flex-shrink:0}
 .task.running .task-badge{color:var(--primary)}
@@ -256,6 +266,8 @@ input[type=number]::-webkit-inner-spin-button{opacity:1}
 .task-actions{display:flex;gap:6px;justify-content:flex-end}
 .task-btn{padding:4px 10px;border-radius:var(--radius);font-size:11px;font-weight:500;border:1px solid var(--border);background:var(--card);color:var(--foreground);transition:background var(--transition-fast),border-color var(--transition-fast)}
 .task-btn:hover{border-color:var(--muted-foreground);background:var(--muted)}
+.task-btn-primary{background:var(--primary);border-color:var(--primary);color:var(--background)}
+.task-btn-primary:hover{background:var(--primary-hover);border-color:var(--primary-hover);color:var(--background)}
 .task-btn:disabled{opacity:.5;cursor:not-allowed}
 .task-btn.skip:hover{border-color:var(--muted-foreground)}
 .task-btn.cancel:hover{border-color:var(--destructive);color:var(--destructive);background:var(--destructive-bg)}
@@ -462,6 +474,8 @@ input[type=number]::-webkit-inner-spin-button{opacity:1}
 @media(max-width:767px){
   .chip-popup{max-width:calc(100vw - 16px);left:8px!important;right:8px!important;width:auto}
   .input-bar{padding-bottom:calc(var(--space-3) + env(safe-area-inset-bottom))}
+  .chat-toolbar{align-items:stretch;flex-direction:column;gap:var(--space-2);padding:var(--space-2) var(--space-3)}
+  .chat-search{width:100%}
 }
 
 /* ── 响应式：桌面（≥768px） ── */
@@ -481,7 +495,7 @@ input[type=number]::-webkit-inner-spin-button{opacity:1}
 <div id="app"></div>
 <script>
 const HUB_URL='https://hub.onebugmanai.online';
-const APP_VERSION='1.9.3';
+const APP_VERSION='1.9.5';
 let API=window.location.origin;
 let token=localStorage.getItem('antbot-token');
 let tasks=[];
@@ -489,6 +503,8 @@ let monitors=[];
 let historyRecords=[];
 let sseSource=null;
 let currentPage='main';
+let chatFilter='all';
+let chatSearch='';
 let deviceId=localStorage.getItem('antbot-device-id')||'';
 let deviceName=localStorage.getItem('antbot-device')||'';
 let consecutiveErrors=0;
@@ -613,6 +629,13 @@ function connectSSE(){
   sseSource.addEventListener('status',e=>{
     const s=JSON.parse(e.data);
     if(s.tasks){tasks=s.tasks;renderTimeline();}
+  });
+  sseSource.addEventListener('history-update',e=>{
+    try{
+      const next=JSON.parse(e.data||'[]');
+      historyRecords=(Array.isArray(next)?next:[]).slice().sort((a,b)=>(b.startedAt||b.endedAt||0)-(a.startedAt||a.endedAt||0));
+      renderTimeline();
+    }catch{}
   });
   sseSource.addEventListener('settings-update',e=>{
     const patch=JSON.parse(e.data);
@@ -749,6 +772,16 @@ function renderAppShell(){
     </aside>
     <div class="content">
       <div class="page active" id="page-main">
+        <div class="chat-toolbar">
+          <div class="chat-filter-tabs" role="tablist" aria-label="任务筛选">
+            <button type="button" class="chat-filter active" data-chat-filter="all">全部</button>
+            <button type="button" class="chat-filter" data-chat-filter="active">进行中</button>
+            <button type="button" class="chat-filter" data-chat-filter="attention">需处理</button>
+            <button type="button" class="chat-filter" data-chat-filter="completed">已完成</button>
+          </div>
+          <label class="chat-search"><span style="font-size:13px">⌕</span><input id="chat-search-input" type="search" placeholder="搜索标题、链接或错误" /></label>
+          <button type="button" class="task-btn" id="chat-stop-all">停止全部</button>
+        </div>
         <div class="chat" id="chat"><div class="chat-stream" id="chat-stream"><div class="empty" id="empty-state"><div class="empty-icon">📋</div><div>粘贴视频链接开始下载</div></div></div></div>
       </div>
       <div class="page" id="page-subtitle">
@@ -911,6 +944,19 @@ function bindEvents(){
   }
   if(sendBtn)sendBtn.addEventListener('click',sendTask);
   document.getElementById('opt-btn')?.addEventListener('click',optimizeTask);
+  document.querySelectorAll('[data-chat-filter]').forEach(btn=>btn.addEventListener('click',()=>{
+    chatFilter=btn.dataset.chatFilter||'all';
+    document.querySelectorAll('[data-chat-filter]').forEach(item=>item.classList.toggle('active',item===btn));
+    renderTimeline();
+  }));
+  document.getElementById('chat-search-input')?.addEventListener('input',e=>{chatSearch=e.target.value||'';renderTimeline();});
+  document.getElementById('chat-stop-all')?.addEventListener('click',async e=>{
+    if(!confirm('确认停止全部任务？'))return;
+    const btn=e.currentTarget;btn.disabled=true;btn.textContent='停止中...';
+    try{const r=await api('POST','/remote/tasks/stop-all');if(r?.ok)showToast('已停止全部任务');else showToast(r?.error||'停止失败');}
+    catch{showToast('网络错误');}
+    finally{btn.disabled=false;btn.textContent='停止全部';}
+  });
   document.getElementById('chat-stream')?.addEventListener('click',e=>{
     // 时间线交互：原文/复制/规则展开/任务详情/操作
     const rawBtn=e.target.closest('[data-msg-raw]');
@@ -1388,7 +1434,7 @@ async function loadSystemStatus(){
   }
   const queue=document.getElementById('status-queue');
   if(queue){
-    const running=d.running,total=d.taskCount||0,active=(d.tasks||[]).filter(t=>t.status==='running'||t.status==='pending'||t.status==='preparing'||t.status==='ready').length;
+    const running=d.running,total=d.taskCount||0,active=(d.tasks||[]).filter(t=>['running','pending','preparing','ready','queued','cancelling'].includes(t.status)).length;
     queue.innerHTML='<div class="status-queue-row"><div class="status-queue-item"><div class="status-queue-num">'+total+'</div><div class="status-queue-label">总任务</div></div><div class="status-queue-item"><div class="status-queue-num">'+active+'</div><div class="status-queue-label">进行中</div></div><div class="status-queue-item"><div class="status-queue-num">'+(running?'是':'否')+'</div><div class="status-queue-label">队列运行</div></div></div>';
   }
   const usageTitle=document.getElementById('usage-title'),usage=document.getElementById('status-usage');
@@ -1653,12 +1699,17 @@ function rulesFromItem(t){
 // 同一任务可能同时来自实时状态、持久化状态和历史记录；不同版本的数据字段也不完全一致。
 function taskIdentityParts(item){
   const snap=item&&item.taskSnapshot||{};
-  return [item&&item.taskId,snap.id,snap.taskId,item&&item.id]
-    .map(v=>String(v==null?'':v).trim()).filter(Boolean);
+  return [...new Set([item&&item.logicalTaskId,item&&item.retryOf,snap.logicalTaskId,snap.retryOf,item&&item.taskId,item&&item.id,snap.taskId,snap.id]
+    .map(v=>String(v==null?'':v).trim()).filter(Boolean))];
 }
 
 function taskIdentity(item){
-  return taskIdentityParts(item)[0]||'';
+  const snap=item&&item.taskSnapshot||{};
+  return String(item&&item.logicalTaskId||snap.logicalTaskId||item&&item.retryOf||snap.retryOf||item&&item.taskId||item&&item.id||snap.id||'').trim();
+}
+function taskExecutionId(item){
+  const snap=item&&item.taskSnapshot||{};
+  return String(item&&item.id||item&&item.taskId||snap.id||snap.taskId||'').trim();
 }
 
 function taskItemAttempt(item){
@@ -1699,6 +1750,23 @@ function dedupeTaskItems(items){
 
 function taskIdsOverlap(item,ids){
   return taskIdentityParts(item).some(id=>ids.has(id));
+}
+
+function chatTaskMatches(item){
+  const st=String(item&&item.status||'pending');
+  if(chatFilter==='active'&&!['queued','pending','running','preparing','cancelling'].includes(st))return false;
+  if(chatFilter==='attention'&&!['warning','failed','stopped','partial_failed'].includes(st))return false;
+  if(chatFilter==='completed'&&st!=='completed')return false;
+  const q=String(chatSearch||'').trim().toLowerCase();
+  if(!q)return true;
+  const snap=item&&item.taskSnapshot||{};
+  return [item&&item.taskName,item&&item.rawLine,item&&item.videoUrl,snap.videoUrl,item&&item.message,item&&item.sourceType,item&&item.monitorName]
+    .some(value=>String(value||'').toLowerCase().includes(q));
+}
+
+function chatTextMatches(text){
+  const q=String(chatSearch||'').trim().toLowerCase();
+  return Boolean(q&&String(text||'').toLowerCase().includes(q));
 }
 
 function isTerminalTaskStatus(status){
@@ -1749,9 +1817,12 @@ function taskCard(t,live){
   const pg=Math.max(0,Math.min(100,Number(t.progress||0)));
   const idx=t.index||t.queueIndex||0;
   const r=rulesFromItem(t);
-  const title=idx?('任务'+idx):(t.taskName&&t.taskName!=='普通'?t.taskName:(r.isOriginal?'原创':'任务'));
+  const taskId=taskExecutionId(t);
+  const title=(t.taskName&&t.taskName!=='普通')?t.taskName:(r.videoUrl?shortUrl(r.videoUrl):(r.isOriginal?'原创':'任务'));
+  const titleMeta=idx?'<span class="task-title-index">任务 '+idx+'</span>':'';
   const retrying=t.retryCount>0&&st==='running';
-  const badge=retrying?('重试中 ('+t.retryCount+')'):st==='cancelling'?'取消中':statusText(st);
+  const expectedUnpublished=st==='warning'&&/自动发布已关闭|成品已生成/.test(String(t.message||''));
+  const badge=retrying?('重试中 ('+t.retryCount+')'):st==='cancelling'?'取消中':expectedUnpublished?'待发布':statusText(st);
   const isCompleted=st==='completed'||st==='warning';
   const isCancelling=st==='cancelling';
   const msg=t.message?('<div class="task-msg">'+esc(t.message)+'</div>'):'';
@@ -1781,6 +1852,7 @@ function taskCard(t,live){
   if(exec.voiceName)detail.push('<span class="task-detail-item">音色 <b>'+esc(exec.voiceName)+'</b></span>');
   if(exec.voiceover!==undefined)detail.push('<span class="task-detail-item">旁白 <b>'+(exec.voiceover?'开':'关')+'</b></span>');
   if(exec.subtitle!==undefined)detail.push('<span class="task-detail-item">字幕 <b>'+(exec.subtitle?'开':'关')+'</b></span>');
+  if(t.step)detail.push('<span class="task-detail-item">阶段 <b>'+esc(t.step)+'</b></span>');
   const detailHtml=detail.length?('<div class="task-detail"><button type="button" class="task-detail-toggle" data-task-detail>执行详情<span class="td-chevron">›</span></button><div class="task-detail-body"><div class="task-detail-grid">'+detail.join('')+'</div></div></div>'):'';
 
   const showProgress=live&&['running','preparing','pending','queued'].includes(st);
@@ -1788,13 +1860,14 @@ function taskCard(t,live){
   const progressHtml=(showProgress||t.history&&st!=='running'&&st!=='pending'&&st!=='queued')?('<div class="task-bar"><div class="task-bar-in" style="width:'+(t.history?(st==='failed'?'100':'0'):pct)+'%"></div></div>'):'';
 
   const acts=[];
-  if(live&&['queued','pending'].includes(st))acts.push('<button class="task-btn skip" data-action="skip" data-id="'+esc(t.id)+'">跳过</button>');
-  if(live&&['running'].includes(st))acts.push('<button class="task-btn cancel" data-action="stop" data-id="'+esc(t.id)+'">取消</button>');
-  if((live||t.history)&&['failed','stopped'].includes(st))acts.push('<button class="task-btn" data-action="retry" data-id="'+esc(t.id)+'">重试</button>');
-  if(isCompleted&&t.outputPath&&r.processMode==='publish')acts.push('<button class="task-btn" data-action="republish" data-id="'+esc(t.id)+'">重新发布</button>');
+  if(live&&['queued','pending'].includes(st))acts.push('<button class="task-btn skip" data-action="skip" data-id="'+esc(taskId)+'">跳过</button>');
+  if(live&&['running'].includes(st))acts.push('<button class="task-btn cancel" data-action="stop" data-id="'+esc(taskId)+'">取消</button>');
+  if((live||t.history)&&['failed','stopped'].includes(st))acts.push('<button class="task-btn" data-action="retry" data-id="'+esc(taskId)+'">重试任务</button>');
+  if(isCompleted&&t.outputPath&&r.processMode==='publish')acts.push('<button class="task-btn task-btn-primary" data-action="republish" data-id="'+esc(taskId)+'">重新发布</button>');
+  if(r.videoUrl)acts.push('<a class="task-btn" href="'+esc(r.videoUrl)+'" target="_blank" rel="noreferrer">查看来源</a>');
   const actsHtml=acts.length?('<div class="task-actions">'+acts.join('')+'</div>'):'';
 
-  const inner='<div class="task-inner"><div class="task-head"><div class="task-title">'+esc(title)+'</div><div class="task-badge">'+esc(badge)+'</div></div>'+metaHtml+detailHtml+progressHtml+msg+actsHtml+'</div>';
+  const inner='<div class="task-inner"><div class="task-head"><div class="task-title" title="'+esc(title)+'">'+esc(title)+' '+titleMeta+'</div><div class="task-badge">'+esc(badge)+'</div></div>'+metaHtml+detailHtml+progressHtml+msg+actsHtml+'</div>';
   const overlay=isCancelling?'<div class="task-cancelling">取消中...</div>':'';
   return '<div class="task '+esc(st)+'">'+inner+overlay+'</div>';
 }
@@ -1842,7 +1915,7 @@ function renderTimeline(){
 
   // 终态任务以历史记录为准（历史包含完整规则和最终 attempt），避免实时状态再渲染一张。
   const visibleLiveItems=liveItems.filter(item=>{
-    return !(isTerminalTaskStatus(item.status)&&taskIdsOverlap(item,historySeenIds));
+    return !(isTerminalTaskStatus(item.status)&&taskIdsOverlap(item,historySeenIds))&&chatTaskMatches(item);
   });
   const visibleLiveIds=new Set(visibleLiveItems.flatMap(taskIdentityParts));
 
@@ -1858,8 +1931,8 @@ function renderTimeline(){
   // 运行中的实时卡片优先；只有实时状态仍在展示时，才从历史组中移除同一任务。
   const visibleHistoryGroups=historyGroups.map(g=>({
     ...g,
-    items:g.items.filter(item=>!taskIdsOverlap(item,visibleLiveIds))
-  })).filter(g=>g.items.length||g.txt);
+    items:g.items.filter(item=>!taskIdsOverlap(item,visibleLiveIds)&&chatTaskMatches(item))
+  })).filter(g=>g.items.length||(chatFilter==='all'&&!chatSearch&&g.txt)||chatTextMatches(g.txt));
 
   if(!liveGroups.size&&!visibleHistoryGroups.length){if(empty)empty.style.display='';return}
   if(empty)empty.style.display='none';
@@ -1875,7 +1948,7 @@ function renderTimeline(){
 
   visibleHistoryGroups.forEach(g=>{
     const rulesItems=g.items.map(rulesFromItem).filter(x=>x.platforms.length||x.isOriginal||x.campaignName||x.publishAt);
-    group(g.at,g.txt,rulesItems.length?{items:g.items}:null,'<div class="task-stack">'+g.items.map(i=>taskCard({...i,id:taskIdentity(i)||i.id||i.taskId,history:true},false)).join('')+'</div>');
+    group(g.at,g.txt,rulesItems.length?{items:g.items}:null,'<div class="task-stack">'+g.items.map(i=>taskCard({...i,id:taskExecutionId(i),history:true},false)).join('')+'</div>');
   });
 
   liveGroups.forEach(g=>{

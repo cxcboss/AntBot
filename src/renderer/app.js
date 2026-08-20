@@ -16,6 +16,8 @@ const el = {
   editAddBtn:$('#edit-add-btn'), editStartBtn:$('#edit-start-btn'),
   resizeHandle:$('#resize-handle'), composer:$('#composer'), chatArea:$('#chat-area'),
   status:$('#startup-status'),
+  chatSearch:$('#chat-search-input'),
+  chatStopAll:$('#chat-stop-all'),
   openVideoBtn:$('#open-video-channel'), openDouyinBtn:$('#open-douyin'),
   statTotal:$('#stat-total'), statPeriod:$('#stat-period'),
   statPeriodLabel:$('#stat-period-label'),
@@ -31,7 +33,7 @@ const S = {
   preview:{count:0,items:[],warnings:[],source:'',defaults:null,error:'',empty:true,mode:'auto'},
   vc:{running:false,status:'idle',step:'等待',pct:0,logs:[]},
   pending:[], chatCount:20, sidebarOpen:window.innerWidth>720, statPeriod:'day',
-  currentFeat:'main', selectedStyle:'', persistedTasks:[],
+  currentFeat:'main', selectedStyle:'', persistedTasks:[], chatFilter:'all', chatSearch:'',
 };
 let previewTimer=null,previewSeq=0,setQueue=Promise.resolve(),startupSeq=0;
 
@@ -263,16 +265,43 @@ function liveGroups(){
   S.pending.forEach(b=>{if(!gs.has(b.runId))gs.set(b.runId,{id:b.runId,at:b.createdAt,txt:b.txt,rules:b.rules||null,tasks:[]});gs.get(b.runId).txt=b.txt;if(b.rules)gs.get(b.runId).rules=b.rules});
   return Array.from(gs.values()).map(g=>({...g,tasks:g.tasks.sort((a,b)=>(a.index||a.queueIndex||0)-(b.index||b.queueIndex||0)),txt:g.txt||g.tasks.map(t=>t.rawLine).filter(Boolean).join('\n')||g.tasks.map(t=>t.taskName).join('\n')})).sort((a,b)=>new Date(a.at)-new Date(b.at));
 }
-// 历史记录中同一任务多次尝试（重试）只保留最后一次（attempt 最大）
+function taskIdentityParts(t){
+  const snap=t?.taskSnapshot||{};
+  return [...new Set([t?.logicalTaskId,t?.retryOf,snap.logicalTaskId,snap.retryOf,t?.taskId,t?.id,snap.taskId,snap.id].map(v=>String(v??'').trim()).filter(Boolean))];
+}
+function taskLogicalId(t){
+  const snap=t?.taskSnapshot||{};
+  return String(t?.logicalTaskId||snap.logicalTaskId||t?.retryOf||snap.retryOf||t?.taskId||t?.id||snap.taskId||snap.id||'').trim();
+}
+function taskId(t){
+  const snap=t?.taskSnapshot||{};
+  return String(t?.id||t?.taskId||snap.id||snap.taskId||'').trim();
+}
+function historyTaskTime(t){return Date.parse(t?.finishedAt||t?.updatedAt||t?.endedAt||t?.createdAt||'')||0}
+// 历史记录中同一逻辑任务多次尝试（重试）只保留最后一次
 function dedupeHistoryItems(items){
   const map=new Map();
   (items||[]).forEach((it,i)=>{
-    const key=String(it.taskId||it.id||'');
+    const key=taskLogicalId(it);
     if(!key){map.set(`__${i}`,it);return}
     const prev=map.get(key);
-    if(!prev||Number(it.attempt||1)>=Number(prev.attempt||1))map.set(key,it);
+    const attempt=Number(it.attempt||it.retryCount||0),prevAttempt=Number(prev?.attempt||prev?.retryCount||0);
+    if(!prev||attempt>prevAttempt||(attempt===prevAttempt&&historyTaskTime(it)>=historyTaskTime(prev)))map.set(key,it);
   });
   return [...map.values()];
+}
+function normalizeHistoryForDisplay(records){
+  const seen=new Set();
+  return (records||[]).slice().sort((a,b)=>(Date.parse(b?.startedAt||b?.endedAt||'')||0)-(Date.parse(a?.startedAt||a?.endedAt||'')||0)).map(record=>{
+    const items=dedupeHistoryItems(record.items||[]).filter(item=>{
+      const key=taskLogicalId(item);
+      if(!key)return true;
+      if(seen.has(key))return false;
+      seen.add(key);
+      return true;
+    });
+    return {...record,items};
+  }).filter(record=>record.items.length||!(record.items||[]).length);
 }
 function taskCard(t,live=false){
   const st=t.status||'pending';const pg=Math.max(0,Math.min(100,Number(t.progress||0)));
@@ -285,12 +314,15 @@ function taskCard(t,live=false){
   const publishAt=t.publishAt||snap.publishAt;
   const exec=t._exec||{};
   const idx=t.index||t.queueIndex||0;
-  const title=idx?`任务${idx}`:(t.taskName&&t.taskName!=='普通'?t.taskName:(isOriginal?'原创':'任务'));
+  const currentTaskId=taskId(t);
+  const title=t.taskName&&t.taskName!=='普通'?t.taskName:(t.videoUrl||snap.videoUrl|| (isOriginal?'原创':'任务'));
+  const titleMeta=idx?`<span class="task-title-index">任务 ${idx}</span>`:'';
   const retrying=t.retryCount>0&&st==='running';
-  const statusLabel=retrying?`重试中 (${t.retryCount})`:st==='cancelling'?'取消中':statusText(st);
+  const expectedUnpublished=st==='warning'&&/自动发布已关闭|成品已生成/.test(String(t.message||''));
+  const statusLabel=retrying?`重试中 (${t.retryCount})`:st==='cancelling'?'取消中':expectedUnpublished?'待发布':statusText(st);
   const canSkip=live&&['queued','pending'].includes(st);
   const canCancel=live&&['running'].includes(st);
-  const canRetry=live&&['failed','stopped'].includes(st);
+  const canRetry=(live||t.history)&&['failed','stopped'].includes(st);
   const isCompleted=st==='completed'||st==='warning';
   const isCancelling=st==='cancelling';
   const msg=t.message?`<div class="task-msg">${esc(t.message)}</div>`:'';
@@ -315,6 +347,7 @@ function taskCard(t,live=false){
   if(exec.voiceName)detailItems.push(`<span class="task-detail-item">音色 <b>${esc(exec.voiceName)}</b></span>`);
   if(exec.voiceover!==undefined)detailItems.push(`<span class="task-detail-item">旁白 <b>${exec.voiceover?'开':'关'}</b></span>`);
   if(exec.subtitle!==undefined)detailItems.push(`<span class="task-detail-item">字幕 <b>${exec.subtitle?'开':'关'}</b></span>`);
+  if(t.step)detailItems.push(`<span class="task-detail-item">阶段 <b>${esc(t.step)}</b></span>`);
   const detailHtml=detailItems.length?`<div class="task-detail"><button type="button" class="task-detail-toggle" data-task-detail>执行详情<span class="icon" data-icon="chevronRight"></span></button><div class="task-detail-body"><div class="task-detail-grid">${detailItems.join('')}</div></div></div>`:'';
 
   const showProgress=st==='running'||st==='preparing'||st==='pending'||st==='queued';
@@ -323,11 +356,13 @@ function taskCard(t,live=false){
   const acts=[];
   if(canSkip)acts.push(`<button class="task-btn skip" data-skip="${esc(t.id)}">跳过</button>`);
   if(canCancel)acts.push(`<button class="task-btn cancel" data-stop="${esc(t.id)}">取消</button>`);
-  if(canRetry)acts.push(`<button class="task-btn" data-retry-task="${esc(t.id)}">重试</button>`);
+  if(canRetry)acts.push(`<button class="task-btn" data-retry-task="${esc(currentTaskId)}">重试任务</button>`);
   if(isCompleted&&t.outputPath)acts.push(`<button class="task-btn" data-open-output="${esc(t.outputPath)}">打开目录</button>`);
-  if((isCompleted||st==='failed')&&t.outputPath&&processMode==='publish')acts.push(`<button class="task-btn" data-republish="${esc(t.id)}">重新发布</button>`);
+  if((isCompleted||st==='failed')&&t.outputPath&&processMode==='publish')acts.push(`<button class="task-btn task-btn-primary" data-republish="${esc(currentTaskId)}">重新发布</button>`);
+  const sourceUrl=t.videoUrl||snap.videoUrl||'';
+  if(sourceUrl)acts.push(`<button class="task-btn" data-copy-source="${esc(sourceUrl)}">复制来源</button>`);
 
-  const inner=`<div class="task-inner"><div class="task-head"><div class="task-title">${esc(title)}</div><div class="task-badge">${esc(statusLabel)}</div></div>${metaHtml}${detailHtml}${progressHtml}${msg}${acts.length?`<div class="task-acts">${acts.join('')}</div>`:''}</div>`;
+  const inner=`<div class="task-inner"><div class="task-head"><div class="task-title" title="${esc(title)}">${esc(title)} ${titleMeta}</div><div class="task-badge">${esc(statusLabel)}</div></div>${metaHtml}${detailHtml}${progressHtml}${msg}${acts.length?`<div class="task-acts">${acts.join('')}</div>`:''}</div>`;
   const overlay=isCancelling?'<div class="task-cancelling">取消中...</div>':'';
   return`<div class="task ${esc(st)}">${inner}${overlay}</div>`;
 }
@@ -335,6 +370,24 @@ function taskCard(t,live=false){
 const _chatCache = new Map();
 function chatGroupKey(g){return (g.persisted?'p:':g.live?'l:':'h:')+g.runId}
 function chatGroupSig(g){return `${g.at}|${g.msgHtml||''}|${g.rulesHtml||''}|${g.tasksHtml}`}
+function chatTaskMatches(t){
+  const st=String(t?.status||'pending');
+  const filter=S.chatFilter||'all';
+  if(filter==='active'&&!['queued','pending','running','preparing','cancelling'].includes(st))return false;
+  if(filter==='attention'&&!['warning','failed','stopped','partial_failed'].includes(st))return false;
+  if(filter==='completed'&&!['completed'].includes(st))return false;
+  const query=String(S.chatSearch||'').trim().toLowerCase();
+  if(!query)return true;
+  const snap=t?.taskSnapshot||{};
+  return [t?.taskName,t?.rawLine,t?.videoUrl,snap.videoUrl,t?.message,t?.sourceType,t?.monitorName].some(v=>String(v||'').toLowerCase().includes(query));
+}
+function filterChatGroup(group){
+  const message=String(group.txt||'').toLowerCase();
+  const query=String(S.chatSearch||'').trim().toLowerCase();
+  const messageMatch=query&&message.includes(query);
+  const tasks=group.tasks.filter(t=>messageMatch||chatTaskMatches(t));
+  return {...group,tasks};
+}
 function renderChat(opts={}){
   if(!el.stream)return;const stick=opts.stick,lg=liveGroups();
   const groups=[];let day='';
@@ -342,15 +395,20 @@ function renderChat(opts={}){
   const push=(at,runId,persisted,live,msgHtml,rulesHtml,tasksHtml)=>{
     groups.push({at:at?new Date(at).getTime():0,runId:String(runId||''),persisted,live,msgHtml,rulesHtml,tasksHtml});
   };
-  for(const r of (S.history||[]).slice(-S.chatCount)){
-    const txt=r.inputText||(r.items||[]).map(i=>i.rawLine||i.taskName).filter(Boolean).join('\n');
-    push(r.startedAt||r.endedAt,r.id,false,false,txt?`<div class="msg-user">${makeMessageHtml(txt,null)}</div>`:'','',`<div class="task-stack">${dedupeHistoryItems(r.items).map(i=>taskCard(i)).join('')}</div>`);
+  const liveActiveIds=new Set(lg.flatMap(g=>g.tasks.filter(t=>['queued','pending','running','preparing','cancelling'].includes(t.status)).map(taskLogicalId).filter(Boolean)));
+  const historyRecords=normalizeHistoryForDisplay(S.history).slice(0,S.chatCount).reverse();
+  for(const r of historyRecords){
+    const allItems=dedupeHistoryItems(r.items).filter(i=>!liveActiveIds.has(taskLogicalId(i)));
+    const txt=r.inputText||(allItems||[]).map(i=>i.rawLine||i.taskName).filter(Boolean).join('\n');
+    const filtered=filterChatGroup({txt,tasks:allItems});
+    if(!filtered.tasks.length&&!((S.chatSearch||'').trim()&&String(txt||'').toLowerCase().includes(String(S.chatSearch).trim().toLowerCase())))continue;
+    push(r.startedAt||r.endedAt,r.id,false,false,txt?`<div class="msg-user">${makeMessageHtml(txt,null)}</div>`:'','',`<div class="task-stack">${filtered.tasks.map(i=>taskCard({...i,id:taskId(i),history:true})).join('')}</div>`);
   }
   // 持久化的主控任务（重新发布状态，重启后保留）
-  const historyIds=new Set((S.history||[]).flatMap(r=>(r.items||[]).map(i=>String(i.taskId||i.id||''))));
+  const historyIds=new Set((S.history||[]).flatMap(r=>(r.items||[]).map(taskLogicalId).filter(Boolean)));
   const persisted=(S.persistedTasks||[]).filter(t=>{
-    const tid=String(t.id||t.taskId||'');
-    return tid&&!historyIds.has(tid)&&(t.status==='warning'||t.status==='completed');
+    const tid=taskLogicalId(t);
+    return tid&&!historyIds.has(tid)&&(t.status==='warning'||t.status==='completed')&&chatTaskMatches(t);
   });
   if(persisted.length){
     const byRun={};
@@ -360,7 +418,9 @@ function renderChat(opts={}){
     }
   }
   for(const g of lg){
-    push(g.at,g.id,false,true,g.txt?`<div class="msg-user">${makeMessageHtml(g.txt,g.rules)}</div>`:'','',`<div class="task-stack">${g.tasks.map(t=>taskCard(t,true)).join('')}</div>`);
+    const filtered=filterChatGroup(g);
+    if(!filtered.tasks.length)continue;
+    push(g.at,g.id,false,true,filtered.txt?`<div class="msg-user">${makeMessageHtml(filtered.txt,filtered.rules)}</div>`:'','',`<div class="task-stack">${filtered.tasks.map(t=>taskCard(t,true)).join('')}</div>`);
   }
   // 按时间升序：最早在上、最新（进行中的任务）在最下
   groups.sort((a,b)=>a.at-b.at);
@@ -688,10 +748,14 @@ function renderStatus(){
   if(S.currentFeat==='subtitle-voice'){
     el.status.textContent='管理音色和字幕样式';el.status.className='tb-status';return;
   }
-  const live=(S.progress?.tasks||[]).filter(t=>['queued','pending','running'].includes(t.status));
+  const allTasks=[...(S.progress?.tasks||[]),...(S.progress?.queueTasks||[])];
+  const live=allTasks.filter(t=>['queued','pending','running','preparing','cancelling'].includes(t.status));
   const running=live.filter(t=>t.status==='running').length;
   const pending=live.filter(t=>t.status!=='running').length;
-  if(live.length>0){const p=[];if(running>0)p.push(`${running}个正在执行`);if(pending>0)p.push(`${pending}个等待中`);el.status.textContent=p.join('，');el.status.className='tb-status active'}
+  const attention=allTasks.filter(t=>['warning','failed','stopped','partial_failed'].includes(t.status)).length;
+  if(el.chatStopAll)el.chatStopAll.disabled=!live.length;
+  if(live.length>0){const p=[];if(running>0)p.push(`${running}个正在执行`);if(pending>0)p.push(`${pending}个等待中`);if(attention>0)p.push(`${attention}个需处理`);el.status.textContent=p.join('，');el.status.className='tb-status active'}
+  else if(attention>0){el.status.textContent=`${attention}个任务需处理`;el.status.className='tb-status attention'}
   else{el.status.textContent='没有任务';el.status.className='tb-status'}
 }
 function renderBtns(){if(el.badge&&S.app)el.badge.textContent=`v${S.app.version}`;toggleSendBtn()}
@@ -1226,7 +1290,7 @@ function showEditCardPopup(anchor, vid, type) {
   const popup = document.createElement('div'); popup.className = 'chip-popup';
   const current = video[type] || '';
   if (type === 'style') {
-    const options = S.styleRefs.filter(s => !s.learning && s.prompt).map(s => s.name); if (!options.length) options = ['暂无风格'];
+    let options = S.styleRefs.filter(s => !s.learning && s.prompt).map(s => s.name); if (!options.length) options = ['暂无风格'];
     popup.innerHTML = `<ul class="style-list">${options.map(o => `<li class="style-item${o === current ? ' active' : ''}" data-val="${esc(o)}">${esc(o)}</li>`).join('')}</ul>`;
     positionPopup(popup, anchor); activePopup = popup;
     popup.querySelectorAll('.style-item').forEach(item => item.addEventListener('click', async () => {
@@ -1290,7 +1354,7 @@ function showEditDefaultPopup(anchor, type) {
   const current = S.editDefaults[type] || '';
   const popup = document.createElement('div'); popup.className = 'chip-popup';
   if (type === 'style') {
-    const options = S.styleRefs.filter(s => !s.learning && s.prompt).map(s => s.name); if (!options.length) options = ['暂无风格'];
+    let options = S.styleRefs.filter(s => !s.learning && s.prompt).map(s => s.name); if (!options.length) options = ['暂无风格'];
     popup.innerHTML = `<ul class="style-list">${options.map(o => `<li class="style-item${o === current ? ' active' : ''}" data-val="${esc(o)}">${esc(o)}</li>`).join('')}</ul>`;
     positionPopup(popup, anchor); activePopup = popup;
     popup.querySelectorAll('.style-item').forEach(item => item.addEventListener('click', () => {
@@ -2014,6 +2078,13 @@ function bind(){
     const confirmBtn=e.target.closest('[data-pv-confirm]');
     if(confirmBtn)void startTasks(true);
   });
+  document.querySelectorAll('[data-chat-filter]').forEach(btn=>btn.addEventListener('click',()=>{
+    S.chatFilter=btn.dataset.chatFilter||'all';
+    document.querySelectorAll('[data-chat-filter]').forEach(item=>item.classList.toggle('active',item===btn));
+    renderChat();
+  }));
+  el.chatSearch?.addEventListener('input',()=>{S.chatSearch=el.chatSearch.value||'';renderChat()});
+  el.chatStopAll?.addEventListener('click',()=>void stopTasks());
   // Chat actions
   el.stream?.addEventListener('click',e=>{
     const copyBtn=e.target.closest('[data-msg-copy]');
@@ -2025,6 +2096,8 @@ function bind(){
     if(ruleToggle){ruleToggle.closest('.msg-rules')?.classList.toggle('open');return}
     const detailToggle=e.target.closest('[data-task-detail]');
     if(detailToggle){detailToggle.closest('.task-detail')?.classList.toggle('open');return}
+    const copySourceBtn=e.target.closest('[data-copy-source]');
+    if(copySourceBtn){Promise.resolve(navigator.clipboard?.writeText(copySourceBtn.dataset.copySource||'')).then(()=>toast('来源链接已复制','success')).catch(()=>toast('复制失败','error'));return}
     const stopBtn=e.target.closest('[data-stop]');
     const skipBtn=e.target.closest('[data-skip]');
     const retryTaskBtn=e.target.closest('[data-retry-task]');
@@ -2044,11 +2117,11 @@ function bind(){
     }
     if(skipBtn){void window.antbot.stopTask(skipBtn.dataset.skip).then(()=>toast('已跳过','success')).catch(err=>toast(err.message,'error'))}
     if(retryTaskBtn){
-      const taskId=retryTaskBtn.dataset.retryTask;
-      const task=S.progress?.tasks?.find(t=>t.id===taskId)||S.history?.flatMap(h=>h.items||[]).find(t=>t.id===taskId);
+      const retryId=retryTaskBtn.dataset.retryTask;
+      const task=S.progress?.tasks?.find(t=>taskId(t)===retryId)||S.progress?.queueTasks?.find(t=>taskId(t)===retryId)||S.history?.flatMap(h=>h.items||[]).find(t=>taskId(t)===retryId);
       const rawLine=task?.rawLine||'';
       const taskPayload=task?.taskSnapshot||task;
-      if(rawLine||taskPayload){void window.antbot.resumeTask({taskId,task:taskPayload}).then(r=>{toast('已重新提交','success');appendPending({runId:r.runId,inputText:rawLine});renderChat({stick:true})}).catch(err=>toast(err.message,'error'))}
+      if(rawLine||taskPayload){retryTaskBtn.disabled=true;retryTaskBtn.textContent='重试中...';void window.antbot.resumeTask({taskId:retryId,task:taskPayload}).then(r=>{toast('已重新提交','success');appendPending({runId:r.runId,inputText:rawLine});renderChat({stick:true})}).catch(err=>toast(err.message,'error')).finally(()=>{retryTaskBtn.disabled=false;retryTaskBtn.textContent='重试任务'})}
       else{toast('无法重试：缺少原始输入','error')}
     }
     if(openOutputBtn){

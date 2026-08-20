@@ -184,12 +184,15 @@ async function getApiUsage() {
 
 async function getStatus() {
   const tasks = _taskRunner ? _taskRunner.progressRows || [] : [];
+  const queueTasks = _taskRunner?.getQueuedTaskRows ? _taskRunner.getQueuedTaskRows() : [];
+  const taskRows = [...tasks, ...queueTasks];
   const [services, usage] = await Promise.all([getServicesStatus(), getApiUsage()]);
   return {
     running: _taskRunner?.running || false,
-    taskCount: tasks.length,
-    tasks: tasks.map(t => ({
+    taskCount: taskRows.length,
+    tasks: taskRows.map(t => ({
       id: t.id,
+      logicalTaskId: t.logicalTaskId || t.taskSnapshot?.logicalTaskId || '',
       name: t.taskName || (t.isOriginal ? '原创' : '任务'),
       status: t.status,
       progress: t.progress,
@@ -414,6 +417,17 @@ function startRemoteServer({ store, taskRunner, mainWindowRef, appLog }) {
         }
       }
 
+      // POST /remote/tasks/stop-all — 停止当前用户可见的全部任务
+      if (method === 'POST' && pathname === '/remote/tasks/stop-all') {
+        const rows = [
+          ...(_taskRunner?.progressRows || []),
+          ...(_taskRunner?.getQueuedTaskRows ? _taskRunner.getQueuedTaskRows() : [])
+        ];
+        for (const row of rows) await _taskRunner.stopTask(row.id, {}).catch(() => {});
+        broadcast('status', await getStatus());
+        return sendJson(res, 200, { ok: true, stopped: rows.length });
+      }
+
       // POST /remote/tasks/:id/stop
       const stopMatch = pathname.match(/^\/remote\/tasks\/([^/]+)\/stop$/);
       if (method === 'POST' && stopMatch) {
@@ -448,52 +462,14 @@ function startRemoteServer({ store, taskRunner, mainWindowRef, appLog }) {
       if (method === 'POST' && republishMatch) {
         const taskId = republishMatch[1];
         try {
-          const { publishVideo } = require('./publisher');
-          const settings = _store ? await _store.getSettings() : null;
-          const row = _taskRunner?.progressRows?.find(r => r.id === taskId);
-          let historyItem = null;
-          try {
-            const historyPath = path.join(os.homedir(), 'AntBot', 'antbot-store.json');
-            const data = JSON.parse(await fs.readFile(historyPath, 'utf-8'));
-            historyItem = (data.users?.[0]?.history || []).flatMap(h => h.items || []).find(i => i.id === taskId);
-          } catch {}
-          let persistedItem = null;
-          try { persistedItem = (await _taskRunner.loadPersistedTasks()).find(t => t.id === taskId); } catch {}
-          const sourceItem = row || historyItem || persistedItem || {};
-          const processMode = sourceItem.processMode || sourceItem.taskSnapshot?.processMode || 'publish';
-          if (processMode !== 'publish') {
-            return sendJson(res, 400, { ok: false, error: '该任务无需重新发布' });
-          }
-          const outputPath = row?.outputPath || historyItem?.outputPath || persistedItem?.outputPath;
-          if (!outputPath) return sendJson(res, 200, { ok: false, error: '未找到视频文件路径' });
-
-          let fileExists = false;
-          try { const stat = await fs.stat(outputPath); fileExists = stat.isFile() && stat.size > 0; } catch {}
-          if (!fileExists) {
-            return sendJson(res, 200, { ok: false, error: 'FILE_DELETED', outputPath, rawLine: row?.rawLine || historyItem?.rawLine || persistedItem?.rawLine || '' });
-          }
-
-          if (settings?.publish?.enabled === false) return sendJson(res, 200, { ok: false, error: '自动发布已关闭' });
-          _taskRunner.setTaskState(taskId, { status: 'running', step: '发布', progress: 95, message: '重新发布中...' });
-          const snapshot = sourceItem.taskSnapshot || {};
-          const task = {
-            ...snapshot,
-            id: taskId,
-            rawLine: row?.rawLine || historyItem?.rawLine || persistedItem?.rawLine || snapshot.rawLine || '',
-            publishCopy: row?.publishCopy || historyItem?.publishCopy || persistedItem?.publishCopy || snapshot.publishCopy || '',
-            publishTopics: row?.publishTopics || historyItem?.publishTopics || persistedItem?.publishTopics || snapshot.publishTopics || [],
-            platforms: row?.platforms || historyItem?.platforms || persistedItem?.platforms || snapshot.platforms || [],
-            campaignName: row?.campaignName || historyItem?.campaignName || persistedItem?.campaignName || snapshot.campaignName || '',
-          };
-          const result = await publishVideo({ task, settings, outputPath, log: (msg) => log('info', `[republish] ${msg}`) });
-          const publishedPlatforms = result?.platforms || [];
-          const platformNames = publishedPlatforms.map(p => p === 'videoChannel' ? '视频号' : '抖音').join('、');
-          _taskRunner.setTaskState(taskId, { status: 'completed', progress: 100, step: '完成', message: platformNames ? `已发布到 ${platformNames}` : '发布完成' });
-          await _taskRunner.removePersistedTask(taskId).catch(() => {});
-          return sendJson(res, 200, { ok: true });
+          const result = await _taskRunner.republishTask(taskId);
+          if (_store) broadcastHistoryUpdate(await _store.getHistory());
+          broadcast('status', await getStatus());
+          return sendJson(res, 200, result);
         } catch (e) {
-          _taskRunner?.setTaskState(taskId, { status: 'warning', step: '部分完成', message: `发布失败: ${e.message}` });
-          return sendJson(res, 200, { ok: false, error: e.message });
+          if (_store) broadcastHistoryUpdate(await _store.getHistory().catch(() => []));
+          broadcast('status', await getStatus());
+          return sendJson(res, 200, { ok: false, error: e.message, outputPath: e.outputPath || '', rawLine: e.rawLine || '' });
         }
       }
 
@@ -825,6 +801,10 @@ function broadcastTaskUpdate(task) {
   broadcast('task-update', task);
 }
 
+function broadcastHistoryUpdate(history) {
+  broadcast('history-update', Array.isArray(history) ? history : []);
+}
+
 module.exports = {
   startRemoteServer,
   stopRemoteServer,
@@ -833,4 +813,5 @@ module.exports = {
   getRemotePort,
   configureRemotePort,
   broadcastTaskUpdate,
+  broadcastHistoryUpdate,
 };

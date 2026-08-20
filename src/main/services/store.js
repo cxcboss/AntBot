@@ -2,6 +2,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { app } = require('electron');
 const { buildDefaultSettings, getSettingsOverridesFromEnv } = require('./config');
+const { getTaskIdentityParts } = require('./taskState');
 
 const STORE_FILE = 'antbot-store.json';
 const STORE_SCHEMA_VERSION = 7;
@@ -664,6 +665,37 @@ class StoreService {
     user.history = user.history.slice(0, 200);
     this.touchUser(user);
     await this.persist();
+    return clone(user.history);
+  }
+
+  async updateHistoryTask(taskId, patch = {}, userId = '') {
+    await this.load();
+    const user = this.getUserRecordById(userId) || this.getActiveUserRecord();
+    const targetId = String(taskId || '').trim();
+    if (!targetId) return clone(user.history);
+
+    let changed = false;
+    for (const record of user.history || []) {
+      let recordChanged = false;
+      for (const item of record.items || []) {
+        if (!getTaskIdentityParts(item).includes(targetId)) continue;
+        Object.assign(item, clone(patch));
+        item.updatedAt = nowIso();
+        changed = true;
+        recordChanged = true;
+      }
+
+      if (recordChanged && Array.isArray(record.items) && record.items.length) {
+        const statuses = record.items.map(item => String(item.status || ''));
+        if (statuses.every(status => status === 'completed')) record.status = 'completed';
+        else if (statuses.some(status => status === 'failed' || status === 'warning' || status === 'stopped')) record.status = 'partial_failed';
+      }
+    }
+
+    if (changed) {
+      this.touchUser(user);
+      await this.persist();
+    }
     return clone(user.history);
   }
 

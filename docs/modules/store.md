@@ -25,6 +25,7 @@
 |------|------|
 | `getSettings()` / `updateSettings(patch)` | 设置读写（增量 merge） |
 | `getHistory()` / `appendHistory(record)` | 历史记录（最多 200 条） |
+| `updateHistoryTask(taskId, patch, userId)` | 按任务 ID/逻辑任务 ID回写历史任务状态，支持重新发布后的状态收敛 |
 | `getLoginState()` / `setLoginState(service, loggedIn)` | 平台登录状态 |
 | `setVoiceClone(result)` | 保存音色克隆结果 |
 | `appendPublishedRecords(records)` | 追加发布记录 |

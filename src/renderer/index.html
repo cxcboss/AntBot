@@ -81,6 +81,16 @@
 
         <!-- 主控页 -->
         <div class="feat-view active" id="view-main">
+          <div class="chat-toolbar" id="chat-toolbar">
+            <div class="chat-filter-tabs" role="tablist" aria-label="任务筛选">
+              <button type="button" class="chat-filter active" data-chat-filter="all">全部</button>
+              <button type="button" class="chat-filter" data-chat-filter="active">进行中</button>
+              <button type="button" class="chat-filter" data-chat-filter="attention">需处理</button>
+              <button type="button" class="chat-filter" data-chat-filter="completed">已完成</button>
+            </div>
+            <label class="chat-search"><span class="icon" data-icon="search"></span><input id="chat-search-input" type="search" placeholder="搜索标题、链接或错误" /></label>
+            <button type="button" class="chat-stop-all" id="chat-stop-all">停止全部</button>
+          </div>
           <div class="chat-area" id="chat-area">
             <div class="chat-scroll" id="chat-scroll"><div class="chat-stream" id="chat-stream"></div></div>
           </div>

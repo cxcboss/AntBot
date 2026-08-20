@@ -212,7 +212,7 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
       return { ok: true };
     } catch (e) {
       appLog('error', `预置音色下载失败: ${e.message}`);
-      return { ok: false, error: e.message };
+      return { ok: false, error: e.message, outputPath: e.outputPath || '', rawLine: e.rawLine || '' };
     } finally {
       await fs.unlink(zipPath).catch(() => {});
       await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
@@ -320,40 +320,17 @@ function registerIpcHandlers({ mainWindowRef, store, taskRunner, systemControl =
   ipcMain.handle('task:resume-one', async (_event, payload) => taskRunner.resumeTask(payload?.taskId, {}, payload?.task || null));
 
   ipcMain.handle('task:republish', async (_event, taskId) => {
+    const notifyHistory = async () => {
+      const win = mainWindowRef();
+      if (win && !win.isDestroyed()) win.webContents.send('history:changed', await store.getHistory());
+    };
     try {
-      const { publishVideo } = require('./services/publisher');
-      const settings = await store.getSettings();
-      const row = taskRunner.progressRows?.find(r => r.id === taskId);
-      const historyItem = (await store.getHistory())?.flatMap(h => h.items || []).find(i => i.id === taskId);
-      const persistedTasks = await taskRunner.loadPersistedTasks();
-      const persistedItem = persistedTasks.find(t => t.id === taskId);
-      const sourceItem = row || historyItem || persistedItem || {};
-      const processMode = sourceItem.processMode || sourceItem.taskSnapshot?.processMode || 'publish';
-      if (processMode !== 'publish') return { ok: false, error: '该任务无需重新发布' };
-      const outputPath = row?.outputPath || historyItem?.outputPath || persistedItem?.outputPath;
-      if (!outputPath) return { ok: false, error: '未找到视频文件路径' };
-
-      // 检查视频文件是否存在
-      let fileExists = false;
-      try { const stat = fsSync.statSync(outputPath); fileExists = stat.isFile() && stat.size > 0; } catch {}
-      if (!fileExists) {
-        return { ok: false, error: 'FILE_DELETED', outputPath, rawLine: row?.rawLine || historyItem?.rawLine || persistedItem?.rawLine || '' };
-      }
-
-      const publishEnabled = settings?.publish?.enabled !== false;
-      if (!publishEnabled) return { ok: false, error: '自动发布已关闭' };
-      taskRunner.setTaskState(taskId, { status: 'running', step: '发布', progress: 95, message: '重新发布中...' });
-      const snapshot = sourceItem.taskSnapshot || {};
-      const task = { ...snapshot, id: taskId, rawLine: row?.rawLine || historyItem?.rawLine || persistedItem?.rawLine || snapshot.rawLine || '', publishCopy: row?.publishCopy || historyItem?.publishCopy || persistedItem?.publishCopy || snapshot.publishCopy || '', publishTopics: row?.publishTopics || historyItem?.publishTopics || persistedItem?.publishTopics || snapshot.publishTopics || [], platforms: row?.platforms || historyItem?.platforms || persistedItem?.platforms || snapshot.platforms || [], campaignName: row?.campaignName || historyItem?.campaignName || persistedItem?.campaignName || snapshot.campaignName || '' };
-      const result = await publishVideo({ task, settings, outputPath, log: (msg) => appLog('info', `[republish] ${msg}`) });
-      const publishedPlatforms = result?.platforms || [];
-      const platformNames = publishedPlatforms.map(p => p === 'videoChannel' ? '视频号' : '抖音').join('、');
-      taskRunner.setTaskState(taskId, { status: 'completed', progress: 100, step: '完成', message: platformNames ? `已发布到 ${platformNames}` : '发布完成' });
-      await taskRunner.removePersistedTask(taskId);
-      return { ok: true };
+      const result = await taskRunner.republishTask(taskId);
+      await notifyHistory();
+      return result;
     } catch (e) {
-      taskRunner.setTaskState(taskId, { status: 'warning', step: '部分完成', message: `发布失败: ${e.message}` });
-      return { ok: false, error: e.message };
+      await notifyHistory().catch(() => {});
+      return { ok: false, error: e.message, outputPath: e.outputPath || '', rawLine: e.rawLine || '' };
     }
   });
 
