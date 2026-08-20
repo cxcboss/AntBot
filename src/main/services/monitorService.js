@@ -13,6 +13,7 @@ let _taskRunner = null;
 let _store = null;
 let _appLog = null;
 let _mainWindowRef = null;
+let _monitorBroadcast = null;
 let _checking = new Set();
 let _saveChain = Promise.resolve();
 let _readyPromise = Promise.resolve();
@@ -27,7 +28,24 @@ function normalizeCount(value) {
   return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 0;
 }
 
-function validateYoutubeUrl(value) {
+const SOURCE_TYPES = new Set(['youtube', 'tiktok']);
+const PROCESS_MODES = new Set(['download', 'edit', 'publish']);
+
+function inferSourceType(value) {
+  try {
+    const host = new URL(String(value || '')).hostname.toLowerCase();
+    if (host === 'tiktok.com' || host.endsWith('.tiktok.com')) return 'tiktok';
+  } catch {}
+  return 'youtube';
+}
+
+function normalizeProcessMode(value, isLegacy = false) {
+  const mode = String(value || '').trim().toLowerCase();
+  if (PROCESS_MODES.has(mode)) return mode;
+  return isLegacy ? 'publish' : 'download';
+}
+
+function validateSourceUrl(value, sourceType = inferSourceType(value)) {
   const sourceUrl = String(value || '').trim();
   if (!sourceUrl) throw new Error('请填写博主主页链接');
   let url;
@@ -36,11 +54,56 @@ function validateYoutubeUrl(value) {
   } catch {
     throw new Error('链接格式不正确');
   }
+  const type = SOURCE_TYPES.has(sourceType) ? sourceType : inferSourceType(sourceUrl);
   const host = url.hostname.toLowerCase();
-  if (!['http:', 'https:'].includes(url.protocol) || !(host === 'youtube.com' || host.endsWith('.youtube.com'))) {
+  if (!['http:', 'https:'].includes(url.protocol)) {
+    throw new Error('链接格式不正确');
+  }
+  const pathname = decodeURIComponent(url.pathname).replace(/\/+$/, '') || '/';
+  if (type === 'tiktok') {
+    if (!(host === 'tiktok.com' || host.endsWith('.tiktok.com')) || !/^\/@[^/]+$/.test(pathname)) {
+      throw new Error('请填写 TikTok 公开账号主页链接，例如 https://www.tiktok.com/@username');
+    }
+    return url.toString();
+  }
+  const youtubePath = /^\/(?:@[^/]+|channel\/[^/]+|c\/[^/]+|user\/[^/]+)(?:\/videos)?$/i;
+  if (!(host === 'youtube.com' || host.endsWith('.youtube.com')) || !youtubePath.test(pathname)) {
     throw new Error('请填写 YouTube 频道或用户主页链接');
   }
   return url.toString();
+}
+
+function sourceVideoKey(sourceType, videoId) {
+  const type = SOURCE_TYPES.has(sourceType) ? sourceType : 'youtube';
+  return `${type}:${String(videoId || '').trim()}`;
+}
+
+function normalizeSourceVideo(entry, sourceType) {
+  const type = SOURCE_TYPES.has(sourceType) ? sourceType : 'youtube';
+  const id = String(entry?.id || entry?.display_id || '').trim();
+  const rawUrl = String(entry?.webpage_url || entry?.webpageUrl || entry?.url || '').trim();
+  const fallbackUrl = type === 'tiktok'
+    ? `https://www.tiktok.com/video/${id}`
+    : `https://www.youtube.com/watch?v=${id}`;
+  const videoUrl = /^https?:\/\//i.test(rawUrl) ? rawUrl : fallbackUrl;
+  return {
+    id,
+    title: String(entry?.title || entry?.fulltitle || id),
+    url: videoUrl,
+    webpageUrl: videoUrl,
+    uploadDate: String(entry?.upload_date || entry?.uploadDate || ''),
+    timestamp: Number(entry?.timestamp || 0) || 0,
+    duration: Number(entry?.duration || 0) || 0,
+    sourceType: type,
+    key: sourceVideoKey(type, id),
+  };
+}
+
+function processStages(value) {
+  const mode = normalizeProcessMode(value, false);
+  if (mode === 'publish') return ['download', 'edit', 'publish'];
+  if (mode === 'edit') return ['download', 'edit'];
+  return ['download'];
 }
 
 function log(level, msg) {
@@ -48,18 +111,26 @@ function log(level, msg) {
   else console.log(`[monitor] ${msg}`);
 }
 
-function setContext({ taskRunner, store, appLog, mainWindowRef }) {
+function setContext({ taskRunner, store, appLog, mainWindowRef, monitorBroadcast = null }) {
   _taskRunner = taskRunner;
   _store = store;
   _appLog = appLog;
   _mainWindowRef = mainWindowRef;
+  _monitorBroadcast = typeof monitorBroadcast === 'function' ? monitorBroadcast : null;
 }
 
 function notifyMonitor(monitor, extra = {}) {
   try {
     const win = typeof _mainWindowRef === 'function' ? _mainWindowRef() : null;
-    if (!win || win.isDestroyed()) return;
-    win.webContents.send('monitor:updated', {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('monitor:updated', {
+        ...extra,
+        monitor: monitor ? { ...monitor } : null,
+      });
+    }
+  } catch {}
+  try {
+    if (_monitorBroadcast) _monitorBroadcast({
       ...extra,
       monitor: monitor ? { ...monitor } : null,
     });
@@ -101,12 +172,17 @@ async function saveMonitors() {
 function migrateMonitor(m) {
   m = m && typeof m === 'object' ? m : {};
   const now = new Date().toISOString();
+  const sourceUrl = String(m.sourceUrl || m.url || '');
+  const hasProcessMode = Object.prototype.hasOwnProperty.call(m, 'processMode');
+  const sourceType = SOURCE_TYPES.has(m.sourceType) ? m.sourceType : inferSourceType(sourceUrl);
   return {
     id: String(m.id || `mon-${Date.now()}-${Math.random().toString(36).slice(2,6)}`),
     enabled: m.enabled !== false,
-    name: String(m.name || m.sourceUrl || '未命名监控'),
-    sourceUrl: String(m.sourceUrl || m.url || ''),
-    platformHint: m.platformHint || 'youtube',
+    name: String(m.name || sourceUrl || '未命名监控'),
+    sourceType,
+    sourceUrl,
+    platformHint: m.platformHint || sourceType,
+    processMode: normalizeProcessMode(m.processMode, !hasProcessMode),
     checkIntervalMinutes: normalizeInterval(m.checkIntervalMinutes || m.intervalMinutes || DEFAULT_CHECK_INTERVAL),
     lastCheckAt: m.lastCheckAt || '',
     lastVideoId: m.lastVideoId || '',
@@ -151,9 +227,10 @@ async function addMonitor(data) {
   const m = migrateMonitor({
     id: `mon-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
     ...data,
+    processMode: data?.processMode || 'download',
     createdAt: new Date().toISOString(),
   });
-  m.sourceUrl = validateYoutubeUrl(m.sourceUrl);
+  m.sourceUrl = validateSourceUrl(m.sourceUrl, m.sourceType);
   _monitors.unshift(m);
   await saveMonitors();
   scheduleMonitor(m);
@@ -169,7 +246,7 @@ async function updateMonitor(id, patch = {}) {
   const safePatch = patch && typeof patch === 'object' ? patch : {};
   const cur = _monitors[idx];
   const next = migrateMonitor({ ...cur, ...safePatch, id: cur.id, overrides: { ...cur.overrides, ...(safePatch.overrides||{}) } });
-  next.sourceUrl = validateYoutubeUrl(next.sourceUrl);
+  next.sourceUrl = validateSourceUrl(next.sourceUrl, next.sourceType);
   // 保留 seenIds / stats / lastCheck
   if (!safePatch.seenIds) next.seenIds = cur.seenIds;
   if (!safePatch.stats) next.stats = cur.stats;
@@ -288,7 +365,7 @@ async function runYtDlp(args, timeoutMs = 40000) {
   });
 }
 
-async function fetchChannelVideos(sourceUrl, limit = 10) {
+async function fetchSourceVideos(sourceType, sourceUrl, limit = 10) {
   // 使用 --flat-playlist 快速列举，不下载
   const args = [
     '--flat-playlist',
@@ -299,9 +376,10 @@ async function fetchChannelVideos(sourceUrl, limit = 10) {
     '--no-check-certificates',
     sourceUrl,
   ];
-  // 尝试附加 cookies（YouTube 可能需要）
+  // 公开页面不强制登录；存在平台 cookies 时附加，兼容受限账号页面。
   try {
-    const cookiesPath = path.join(os.homedir(), 'AntBot', 'cookies', 'youtube.txt');
+    const cookieName = sourceType === 'tiktok' ? 'tiktok.txt' : 'youtube.txt';
+    const cookiesPath = path.join(os.homedir(), 'AntBot', 'cookies', cookieName);
     if (fsSync.existsSync(cookiesPath)) {
       args.push('--cookies', cookiesPath);
     }
@@ -310,15 +388,9 @@ async function fetchChannelVideos(sourceUrl, limit = 10) {
   let data;
   try { data = JSON.parse(stdout); } catch { throw new Error('解析频道数据失败'); }
   const entries = Array.isArray(data.entries) ? data.entries : (Array.isArray(data) ? data : []);
-  const videos = entries.filter(e => e && e.id).map(e => ({
-    id: String(e.id),
-    title: String(e.title || e.id),
-    url: String(e.url || e.webpage_url || `https://www.youtube.com/watch?v=${e.id}`),
-    webpageUrl: String(e.webpage_url || e.url || ''),
-    uploadDate: e.upload_date || '',
-    timestamp: e.timestamp || 0,
-    duration: e.duration || 0,
-  }));
+  const videos = entries
+    .filter(e => e && e.id)
+    .map(e => normalizeSourceVideo(e, sourceType));
   return videos;
 }
 
@@ -333,8 +405,8 @@ async function checkMonitor(monitorId) {
   if (!monitor.enabled) return { skipped: true, reason: '已禁用' };
   _checking.add(monitorId);
   try {
-    log('info', `检查监控: ${monitor.name} (${monitor.sourceUrl})`);
-    const videos = await fetchChannelVideos(monitor.sourceUrl, 10);
+    log('info', `检查监控: ${monitor.name} (${monitor.sourceType}) ${monitor.sourceUrl}`);
+    const videos = await fetchSourceVideos(monitor.sourceType, monitor.sourceUrl, 10);
     if (findMonitor(monitorId) !== monitor || !monitor.enabled) {
       return { skipped: true, reason: !monitor.enabled ? '已禁用' : '监控已删除' };
     }
@@ -349,12 +421,12 @@ async function checkMonitor(monitorId) {
     const seenSet = new Set(monitor.seenIds || []);
     const newVideos = [];
     for (const v of videos) {
-      if (!seenSet.has(v.id)) newVideos.push(v);
+      if (!seenSet.has(v.key) && !seenSet.has(v.id)) newVideos.push(v);
     }
     // 若是首次运行（seenIds 为空），仅记录不自动下载，避免历史视频批量下载
     const isFirstRun = !monitor.seenIds || monitor.seenIds.length === 0;
     if (isFirstRun) {
-      monitor.seenIds = videos.map(v => v.id).slice(0, 50);
+      monitor.seenIds = videos.map(v => v.key).slice(0, 50);
       monitor.lastCheckAt = new Date().toISOString();
       monitor.stats.totalFetched = videos.length;
       monitor.stats.lastError = '';
@@ -399,6 +471,8 @@ async function checkMonitor(monitorId) {
         _styleName: defaultStyle,
         _voiceId: overrides.voiceId || '',
         _voiceProfileName: overrides.voiceProfileName || '',
+        sourceType: v.sourceType,
+        processMode: monitor.processMode,
         _monitorId: monitor.id,
         _monitorName: monitor.name,
       });
@@ -420,7 +494,7 @@ async function checkMonitor(monitorId) {
     }
 
     // 入队成功后再记录 seenIds，入队失败时下次检查仍会重试，避免漏处理。
-    const newIds = newVideos.map(v => v.id);
+    const newIds = newVideos.map(v => v.key);
     monitor.seenIds = [...newIds, ...monitor.seenIds].slice(0, 100);
     monitor.lastCheckAt = new Date().toISOString();
     monitor.stats.totalFetched += newVideos.length;
@@ -459,6 +533,13 @@ function dispose() {
 }
 
 module.exports = {
+  inferSourceType,
+  normalizeProcessMode,
+  validateSourceUrl,
+  sourceVideoKey,
+  normalizeSourceVideo,
+  processStages,
+  migrateMonitor,
   setContext,
   waitForReady,
   loadMonitors,
