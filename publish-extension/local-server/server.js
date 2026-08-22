@@ -74,6 +74,7 @@ function normalizeRequestedPath(rawPath) {
 // ── 搬运蚁 / 浏览器插件桥接接口 ──
 app.get('/api/bridge/status', (req, res) => {
   const snapshot = bridgeQueue.snapshot();
+  const lastPoll = bridgeQueue.getExtensionLastPollAt();
   res.json({
     ok: true,
     name: '搬运蚁发布助手',
@@ -81,6 +82,7 @@ app.get('/api/bridge/status', (req, res) => {
     port: PORT,
     status: snapshot.pending.length ? 'busy' : 'ready',
     extensionConnected: bridgeQueue.isExtensionConnected(),
+    extensionLastPollAt: lastPoll ? new Date(lastPoll).toISOString() : null,
     queued: snapshot.queued.length,
     pending: snapshot.pending.length,
     lastCommand: snapshot.history[0] || null,

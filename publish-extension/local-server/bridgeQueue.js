@@ -32,7 +32,10 @@ function createBridgeQueue({ maxHistory = 100, maxEvents = 200 } = {}) {
   };
 
   const markExtensionPoll = () => { lastExtensionPoll = Date.now(); };
-  const isExtensionConnected = () => lastExtensionPoll > 0 && (Date.now() - lastExtensionPoll) < 10000;
+  // 30s 容忍窗口（此前 10s）：MV3 Service Worker 回收重启、Windows 休眠恢复、
+  // 杀毒扫描等场景下轮询会出现 >10s 空档，窗口过小会导致 App 端频繁误判"插件断连"
+  const isExtensionConnected = () => lastExtensionPoll > 0 && (Date.now() - lastExtensionPoll) < 30000;
+  const getExtensionLastPollAt = () => lastExtensionPoll;
 
   const enqueue = (input) => {
     const command = normalizeCommand(input);
@@ -108,7 +111,7 @@ function createBridgeQueue({ maxHistory = 100, maxEvents = 200 } = {}) {
     events: events.map(item => ({ ...item }))
   });
 
-  return { enqueue, claim, resolve, cancel, get, updateState, addEvent, snapshot, markExtensionPoll, isExtensionConnected };
+  return { enqueue, claim, resolve, cancel, get, updateState, addEvent, snapshot, markExtensionPoll, isExtensionConnected, getExtensionLastPollAt };
 }
 
 module.exports = { createBridgeQueue, TERMINAL_STATUSES };

@@ -71,17 +71,20 @@ function probePort(port, timeoutMs = 1200) {
 
 async function findActiveBridgeBaseUrl(timeoutMs = 1200) {
   const stored = readStoredPort();
+  // 存储端口优先单独探测（命中即免全量扫描）
+  if (stored) {
+    const storedResult = await probePort(stored, timeoutMs);
+    if (storedResult.ok) return `http://127.0.0.1:${stored}`;
+  }
+  // 其余端口并行探测（此前串行最坏 13s+，Windows 防火墙/代理拦截时恢复极慢）
   const ports = [];
-  if (stored) ports.push(stored);
   for (let i = 0; i < PORT_RANGE; i++) {
     const p = DEFAULT_PORT + i;
-    if (!ports.includes(p)) ports.push(p);
+    if (p !== stored) ports.push(p);
   }
-  for (const port of ports) {
-    const result = await probePort(port, timeoutMs);
-    if (result.ok) return `http://127.0.0.1:${port}`;
-  }
-  return null;
+  const results = await Promise.all(ports.map((port) => probePort(port, timeoutMs)));
+  const hit = results.find((r) => r.ok);
+  return hit ? `http://127.0.0.1:${hit.port}` : null;
 }
 
 async function resolveBridgeBaseUrl(preferredBaseUrl) {

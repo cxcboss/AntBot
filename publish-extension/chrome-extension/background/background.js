@@ -19,33 +19,62 @@ const BRIDGE_PORTS = [18321,18322,18323,18324,18325,18326,18327,18328,18329,1833
 let cachedBridgeBaseUrl = 'http://127.0.0.1:18321';
 let cachedBridgeAt = 0;
 let bridgePollTimer = null;
+let pollConsecutiveFailures = 0; // 连续失败计数：驱动轮询退避，避免代理/防火墙环境雪崩
 // 登录检测状态缓存，避免轮询时重复创建 tab
 let loginCheckTabs = { douyin: null, weixin: null };
 let bridgeBusy = false;
 let bridgeBusyTimer = null;
 let debuggerTargets = new Map();
 
-async function resolveBridgeBaseUrl(force = false) {
-  if (!force && cachedBridgeBaseUrl && Date.now() - cachedBridgeAt < 5000) return cachedBridgeBaseUrl;
-  for (const port of BRIDGE_PORTS) {
-    for (const host of ['127.0.0.1', 'localhost']) {
-      try {
-        const controller = new AbortController();
-        const t = setTimeout(() => controller.abort(), 900);
-        const r = await fetch(`http://${host}:${port}/api/bridge/status`, { signal: controller.signal });
-        clearTimeout(t);
-        if (r.ok) {
-          const j = await r.json().catch(() => ({}));
-          if (j && j.ok) {
-            cachedBridgeBaseUrl = `http://${host}:${port}`;
-            cachedBridgeAt = Date.now();
-            return cachedBridgeBaseUrl;
-          }
-        }
-      } catch {}
-    }
+async function probeBridgeBase(base, timeoutMs = 600) {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const r = await fetch(`${base}/api/bridge/status`, { signal: controller.signal });
+    if (!r.ok) return null;
+    const j = await r.json().catch(() => ({}));
+    return j && j.ok ? base : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(t);
   }
-  return cachedBridgeBaseUrl;
+}
+
+// 并行探测所有候选地址，返回最先存活的（比逐个串行快一个数量级，
+// Windows 系统代理/防火墙拦截回环请求时不再出现 10-20 秒的串行超时）
+async function discoverBridgeBase(timeoutMs = 600) {
+  let storedBase = '';
+  try {
+    const d = await chrome.storage.local.get('bridgeBaseUrl');
+    storedBase = String(d?.bridgeBaseUrl || '');
+  } catch {}
+  const candidates = [...new Set([
+    storedBase,
+    ...BRIDGE_PORTS.map(p => `http://127.0.0.1:${p}`),
+    ...BRIDGE_PORTS.map(p => `http://localhost:${p}`),
+  ])].filter(Boolean);
+  const results = await Promise.all(candidates.map(b => probeBridgeBase(b, timeoutMs)));
+  const found = results.find(Boolean) || '';
+  if (found && found !== storedBase) {
+    // 记忆本次可用地址，Service Worker 被回收重启后优先直连，免全量扫描
+    chrome.storage.local.set({ bridgeBaseUrl: found }).catch(() => {});
+  }
+  return found;
+}
+
+async function resolveBridgeBaseUrl(force = false) {
+  // 成功结果缓存 30s（此前仅 5s，MV3 SW 频繁重启时反复全量扫描）
+  if (!force && cachedBridgeAt && Date.now() - cachedBridgeAt < 30000) return cachedBridgeBaseUrl;
+  const found = await discoverBridgeBase(600);
+  if (found) {
+    cachedBridgeBaseUrl = found;
+    cachedBridgeAt = Date.now();
+    pollConsecutiveFailures = 0;
+  } else {
+    cachedBridgeAt = 0;
+  }
+  return found || cachedBridgeBaseUrl;
 }
 
 async function bridgeRequest(path, options = {}) {
@@ -345,6 +374,7 @@ async function pollBridgeCommands() {
   bridgeBusyTimer = setTimeout(() => { bridgeBusy = false; }, 10000);
   try {
     const response = await bridgeRequest('/api/bridge/commands/next');
+    pollConsecutiveFailures = 0;
     if (response?.command) {
       const command = response.command;
       await bridgeEvent(command.id, { type: 'progress', status: 'running', step: `执行 ${command.action}` });
@@ -358,6 +388,7 @@ async function pollBridgeCommands() {
       }
     }
   } catch (e) {
+    pollConsecutiveFailures += 1;
     // 仅在非超时情况下静默，超时需要打日志便于排查
     if (e && !/桥接请求超时/.test(e.message)) {
       // The desktop app may not have started its bridge server yet.
@@ -398,8 +429,21 @@ async function executeBrowserCommand(action, payload) {
 
 function startBridgePolling() {
   if (bridgePollTimer) return;
-  bridgePollTimer = setInterval(() => { pollBridgeCommands().catch(() => {}); }, 800);
-  pollBridgeCommands().catch(() => {});
+  scheduleBridgePoll(0);
+}
+
+// 自适应轮询：服务正常时 800ms 快轮询；连续失败指数退避（1s→2s→4s→8s 封顶），
+// 服务未启动/被代理拦截时不再每 800ms 空转一次全端口扫描
+function scheduleBridgePoll(delayMs) {
+  if (bridgePollTimer) clearTimeout(bridgePollTimer);
+  bridgePollTimer = setTimeout(async () => {
+    bridgePollTimer = null;
+    await pollBridgeCommands().catch(() => {});
+    const backoff = pollConsecutiveFailures === 0
+      ? 800
+      : Math.min(8000, 1000 * Math.pow(2, Math.min(pollConsecutiveFailures - 1, 3)));
+    scheduleBridgePoll(backoff);
+  }, delayMs);
 }
 
 // ════════════════════════════════════════════
@@ -440,19 +484,22 @@ async function startOffscreenKeepAlive() {
 }
 
 // 2. Alarms 兜底：万一 Worker 还是被杀了，1 分钟内恢复轮询
+// 注意：onAlarm 监听器必须在顶层同步注册——MV3 规定异步注册的监听器
+// 收不到唤醒事件（SW 被回收后由 alarm 唤醒时会错过，导致断连后恢复慢）
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === 'bridge-poll') {
+    // 如果轮询已停止，重启
+    if (!bridgePollTimer) {
+      console.log('[BG] Alarm: restarting bridge polling');
+      startBridgePolling();
+    }
+    // 强制刷新端口缓存后重试
+    resolveBridgeBaseUrl(true).then(() => pollBridgeCommands().catch(() => {}));
+  }
+});
+
 function startAlarmFallback() {
   chrome.alarms.create('bridge-poll', { periodInMinutes: 1 });
-  chrome.alarms.onAlarm.addListener((alarm) => {
-    if (alarm.name === 'bridge-poll') {
-      // 如果轮询已停止，重启
-      if (!bridgePollTimer) {
-        console.log('[BG] Alarm: restarting bridge polling');
-        startBridgePolling();
-      }
-      // 强制刷新端口缓存后重试
-      resolveBridgeBaseUrl(true).then(() => pollBridgeCommands().catch(() => {}));
-    }
-  });
 }
 
 // ========== 跳过管理 ==========

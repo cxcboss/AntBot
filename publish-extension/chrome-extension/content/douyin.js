@@ -1,19 +1,27 @@
 const BRIDGE_PORTS = [18321,18322,18323,18324,18325,18326,18327,18328,18329,18330,18331];
 let cachedBridgeBase = null;
 let cachedBridgeAt = 0;
+function probeBridgeBase(base, timeoutMs = 600) {
+  const c = new AbortController(); const t = setTimeout(() => c.abort(), timeoutMs);
+  return fetch(`${base}/api/bridge/status`, { signal: c.signal })
+    .then(r => r.ok ? r.json().catch(() => ({})) : {})
+    .then(j => (j && j.ok) ? base : null)
+    .catch(() => null)
+    .finally(() => clearTimeout(t));
+}
+// 并行探测全部候选地址：代理/防火墙拦截回环时不再串行超时 10-20 秒
 async function resolveBridgeBase() {
-  if (cachedBridgeBase && Date.now() - cachedBridgeAt < 5000) return cachedBridgeBase;
-  for (const port of BRIDGE_PORTS) {
-    for (const host of ['127.0.0.1','localhost']) {
-      try {
-        const c = new AbortController(); const t=setTimeout(()=>c.abort(), 700);
-        const r = await fetch(`http://${host}:${port}/api/bridge/status`, { signal: c.signal });
-        clearTimeout(t);
-        if (r.ok) { const j=await r.json().catch(()=>({})); if (j && j.ok) { cachedBridgeBase=`http://${host}:${port}`; cachedBridgeAt=Date.now(); return cachedBridgeBase; } }
-      } catch {}
-    }
+  if (cachedBridgeBase && Date.now() - cachedBridgeAt < 30000) return cachedBridgeBase;
+  let storedBase = '';
+  try { storedBase = String((await chrome.storage.local.get('bridgeBaseUrl'))?.bridgeBaseUrl || ''); } catch {}
+  const candidates = [...new Set([storedBase, ...BRIDGE_PORTS.map(p => `http://127.0.0.1:${p}`)])].filter(Boolean);
+  const results = await Promise.all(candidates.map(b => probeBridgeBase(b, 600)));
+  const found = results.find(Boolean) || '';
+  if (found) {
+    cachedBridgeBase = found;
+    cachedBridgeAt = Date.now();
   }
-  return cachedBridgeBase || 'http://127.0.0.1:18321';
+  return found || cachedBridgeBase || 'http://127.0.0.1:18321';
 }
 async function getLocalServerBase() { return resolveBridgeBase(); }
 /**
