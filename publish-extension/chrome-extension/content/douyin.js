@@ -43,11 +43,16 @@ class DouyinPublisher {
   }
 
   init() {
+    this.clickedPublish = false; // 已点击发布按钮：此后拒绝中止，防止重复发布
     // ★ storage 变化监听 — 最可靠的中止信号通道
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area === 'local' && changes['_vpe_abort'] && changes['_vpe_abort'].newValue) {
-        this.aborted = true;
-        console.log('[抖音发布助手] storage 中止信号');
+        if (this.clickedPublish) {
+          console.log('[抖音发布助手] 已点击发布，忽略中止信号');
+        } else {
+          this.aborted = true;
+          console.log('[抖音发布助手] storage 中止信号');
+        }
       }
     });
 
@@ -58,7 +63,9 @@ class DouyinPublisher {
          // 同步缓存 baseUrl
          if (message.bridgeBaseUrl) { cachedBridgeBase = message.bridgeBaseUrl; cachedBridgeAt = Date.now(); }
          this.aborted = false;
+         this.clickedPublish = false;
          this.startAbortCheck();
+         const videoNameCache = message.videos[0]?.name;
          this.publishSingleVideo(message.videos[0], message.settings, message.videoPath, message.videoIndex, message.totalVideos)
           .then(() => {
             this.stopAbortCheck();
@@ -71,18 +78,25 @@ class DouyinPublisher {
             if (this.aborted) return;
             console.error('[抖音发布助手] 发布失败:', error);
             this.notifyProgress('发布失败: ' + error.message, message.videoIndex + 1, message.totalVideos, 'error');
-            sendResponse({ success: false, error: error.message });
+            // 明确失败 → 立即上报，background 按阶段决定重试或记录
+            this.reportPublishDone(message.videoIndex, videoNameCache, { status: 'failed', error: error.message });
+            sendResponse({ success: false, error: error.message, clicked: this.clickedPublish });
           });
         return true;
       }
       if (message.action === 'ping') {
-        sendResponse({ ready: true, elementCount: document.querySelectorAll('*').length });
+        sendResponse({ ready: true, elementCount: document.querySelectorAll('*').length, clicked: this.clickedPublish });
         return true;
       }
       if (message.action === 'abortPublish') {
-        this.aborted = true;
-        console.log('[抖音发布助手] 消息中止信号');
-        sendResponse({ aborted: true });
+        if (this.clickedPublish) {
+          console.log('[抖音发布助手] 已点击发布，拒绝中止');
+          sendResponse({ aborted: false, clicked: true });
+        } else {
+          this.aborted = true;
+          console.log('[抖音发布助手] 消息中止信号');
+          sendResponse({ aborted: true });
+        }
         return true;
       }
       if (message.action === 'loginCheck') {
@@ -111,12 +125,14 @@ class DouyinPublisher {
 
   async checkLoginState() {
     await new Promise(r => setTimeout(r, 1500));
+    // 仅用 URL 判断 + 可见二维码兜底；不做全 DOM class 模糊匹配，
+    // 避免页面预渲染的隐藏登录组件导致已登录被误判为未登录。
     const url = window.location.href;
     if (/login|passport|signin/i.test(url)) {
       return { loggedIn: false, qrDataUrl: this.captureQrCode() };
     }
-    const hasLoginForm = document.querySelector('[class*="login"], [class*="qrcode"], [class*="scan-login"]');
-    if (hasLoginForm) {
+    const qrImg = document.querySelector('img[src*="qrcode"], img[src*="QR"], img[class*="qr"], img[class*="QR"]');
+    if (qrImg && this.isElementVisible(qrImg)) {
       return { loggedIn: false, qrDataUrl: this.captureQrCode() };
     }
     return { loggedIn: true };
@@ -151,6 +167,7 @@ class DouyinPublisher {
 
     // 步骤1: 等待页面加载
     this.notifyProgress('等待页面加载...', idx, totalVideos);
+    this.reportStage('loading', videoIndex);
     await this.waitForPageReady();
     if (this.aborted) return;
     await this.delay(1500);
@@ -169,6 +186,8 @@ class DouyinPublisher {
     if (!file) throw new Error('无法获取视频文件');
     if (this.aborted) return;
     step(`视频大小: ${(file.size / 1024 / 1024).toFixed(1)}MB`);
+    // 上报上传阶段 + 视频大小（background 按大小自适应延长上传超时）
+    this.reportStage('uploading', videoIndex, file.size);
 
     // DataTransfer API 注入文件到 input[type="file]（React 不拦截 file input）
     const dataTransfer = new DataTransfer();
@@ -213,6 +232,7 @@ class DouyinPublisher {
     if (this.aborted) return;
 
     // 步骤6: 填写描述
+    this.reportStage('filling', videoIndex);
     const requestedDescription = String(settings.publishCopy || '').trim();
     const fallbackDescription = String(video.name || '').replace(/\.[^.]+$/, '');
     if (requestedDescription || (settings.autoGenerate && aiContent.description) || fallbackDescription) {
@@ -247,14 +267,25 @@ class DouyinPublisher {
     const publishResult = await this.clickPublish();
     if (!publishResult) step('发布按钮点击失败');
 
-    // 步骤9: 通知 background 保存发布记录
-    await this.delay(3000);
-    chrome.runtime.sendMessage({
-      action: 'douyinPublishDone',
-      videoName: video.name,
-      videoPath: videoPath,
+    // 已点击发布（无论按钮是否找到，进入安全边界）：background 不再自动重试，防止重复发布
+    this.clickedPublish = true;
+    this.reportStage('clicked', videoIndex);
+
+    // 步骤8.5: 验证发布结果（轮询检测成功/失败信号，最多 60 秒）
+    this.notifyProgress('验证发布结果...', idx, totalVideos);
+    this.reportStage('verifying', videoIndex);
+    const verifyResult = await this.verifyPublishResult();
+    step(`发布验证: ${verifyResult.success ? '成功' : '失败/未知'} ${verifyResult.error || ''}`);
+
+    // 步骤9: 通知 background 保存发布记录（三态：success / failed / unknown）
+    await this.delay(1000);
+    const status = verifyResult.success ? 'success' : (verifyResult.unknown ? 'unknown' : 'failed');
+    this.reportPublishDone(videoIndex, video.name, {
+      status,
+      error: verifyResult.error || '',
+      videoPath,
       scheduled: settings.scheduledPublish || false
-    }).catch(() => {});
+    });
   }
 
   async waitForPageReady() {
@@ -471,6 +502,62 @@ class DouyinPublisher {
     publishButtons.sort((a, b) => a.priority - b.priority);
     if (publishButtons.length > 0) { publishButtons[0].btn.click(); return true; }
     return false;
+  }
+
+  /**
+   * 验证发布结果，避免假成功/假失败
+   * 明确失败信号（错误提示）→ 失败；页面跳转/成功提示 → 成功；
+   * 超时未确定 → 返回 unknown（已点击发布，可能已发出，禁止重试）
+   */
+  async verifyPublishResult(timeoutMs = 60000) {
+    const start = Date.now();
+    const successTexts = ['发布成功', '已发布', '已设置定时发布', '已预约发布', '定时发布已设置', '提交成功', '作品发布成功'];
+    const failTexts = ['发布失败', '发布异常', '上传失败', '发表失败', '发布不成功', '请重新提交'];
+    while (Date.now() - start < timeoutMs) {
+      if (this.aborted) return { success: false, error: '已中止' };
+      const toasts = document.querySelectorAll('[class*="toast"], [class*="message"], [class*="dialog"], [class*="modal"], [class*="notice"], [role="alert"]');
+      for (const el of toasts) {
+        if (!this.isElementVisible(el)) continue;
+        const t = (el.textContent || '').trim();
+        if (!t || t.length > 300) continue;
+        if (failTexts.some(f => t.includes(f))) {
+          return { success: false, error: `页面提示: ${t.substring(0, 100)}` };
+        }
+        if (successTexts.some(s => t.includes(s))) {
+          return { success: true, error: '' };
+        }
+      }
+      // 页面跳转（离开发布页）= 发布成功
+      if (!window.location.href.includes('/publish')) {
+        return { success: true, error: '' };
+      }
+      await this.delay(2000);
+    }
+    return { success: false, error: '60秒内未检测到发布结果信号', unknown: true };
+  }
+
+  // 阶段上报：background 据此重置超时定时器 / 上传阶段自适应加时 / clicked 进入安全区
+  reportStage(stage, videoIndex, videoSize) {
+    try {
+      chrome.runtime.sendMessage({ action: 'publishStage', stage, videoIndex, videoSize }).catch(() => {});
+    } catch (_) {}
+  }
+
+  // 完成上报：status = success | failed | unknown
+  // clicked 标志：是否已点击发布（true 时 background 禁止自动重试，防止重复发布）
+  reportPublishDone(videoIndex, videoName, extra = {}) {
+    try {
+      chrome.runtime.sendMessage({
+        action: 'douyinPublishDone',
+        videoName,
+        videoIndex,
+        videoPath: extra.videoPath || '',
+        scheduled: extra.scheduled || false,
+        status: extra.status || 'success',
+        error: extra.error || '',
+        clicked: this.clickedPublish
+      }).catch(() => {});
+    } catch (_) {}
   }
 
   // ===== 进度通知 =====

@@ -5,12 +5,16 @@ let publishState = {
   publishRecords: [], retryCounts: {}, timeoutTimer: null, nextVideoTimer: null,
   totalVideos: 0,
   bridgeCommandId: null,
+  // 阶段机：内容脚本上报流程阶段，超时重试按阶段分流
+  stage: 'idle', clickedPublish: false, verifyWaited: false,
 };
 
 let _doneLock = false;
 let _finishCalled = false;
 const SKIP_KEY = '_vpe_skip_names';
 const ABORT_KEY = '_vpe_abort';
+// 点击发布之后的阶段（安全区）：绝不自动重试，防止重复发布
+const STAGE_CLICKED_OR_AFTER = ['clicked', 'verifying', 'done', 'failed'];
 const BRIDGE_PORTS = [18321,18322,18323,18324,18325,18326,18327,18328,18329,18330,18331];
 let cachedBridgeBaseUrl = 'http://127.0.0.1:18321';
 let cachedBridgeAt = 0;
@@ -584,12 +588,66 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         .then(r => sendResponse(r)).catch(e => sendResponse({ success: false, error: e.message }));
       return true;
     case 'douyinPublishDone':
-      handleDouyinPublishDone(message).catch(() => {});
+      handlePublishCompleted(message).catch(() => {});
       sendResponse({ success: true });
       break;
+    case 'publishStage':
+      handleStageUpdate(message);
+      sendResponse({ success: true });
+      break;
+    // 内容脚本运行期进度：转发到桥接事件，喂饱 App 端活动超时检测（防 90s 无事件误杀）
+    case 'progressUpdate':
+    case 'publishProgress': {
+      if (publishState.isPublishing && publishState.bridgeCommandId &&
+          message.status !== 'done' && message.detail !== 'done' && message.step !== 'done') {
+        bridgeEvent(publishState.bridgeCommandId, {
+          type: 'progress',
+          step: message.step || message.status || '',
+          detail: message.detail || '',
+          current: message.current,
+          total: message.total,
+        }).catch(() => {});
+      }
+      sendResponse({ ok: true });
+      break;
+    }
   }
   return true;
 });
+
+// ========== 阶段机（内容脚本上报 → 超时定时器按阶段分流） ==========
+
+async function handleStageUpdate(message) {
+  if (!publishState.isPublishing) return;
+  if (message.videoIndex !== undefined && message.videoIndex !== publishState.currentIndex) return;
+  const stage = message.stage;
+  if (!stage) return;
+  publishState.stage = stage;
+  console.log('[BG] 阶段:', stage, '视频', publishState.currentIndex);
+
+  // 阶段即心跳：转发桥接事件，防止 App 端"无事件超时"误杀正常流程
+  if (publishState.bridgeCommandId) {
+    bridgeEvent(publishState.bridgeCommandId, { type: 'progress', step: stage, detail: '', current: publishState.currentIndex + 1, total: publishState.totalVideos }).catch(() => {});
+  }
+
+  if (stage === 'uploading' && message.videoSize) {
+    // 上传阶段超时按视频大小自适应：每 10MB 额外 5s，上限 30 分钟
+    const extra = Math.min(Math.ceil(message.videoSize / (10 * 1024 * 1024)) * 5000, 30 * 60 * 1000);
+    startPublishTimeout(getTimeoutMs() + extra);
+    return;
+  }
+
+  if (stage === 'clicked') {
+    // 已点击发布按钮：进入安全区。绝不自动重试，转为验证等待兜底
+    publishState.clickedPublish = true;
+    publishState.verifyWaited = false;
+    startPublishTimeout();
+    return;
+  }
+
+  // 其他阶段：流程存活，重置超时定时器
+  if (stage !== 'done' && stage !== 'failed') startPublishTimeout();
+}
 
 // ========== 发布控制 ==========
 
@@ -607,6 +665,9 @@ function stopPublishCompletely() {
   }
   publishState.debuggerAttached = false;
   publishState.commandSent = false;
+  publishState.stage = 'idle';
+  publishState.clickedPublish = false;
+  publishState.verifyWaited = false;
   clearSkipNames();
   clearAbortFlag();
 }
@@ -624,6 +685,7 @@ async function handleStartPublishFlow(message) {
     retryCounts: {}, timeoutTimer: null, nextVideoTimer: null,
     bridgeCommandId: message.bridgeCommandId || null,
     totalVideos: message.videos.length,
+    stage: 'idle', clickedPublish: false, verifyWaited: false,
   };
   _doneLock = false;
   _finishCalled = false;
@@ -656,6 +718,9 @@ async function publishNextVideo() {
 
   _doneLock = false;
   publishState.publishStartTime = Date.now();
+  publishState.stage = 'idle';
+  publishState.clickedPublish = false;
+  publishState.verifyWaited = false;
   await clearAbortFlag();
   const video = publishState.videos[publishState.currentIndex];
   // 每视频独立参数（发布页按视频×平台设置）；无则用全局 settings
@@ -693,66 +758,122 @@ async function publishNextVideo() {
 
 function getTimeoutMs() { return (parseInt(publishState.currentSettings?.timeoutSeconds || publishState.settings?.timeoutSeconds) || 120) * 1000; }
 
-function startPublishTimeout() {
+function startPublishTimeout(overrideMs) {
   clearPublishTimeout();
-  if (!(publishState.currentSettings?.autoRetry ?? publishState.settings.autoRetry)) return;
-  const timeoutMs = getTimeoutMs();
-  console.log(`[BG] 启动超时定时器: ${timeoutMs}ms (${publishState.settings.timeoutSeconds}s), autoRetry=${publishState.settings.autoRetry}`);
+  const timeoutMs = overrideMs || getTimeoutMs();
+  console.log(`[BG] 启动超时定时器: ${timeoutMs}ms (stage=${publishState.stage})`);
   const currentIdx = publishState.currentIndex;
   publishState.timeoutTimer = setTimeout(async () => {
     if (!publishState.isPublishing || !publishState.targetTabId) return;
     if (publishState.currentIndex !== currentIdx) return; // 已切换到下一个视频，忽略
-
-    // ★ 立即锁定，防止 done 处理器并发执行导致重复发布
-    if (_doneLock) return;
-    _doneLock = true;
-
-    const idx = publishState.currentIndex;
-    const retries = publishState.retryCounts[idx] || 0;
-    const max = publishState.currentSettings?.maxRetries || publishState.settings.maxRetries || 1;
-    const cmdSent = publishState.commandSent;
-
-    console.log(`[BG] 超时触发 (retries=${retries}, max=${max}, commandSent=${cmdSent})`);
-
-    // 立即中止内容脚本 + 设置 storage 标志
-    const tabId = publishState.targetTabId;
-    try { await chrome.tabs.sendMessage(tabId, { action: 'abortPublish' }); } catch (_) {}
-    await setAbortFlag();
-
-    // 等待一小段时间让内容脚本处理 abort
-    await sleep(300);
-
-    // 关闭标签页并清理
-    if (tabId) { try { await chrome.tabs.remove(tabId); } catch (_) {} }
-    detachDebugger(tabId);
-    publishState.targetTabId = null;
-    publishState.debuggerAttached = false;
-    publishState.commandSent = false;
-
-    if (retries < max) {
-      publishState.retryCounts[idx] = retries + 1;
-      sendProgress(`超时重试 (${retries + 1}/${max})`, 'publishing', idx, publishState.videos.length);
-      await sleep(1000);
-      _doneLock = false;
-      if (publishState.isPublishing) await publishNextVideo();
-    } else {
-      sendProgress(`重试${max}次仍超时，跳过`, 'error', idx, publishState.videos.length);
-      // 记录失败
-      const failedVideo = publishState.videos[idx];
-      if (failedVideo) {
-        publishState.publishRecords.push({
-          videoName: failedVideo.name, videoPath: publishState.videoPath || '',
-          platform: publishState.platform, publishTime: new Date().toISOString(),
-          status: 'failed', error: `超时重试${max}次后失败`,
-          scheduled: false, scheduledTime: null
-        });
-      }
-      publishState.currentIndex++;
-      await sleep(2000);
-      _doneLock = false;
-      if (publishState.isPublishing) await publishNextVideo();
-    }
+    await handlePublishTimeout();
   }, timeoutMs);
+}
+
+async function handlePublishTimeout() {
+  if (!publishState.isPublishing || !publishState.targetTabId) return;
+
+  // ★ 立即锁定，防止 done 处理器并发执行导致重复发布
+  if (_doneLock) return;
+  _doneLock = true;
+
+  const idx = publishState.currentIndex;
+  const retries = publishState.retryCounts[idx] || 0;
+  const max = publishState.currentSettings?.maxRetries || publishState.settings.maxRetries || 1;
+  const stage = publishState.stage;
+  const autoRetry = publishState.currentSettings?.autoRetry ?? publishState.settings.autoRetry;
+
+  // ── 分支 A：已点击发布（clicked/verifying）→ 绝不自动重试，延长验证等待一次 ──
+  if (STAGE_CLICKED_OR_AFTER.includes(stage) || publishState.clickedPublish) {
+    if (!publishState.verifyWaited) {
+      publishState.verifyWaited = true;
+      _doneLock = false;
+      console.log('[BG] 已点击发布，延长验证等待（不重试，防止重复发布）');
+      sendProgress('等待发布确认（视频可能已提交）...', 'publishing', idx, publishState.videos.length);
+      startPublishTimeout();
+      return;
+    }
+    // 验证等待已延长一次仍无结果 → 记录"结果未知"，继续下一个视频
+    console.log('[BG] 发布结果未知（已点击发布但未检测到结果）');
+    const unknownVideo = publishState.videos[idx];
+    if (unknownVideo) {
+      publishState.publishRecords.push({
+        videoName: unknownVideo.name, videoPath: publishState.videoPath || '',
+        platform: publishState.platform, publishTime: new Date().toISOString(),
+        status: 'unknown', error: '已点击发布但未检测到发布结果，请人工确认',
+        scheduled: false, scheduledTime: null
+      });
+    }
+    publishState.currentIndex++;
+    publishState.stage = 'idle';
+    publishState.clickedPublish = false;
+    publishState.verifyWaited = false;
+    await sleep(2000);
+    _doneLock = false;
+    if (publishState.isPublishing) await publishNextVideo();
+    return;
+  }
+
+  // ── 分支 B：安全阶段（idle/loading/uploading/filling）→ 竞态确认 → abort → 重试 ──
+  console.log(`[BG] 阶段停滞超时 (stage=${stage}, retries=${retries}, max=${max}, commandSent=${publishState.commandSent})`);
+
+  // ★ 竞态防护：abort 前 ping 内容脚本，确认它还没点击发布
+  // （clicked 阶段消息可能尚在途中，此时 abort 会导致重复发布）
+  const tabId = publishState.targetTabId;
+  try {
+    const r = await chrome.tabs.sendMessage(tabId, { action: 'ping' });
+    if (r?.clicked) {
+      console.log('[BG] 内容脚本已点击发布（消息竞态），放弃 abort，转入验证等待');
+      publishState.stage = 'clicked';
+      publishState.clickedPublish = true;
+      _doneLock = false;
+      startPublishTimeout();
+      return;
+    }
+  } catch (_) {}
+
+  // 立即中止内容脚本 + 设置 storage 标志
+  try { await chrome.tabs.sendMessage(tabId, { action: 'abortPublish' }); } catch (_) {}
+  await setAbortFlag();
+
+  // 等待一小段时间让内容脚本处理 abort
+  await sleep(300);
+
+  // 关闭标签页并清理
+  if (tabId) { try { await chrome.tabs.remove(tabId); } catch (_) {} }
+  detachDebugger(tabId);
+  // 确认标签页真正关闭，防止残留内容脚本继续执行旧流程
+  for (let i = 0; i < 10; i++) {
+    try { await chrome.tabs.get(tabId); break; } catch (_) { break; }
+  }
+  publishState.targetTabId = null;
+  publishState.debuggerAttached = false;
+  publishState.commandSent = false;
+  publishState.stage = 'idle';
+
+  if (autoRetry && retries < max) {
+    publishState.retryCounts[idx] = retries + 1;
+    sendProgress(`超时重试 (${retries + 1}/${max})`, 'publishing', idx, publishState.videos.length);
+    await sleep(1000);
+    _doneLock = false;
+    if (publishState.isPublishing) await publishNextVideo();
+  } else {
+    sendProgress(`重试${max}次仍超时，跳过`, 'error', idx, publishState.videos.length);
+    // 记录失败
+    const failedVideo = publishState.videos[idx];
+    if (failedVideo) {
+      publishState.publishRecords.push({
+        videoName: failedVideo.name, videoPath: publishState.videoPath || '',
+        platform: publishState.platform, publishTime: new Date().toISOString(),
+        status: 'failed', error: `阶段停滞(${stage})超时，重试${max}次后失败`,
+        scheduled: false, scheduledTime: null
+      });
+    }
+    publishState.currentIndex++;
+    await sleep(2000);
+    _doneLock = false;
+    if (publishState.isPublishing) await publishNextVideo();
+  }
 }
 
 function clearPublishTimeout() { if (publishState.timeoutTimer) { clearTimeout(publishState.timeoutTimer); publishState.timeoutTimer = null; } }
@@ -809,40 +930,50 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   }
 });
 
-// ★ 防重入锁
-async function handleDouyinPublishDone(message) {
+// ★ 统一完成判定器（抖音/视频号/阶段上报共用）
+// 校验完成信号属于当前视频（防止残留/延迟消息误判完成）
+async function handlePublishCompleted(message) {
   if (!publishState.isPublishing || _doneLock) return;
+  if (message.videoIndex !== undefined && message.videoIndex !== publishState.currentIndex) {
+    console.log('[BG] 忽略过期发布完成信号:', message.videoIndex, '当前:', publishState.currentIndex);
+    return;
+  }
   _doneLock = true;
   clearPublishTimeout();
   const idx = publishState.currentIndex;
-  sendProgress(`完成: ${message.videoName}`, 'done', idx + 1, publishState.videos.length);
-  publishState.publishRecords.push({
-    videoName: message.videoName, videoPath: message.videoPath || publishState.videoPath || '',
-    platform: 'douyin', publishTime: new Date().toISOString(),
-    status: 'success', scheduled: message.scheduled || false, scheduledTime: publishState.scheduledTime
-  });
-  if (publishState.targetTabId) detachDebugger(publishState.targetTabId);
-  publishState.currentIndex++; publishState.debuggerAttached = false; publishState.commandSent = false;
-  if (publishState.currentIndex < publishState.videos.length) {
-    const old = publishState.targetTabId; publishState.targetTabId = null;
-    if (old) setTimeout(() => chrome.tabs.remove(old).catch(() => {}), 3000);
-    publishState.nextVideoTimer = setTimeout(() => publishNextVideo(), 8000);
-  } else { await finishAllPublish(); }
-}
+  const status = message.status || (message.success === false ? 'failed' : 'success');
+  const videoName = message.videoName || publishState.videos[idx]?.name || '未知视频';
 
-// S3: 内容脚本明确报告发布失败 → 记录失败记录并推进，避免任务挂死到 App 端 90s 超时
-async function handleContentScriptFailure(video, errorMessage) {
-  if (!publishState.isPublishing || _doneLock) return;
-  _doneLock = true;
-  clearPublishTimeout();
-  const idx = publishState.currentIndex;
-  sendProgress(`发布失败: ${errorMessage}`, 'error', idx + 1, publishState.videos.length);
+  // ★ 失败自动重试：未点击发布（安全阶段，clicked=false）的明确失败 → 自动重试
+  // （已点击发布后的失败/未知 → 不重试，防止重复发布，直接记录）
+  if (status === 'failed' && !message.clicked) {
+    const retries = publishState.retryCounts[idx] || 0;
+    const max = publishState.currentSettings?.maxRetries || publishState.settings.maxRetries || 1;
+    const autoRetry = publishState.currentSettings?.autoRetry ?? publishState.settings.autoRetry;
+    if (autoRetry && retries < max) {
+      publishState.retryCounts[idx] = retries + 1;
+      console.log(`[BG] 发布失败，自动重试 (${retries + 1}/${max}): ${message.error || '未知原因'}`);
+      sendProgress(`发布失败，自动重试 (${retries + 1}/${max})`, 'publishing', idx + 1, publishState.videos.length);
+      // 失败时内容脚本已退出，残留标签页由 publishNextVideo 清理并重开
+      await sleep(1500);
+      _doneLock = false;
+      if (publishState.isPublishing) await publishNextVideo();
+      return;
+    }
+  }
+
+  const detail = status === 'success' ? 'done' : 'error';
+  const statusText = status === 'success' ? '完成' : (status === 'unknown' ? '结果未知' : '失败');
+  sendProgress(`${statusText}: ${videoName}`, detail, idx + 1, publishState.videos.length);
   publishState.publishRecords.push({
-    videoName: video.name, videoPath: publishState.videoPath || '',
+    videoName, videoPath: message.videoPath || publishState.videoPath || '',
     platform: publishState.platform, publishTime: new Date().toISOString(),
-    status: 'failed', error: errorMessage,
-    scheduled: false, scheduledTime: null
+    status, error: status === 'success' ? '' : (message.error || '发布失败'),
+    scheduled: message.scheduled || false, scheduledTime: publishState.scheduledTime
   });
+  publishState.stage = 'idle';
+  publishState.clickedPublish = false;
+  publishState.verifyWaited = false;
   if (publishState.targetTabId) detachDebugger(publishState.targetTabId);
   publishState.currentIndex++; publishState.debuggerAttached = false; publishState.commandSent = false;
   if (publishState.currentIndex < publishState.videos.length) {
@@ -853,29 +984,18 @@ async function handleContentScriptFailure(video, errorMessage) {
 }
 
 async function handleVideoPublishDone() {
-  if (!publishState.isPublishing || _doneLock) return;
-  _doneLock = true;
-  clearPublishTimeout();
   const video = publishState.videos[publishState.currentIndex];
-  const idx = publishState.currentIndex;
-  sendProgress(`完成: ${video.name}`, 'done', idx + 1, publishState.videos.length);
-  publishState.publishRecords.push({
-    videoName: video.name, videoPath: publishState.videoPath || '',
-    platform: publishState.platform, publishTime: new Date().toISOString(),
-    status: 'success', scheduled: publishState.currentSettings?.scheduledPublish || false, scheduledTime: publishState.scheduledTime
+  await handlePublishCompleted({
+    videoName: video?.name,
+    videoIndex: publishState.currentIndex,
+    status: 'success',
+    scheduled: publishState.currentSettings?.scheduledPublish || false
   });
-  if (publishState.targetTabId) detachDebugger(publishState.targetTabId);
-  publishState.currentIndex++; publishState.debuggerAttached = false; publishState.commandSent = false;
-  if (publishState.currentIndex < publishState.videos.length) {
-    const old = publishState.targetTabId; publishState.targetTabId = null;
-    if (old) setTimeout(() => chrome.tabs.remove(old).catch(() => {}), 3000);
-    publishState.nextVideoTimer = setTimeout(() => publishNextVideo(), 8000);
-  } else { await finishAllPublish(); }
 }
 
 // ========== 发布命令 ==========
 
-async function sendPublishCommand(tabId) {
+async function sendPublishCommand(tabId, resendAttempt = 0) {
   if (publishState.commandSent || !publishState.isPublishing) return;
   let best = null, max = 0;
   for (let i = 0; i < 15; i++) {
@@ -887,39 +1007,41 @@ async function sendPublishCommand(tabId) {
     await sleep(1000);
   }
   if (!best || max < 10 || !publishState.isPublishing) {
-    console.log('[BG] 内容脚本未就绪，等待超时重试...');
+    // 内容脚本未就绪：不再干等超时，安排一次延迟重发（SPA 渲染慢/注入延迟时自愈）
+    const MAX_RESEND = 2;
+    if (resendAttempt < MAX_RESEND && publishState.targetTabId === tabId) {
+      console.log(`[BG] 内容脚本未就绪，${10}s 后重发发布命令 (${resendAttempt + 1}/${MAX_RESEND})`);
+      setTimeout(() => {
+        if (publishState.isPublishing && publishState.targetTabId === tabId && !publishState.commandSent) {
+          sendPublishCommand(tabId, resendAttempt + 1).catch(() => {});
+        }
+      }, 10000);
+    } else {
+      console.log('[BG] 内容脚本持续未就绪，等待超时重试...');
+    }
     publishState.commandSent = false;
     return;
   }
-  // 内容脚本已就绪，但 SPA 可能仍在渲染（上传区/表单未出现），再等待几秒
-  await sleep(3000);
-  if (!publishState.isPublishing) return;
-  // 发布前检测登录状态
-  try {
-    const loginResult = await chrome.tabs.sendMessage(tabId, { action: 'loginCheck' });
-    if (loginResult && !loginResult.loggedIn) {
-      const platformName = publishState.platform === 'douyin' ? '抖音' : '视频号';
-      if (publishState.bridgeCommandId) {
-        await bridgeEvent(publishState.bridgeCommandId, { type: 'login-required', platform: publishState.platform, qrDataUrl: loginResult.qrDataUrl });
-        await bridgeResult(publishState.bridgeCommandId, { success: false, status: 'login-required', platform: publishState.platform, qrDataUrl: loginResult.qrDataUrl, error: `${platformName}未登录，请先扫码登录` });
-      }
-      sendProgress(`${platformName}未登录`, 'login-required', publishState.currentIndex, publishState.videos.length);
-      stopPublishCompletely();
-      return;
-    }
-  } catch (e) {
-    console.log('[BG] 登录检测失败，继续发布:', e.message);
-  }
+  // App 端发布前已通过独立登录检测确认登录态，此处不再做 loginCheck 门禁
+  // （页面常驻隐藏登录组件曾导致已登录被误判为未登录而直接终止）
   publishState.commandSent = true;
-  const video = publishState.videos[publishState.currentIndex];
+  publishState.stage = 'loading';
+  const videoIndexForCommand = publishState.currentIndex;
+  const video = publishState.videos[videoIndexForCommand];
   try {
     const response = await chrome.tabs.sendMessage(tabId, {
       action: 'startPublish', videos: [video], settings: publishState.currentSettings || publishState.settings,
-      videoPath: publishState.videoPath, videoIndex: publishState.currentIndex, totalVideos: publishState.totalVideos
+      videoPath: publishState.videoPath, videoIndex: videoIndexForCommand, totalVideos: publishState.totalVideos,
+      bridgeBaseUrl: cachedBridgeBaseUrl
     });
-    // S3: 内容脚本明确报告失败 → 立即记录失败并推进下一个视频，不再挂等 App 端超时
-    if (response && response.success === false) {
-      await handleContentScriptFailure(video, response.error || '发布失败');
+    // 内容脚本明确报告失败 → 走统一判定器（未点击发布时自动重试），不再挂等超时
+    if (response && response.success === false && publishState.isPublishing && publishState.currentIndex === videoIndexForCommand) {
+      console.error('[BG] 内容脚本发布失败:', response.error);
+      await handlePublishCompleted({
+        videoName: video.name, videoPath: publishState.videoPath || '',
+        videoIndex: videoIndexForCommand, status: 'failed',
+        error: response.error || '内容脚本执行失败', clicked: response.clicked || false
+      });
     }
   } catch (e) {
     console.error('[BG] 发送发布命令失败:', e.message, '等待超时重试...');
